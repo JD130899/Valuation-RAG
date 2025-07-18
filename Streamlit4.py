@@ -31,12 +31,11 @@ openai.api_key = os.environ["OPENAI_API_KEY"]
 uploaded_file = st.file_uploader("Upload a valuation report PDF", type="pdf")
 
 if uploaded_file is not None:
-    PDF_PATH = os.path.join("uploaded", uploaded_file.name)
     os.makedirs("uploaded", exist_ok=True)
-    
+    PDF_PATH = os.path.join("uploaded", uploaded_file.name)
     with open(PDF_PATH, "wb") as f:
         f.write(uploaded_file.getbuffer())
-        
+    
     EXTRACTED_FOLDER = os.path.join(os.getcwd(), "extracted")
     os.makedirs(EXTRACTED_FOLDER, exist_ok=True)
 
