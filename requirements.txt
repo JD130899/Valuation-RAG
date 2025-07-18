@@ -10,4 +10,4 @@ langchain-openai
 llama-cloud-services
 cohere
 faiss-cpu
-sklearn
+scikit-learn
