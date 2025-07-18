@@ -230,15 +230,15 @@ if user_question:
         best_doc = retrieved_docs[best_index]
 
         # === Show ranked list of candidate pages with similarity ===
-        #ranked = sorted(
-            #[(i, doc.metadata.get("page_number"), sim) for i, (doc, sim) in enumerate(zip(retrieved_docs, similarities))],
-            #key=lambda x: x[2],
-            #reverse=True
-        #)
+        ranked = sorted(
+            [(i, doc.metadata.get("page_number"), sim) for i, (doc, sim) in enumerate(zip(retrieved_docs, similarities))],
+            key=lambda x: x[2],
+            reverse=True
+        )
         
-        #with st.expander("🔍 Pages considered (by similarity to answer)", expanded=False):
-            #for idx, page, score in ranked:
-                #st.markdown(f"- **Page {page if page else '?'}** (Chunk #{idx + 1}): Similarity = `{score:.4f}`")
+        with st.expander("🔍 Pages considered (by similarity to answer)", expanded=False):
+            for idx, page, score in ranked:
+                st.markdown(f"- **Page {page if page else '?'}** (Chunk #{idx + 1}): Similarity = `{score:.4f}`")
         page = best_doc.metadata.get("page_number") if best_doc else None
         raw_img = st.session_state.page_images.get(page)
         b64_img = pil_to_base64(raw_img) if raw_img else None
