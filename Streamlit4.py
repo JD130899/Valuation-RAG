@@ -4,7 +4,7 @@ import re
 import fitz
 import openai
 import base64
-
+from pdf2image import convert_from_path
 import fitz 
 from langchain_core.documents import Document
 from llama_cloud_services import LlamaParse
