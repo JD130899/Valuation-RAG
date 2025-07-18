@@ -226,19 +226,46 @@ if user_question:
         texts = [doc.page_content for doc in retrieved_docs]
         chunk_embeddings = embed.embed_documents(texts)
         similarities = cosine_similarity([llm_embedding], chunk_embeddings)[0]
-        best_index = int(np.argmax(similarities))
-        best_doc = retrieved_docs[best_index]
-   
-        # === Show ranked list of candidate pages with similarity ===
         ranked = sorted(
-            [(i, doc.metadata.get("page_number"), sim) for i, (doc, sim) in enumerate(zip(retrieved_docs, similarities))],
-            key=lambda x: x[2],
-            reverse=True
+            [(i, doc, sim) for i, (doc, sim) in enumerate(zip(retrieved_docs, similarities))],
+            key=lambda x: x[2], reverse=True
         )
-        
-        with st.expander("🔍 Pages considered (by similarity to answer)", expanded=False):
-            for idx, page, score in ranked:
-                st.markdown(f"- **Page {page if page else '?'}** (Chunk #{idx + 1}): Similarity = `{score:.4f}`")
+
+        # === Prepare top 3 for LLM re-ranking ===
+        top3_docs = [doc for _, doc, _ in ranked[:3]]
+        top3_chunks = [doc.page_content for doc in top3_docs]
+
+        ranking_prompt = PromptTemplate(
+            template="""
+            Given a user question and 3 candidate context chunks, return the number (1-3) of the chunk that best answers it.
+            
+            Question:
+            {question}
+            
+            Chunk 1:
+            {chunk1}
+            
+            Chunk 2:
+            {chunk2}
+            
+            Chunk 3:
+            {chunk3}
+            
+            Best Chunk Number:
+            """,
+            input_variables=["question", "chunk1", "chunk2", "chunk3"]
+        )
+
+        ranking_input = ranking_prompt.invoke({
+            "question": user_question,
+            "chunk1": top3_chunks[0],
+            "chunk2": top3_chunks[1],
+            "chunk3": top3_chunks[2]
+        })
+
+        ranking_response = llm.invoke(ranking_input)
+        best_index = int(ranking_response.content.strip()) - 1
+        best_doc = top3_docs[best_index]
 
         
         page = best_doc.metadata.get("page_number") if best_doc else None
