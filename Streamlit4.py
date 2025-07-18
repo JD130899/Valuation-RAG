@@ -42,15 +42,7 @@ def pil_to_base64(img: Image.Image) -> str:
     img.save(buf, format="PNG")
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
-def get_images_from_pdf(pdf_path):
-    doc = fitz.open(pdf_path)
-    images = []
-    for page in doc:
-        pix = page.get_pixmap(dpi=300)
-        img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-        images.append(img)
-    doc.close()
-    return images
+
 
 # Once, at startup, stash every page’s PIL.Image in session_state
 if uploaded_file is not None:
@@ -63,11 +55,8 @@ if uploaded_file is not None:
         EXTRACTED_FOLDER = os.path.join(os.getcwd(), "extracted")
         os.makedirs(EXTRACTED_FOLDER, exist_ok=True)
         
-        all_images = get_images_from_pdf(PDF_PATH)
-        st.session_state.page_images = {
-            i+1: img
-            for i, img in enumerate(all_images)
-        }
+        all_images = convert_from_path(PDF_PATH, dpi=300)
+        st.session_state.page_images = {i + 1: img for i, img in enumerate(all_images)}
 else:
     st.warning("📄 Please upload a PDF to continue.")
     st.stop()
@@ -165,12 +154,7 @@ if "initialized" not in st.session_state:
         if valuation_summary_page is not None:
             final_selections.append((valuation_summary_page, "valuation_summary"))
 
-        all_images = get_images_from_pdf(PDF_PATH)
-        # map page_number → PIL.Image
-        st.session_state.page_images = {
-            i+1: img
-            for i, img in enumerate(all_images)
-        }
+
         for idx, label in final_selections:
             image = all_images[idx]
             output_path = os.path.join(EXTRACTED_FOLDER, f"{label}_page_{idx+1}.png")
