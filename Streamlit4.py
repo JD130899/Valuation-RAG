@@ -25,6 +25,7 @@ import io
 import base64
 from PIL import Image
 
+EXTRACTED_FOLDER = os.path.join(os.getcwd(), "extracted")
 openai.api_key = os.environ["OPENAI_API_KEY"]
 
 PDF_PATH = "/Users/jaipdalvi/Desktop/Work/Gen AI/Langchain/JB Tile & Stone Certified Valuation Report.pdf"
