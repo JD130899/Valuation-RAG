@@ -25,19 +25,16 @@ import io
 import base64
 from PIL import Image
 
-EXTRACTED_FOLDER = os.path.join(os.getcwd(), "extracted")
+
 openai.api_key = os.environ["OPENAI_API_KEY"]
 
+# === Streamlit UI Config ===
+st.set_page_config(page_title="Valuation RAG Chatbot", layout="wide")
+st.title("Underwriting Agent")
+
+# === File uploader ===
 uploaded_file = st.file_uploader("Upload a valuation report PDF", type="pdf")
 
-if uploaded_file is not None:
-    os.makedirs("uploaded", exist_ok=True)
-    PDF_PATH = os.path.join("uploaded", uploaded_file.name)
-    with open(PDF_PATH, "wb") as f:
-        f.write(uploaded_file.getbuffer())
-    
-    EXTRACTED_FOLDER = os.path.join(os.getcwd(), "extracted")
-    os.makedirs(EXTRACTED_FOLDER, exist_ok=True)
 
 # HELPER: turn PIL→base64
 def pil_to_base64(img: Image.Image) -> str:
@@ -46,17 +43,27 @@ def pil_to_base64(img: Image.Image) -> str:
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 # Once, at startup, stash every page’s PIL.Image in session_state
-if "page_images" not in st.session_state:
-    all_images = convert_from_path(PDF_PATH, dpi=300)
-    st.session_state.page_images = {
-        i+1: img
-        for i, img in enumerate(all_images)
-    }
+if uploaded_file is not None:
+    with st.spinner("Processing PDF..."):
+        os.makedirs("uploaded", exist_ok=True)
+        PDF_PATH = os.path.join("uploaded", uploaded_file.name)
+        with open(PDF_PATH, "wb") as f:
+            f.write(uploaded_file.getbuffer())
+
+        EXTRACTED_FOLDER = os.path.join(os.getcwd(), "extracted")
+        os.makedirs(EXTRACTED_FOLDER, exist_ok=True)
+        
+        all_images = convert_from_path(PDF_PATH, dpi=300)
+        st.session_state.page_images = {
+            i+1: img
+            for i, img in enumerate(all_images)
+        }
+else:
+    st.warning("📄 Please upload a PDF to continue.")
+    st.stop()
 
 
-# === Streamlit UI Config ===
-st.set_page_config(page_title="Valuation RAG Chatbot", layout="wide")
-st.title("Underwriting Agent")
+
 
 # === CSS Styling for chat bubbles ===
 st.markdown("""
