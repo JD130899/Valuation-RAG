@@ -223,7 +223,8 @@ if user_question:
         embed = CohereEmbeddings(model="embed-english-v3.0", user_agent="langchain")
         llm_embedding = embed.embed_query(response.content)
 
-        chunk_embeddings = [embed.embed_query(doc.page_content) for doc in retrieved_docs]
+        texts = [doc.page_content for doc in retrieved_docs]
+        chunk_embeddings = embed.embed_documents(texts)
         similarities = cosine_similarity([llm_embedding], chunk_embeddings)[0]
         best_index = int(np.argmax(similarities))
         best_doc = retrieved_docs[best_index]
