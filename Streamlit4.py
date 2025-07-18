@@ -233,8 +233,11 @@ if user_question:
             key=lambda x: x[2],
             reverse=True
         )
-        best_index = ranked[0][0]
-        best_doc = retrieved_docs[best_index]
+        
+        with st.expander("🔍 Pages considered (by similarity to answer)", expanded=False):
+            for idx, page, score in ranked:
+                st.markdown(f"- **Page {page if page else '?'}** (Chunk #{idx + 1}): Similarity = `{score:.4f}`")
+
         
         page = best_doc.metadata.get("page_number") if best_doc else None
         raw_img = st.session_state.page_images.get(page)
