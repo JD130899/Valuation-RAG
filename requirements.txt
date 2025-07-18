@@ -1,7 +1,7 @@
 streamlit
 python-dotenv
 openai
-
+PymuPDF
 pdf2image
 Pillow
 langchain
