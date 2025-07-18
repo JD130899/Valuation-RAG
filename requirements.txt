@@ -1,0 +1,10 @@
+streamlit
+python-dotenv
+openai
+PyMuPDF
+pdf2image
+Pillow
+langchain
+langchain-community
+langchain-openai
+llama-cloud-services

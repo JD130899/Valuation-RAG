@@ -1,0 +1,30 @@
+# Ignore virtual environments
+venv/
+.env
+
+# Bytecode and cache
+__pycache__/
+*.py[cod]
+*.ipynb_checkpoints/
+
+# OS-specific files
+.DS_Store
+
+# Logs or temporary files
+*.log
+*.tmp
+*.bak
+
+# VS Code settings (optional)
+.vscode/
+
+# Streamlit artifacts
+.streamlit/
+
+# Jupyter notebook checkpoints
+*.ipynb_checkpoints/
+
+# Ignore extracted images and output folders
+extracted/
+Structured_Output/
+rough/
