@@ -7,6 +7,8 @@ import base64
 import io
 import time
 from PIL import Image
+from sklearn.metrics.pairwise import cosine_similarity
+import numpy as np
 
 from langchain_core.documents import Document
 from llama_cloud_services import LlamaParse
@@ -218,7 +220,12 @@ if user_question:
         response = llm.invoke(final_prompt)
         #best_doc = st.session_state.reranker.compress_documents(retrieved_docs, query=response.content)[0]
         #best_doc = st.session_state.reranker.compress_documents(retrieved_docs, query=user_question)[0]
-        best_doc = retrieved_docs[0]
+        llm_embedding = embed.embed_query(response.content)
+
+        chunk_embeddings = [embed.embed_query(doc.page_content) for doc in retrieved_docs]
+        similarities = cosine_similarity([llm_embedding], chunk_embeddings)[0]
+        best_index = int(np.argmax(similarities))
+        best_doc = retrieved_docs[best_index]
 
         page = best_doc.metadata.get("page_number") if best_doc else None
         raw_img = st.session_state.page_images.get(page)
