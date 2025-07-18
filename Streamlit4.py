@@ -216,7 +216,8 @@ if user_question:
         final_prompt = prompt.invoke({"context": context_text, "question": user_question})
         llm = ChatOpenAI(model="gpt-4o", temperature=0)
         response = llm.invoke(final_prompt)
-        best_doc = st.session_state.reranker.compress_documents(retrieved_docs, query=response.content)[0]
+        #best_doc = st.session_state.reranker.compress_documents(retrieved_docs, query=response.content)[0]
+        best_doc = st.session_state.reranker.compress_documents(retrieved_docs, query=user_question)[0]
         page = best_doc.metadata.get("page_number") if best_doc else None
         raw_img = st.session_state.page_images.get(page)
         b64_img = pil_to_base64(raw_img) if raw_img else None
