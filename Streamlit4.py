@@ -28,9 +28,17 @@ from PIL import Image
 EXTRACTED_FOLDER = os.path.join(os.getcwd(), "extracted")
 openai.api_key = os.environ["OPENAI_API_KEY"]
 
-PDF_PATH = "/Users/jaipdalvi/Desktop/Work/Gen AI/Langchain/JB Tile & Stone Certified Valuation Report.pdf"
-EXTRACTED_FOLDER = "/Users/jaipdalvi/Desktop/Work/Gen AI/Langchain/extracted"
-os.makedirs(EXTRACTED_FOLDER, exist_ok=True)
+uploaded_file = st.file_uploader("Upload a valuation report PDF", type="pdf")
+
+if uploaded_file is not None:
+    PDF_PATH = os.path.join("uploaded", uploaded_file.name)
+    os.makedirs("uploaded", exist_ok=True)
+    
+    with open(PDF_PATH, "wb") as f:
+        f.write(uploaded_file.getbuffer())
+        
+    EXTRACTED_FOLDER = os.path.join(os.getcwd(), "extracted")
+    os.makedirs(EXTRACTED_FOLDER, exist_ok=True)
 
 # HELPER: turn PIL→base64
 def pil_to_base64(img: Image.Image) -> str:
