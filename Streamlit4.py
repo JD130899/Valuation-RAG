@@ -220,6 +220,7 @@ if user_question:
         response = llm.invoke(final_prompt)
         #best_doc = st.session_state.reranker.compress_documents(retrieved_docs, query=response.content)[0]
         #best_doc = st.session_state.reranker.compress_documents(retrieved_docs, query=user_question)[0]
+        embed = CohereEmbeddings(model="embed-english-v3.0", user_agent="langchain")
         llm_embedding = embed.embed_query(response.content)
 
         chunk_embeddings = [embed.embed_query(doc.page_content) for doc in retrieved_docs]
