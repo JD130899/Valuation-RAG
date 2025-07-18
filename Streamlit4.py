@@ -173,39 +173,7 @@ html, body { font-size: 16px !important; line-height: 1.6; font-family: "Segoe U
 prompt = PromptTemplate(
         template = """
         You are a financial-data extraction assistant.
-    
-    **Use ONLY what appears under “Context”.**
-    
-    ### How to answer
-    1. **Single value questions**  
-       • Find the row + column that match the user's words.  
-       • Return the answer in a **short, clear sentence** using the exact number from the context.  
-         Example: “The Income (DCF) approach value is $1,150,000.”  
-       • **Do NOT repeat the metric name or company name** unless the user asks.
-    
-    2. **Table questions**  
-       • Return the full table **with its header row** in GitHub-flavoured markdown.
-    
-    3. **Valuation method / theory / reasoning questions**
-       • If the question involves **valuation methods**, **concluded value**, or topics like **Income Approach**, **Market Approach**, or **Valuation Summary**, do the following:
-         - Combine and synthesize relevant information across all chunks.
-         - Pay special attention to how **weights are distributed** (e.g., “50% DCF, 25% EBITDA, 25% SDE”).
-         - Avoid oversimplifying if more detailed breakdowns (like subcomponents of market approach) are available.
-         - If a table gives a simplified view (e.g., "50% Market Approach"), but other parts break it down (e.g., 25% EBITDA + 25% SDE), **prefer the detailed breakdown with percent value**.   
-         - When describing weights, also mention the **corresponding dollar values** used in the context (e.g., “50% DCF = $3,712,000, 25% EBITDA = $4,087,000...”)
-         - **If Market approach is composed of sub-methods like EBITDA and SDE, then explicitly extract and show their individual weights and values, even if not listed together in a single table.**
-    
-    
-    4. **Theory/textual question**  
-       • Try to return an explanation **based on the context**.
-    
-    If you still cannot see the answer, 
-    - Say: **"I'm not sure about the answer based on this document."**
-    - Then follow up with one or more of the following:
-      1. “Can you provide more details?”
-      2. Or suggest a **refined version of the user's question** using what you understood.
-    
-    ---
+    ...
     Context:
     {context}
     
