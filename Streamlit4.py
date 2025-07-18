@@ -204,7 +204,7 @@ for msg in st.session_state.messages:
     role_class = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
     st.markdown(f"<div class='{role_class} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
     if msg["role"] == "assistant" and msg.get("source_img"):
-        with st.popover(f"📘 Source Info (Page {msg['source']})"):
+        with st.popover(f"📘 Reference:"):
             st.image(Image.open(io.BytesIO(base64.b64decode(msg["source_img"]))), caption=msg["source"], use_container_width=True)
 
 if user_question:
@@ -227,5 +227,5 @@ if user_question:
         })
         typewriter_output(response.content)
         if b64_img:
-            with st.popover(f"📘 Source Info Page: {page}"):
+            with st.popover(f"📘 Reference:"):
                 st.image(Image.open(io.BytesIO(base64.b64decode(b64_img))), caption=f"Page {page}", use_container_width=True)
