@@ -226,6 +226,8 @@ if user_question:
         texts = [doc.page_content for doc in retrieved_docs]
         chunk_embeddings = embed.embed_documents(texts)
         similarities = cosine_similarity([llm_embedding], chunk_embeddings)[0]
+        best_index = int(np.argmax(similarities))
+        best_doc = retrieved_docs[best_index]
    
         # === Show ranked list of candidate pages with similarity ===
         ranked = sorted(
