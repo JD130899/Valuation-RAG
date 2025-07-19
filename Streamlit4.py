@@ -264,8 +264,15 @@ if user_question:
         })
 
         ranking_response = llm.invoke(ranking_input)
-        best_index = int(ranking_response.content.strip()) - 1
-        best_doc = top3_docs[best_index]
+        response_text = ranking_response.content.strip()
+
+        # Check if it's numeric
+        if response_text.isdigit():
+            best_index = int(response_text) - 1
+        else:
+            st.error("Ranking response is not a valid index:", response_text)
+            best_index = 0  # fallback or skip this ranking
+
 
         
         page = best_doc.metadata.get("page_number") if best_doc else None
