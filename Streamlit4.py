@@ -269,9 +269,12 @@ if user_question:
         # Check if it's numeric
         if response_text.isdigit():
             best_index = int(response_text) - 1
+            best_doc = top3_chunks[best_index]
         else:
             st.error("Ranking response is not a valid index:", response_text)
-            best_index = 0  # fallback or skip this ranking
+            best_index = 0
+            best_doc = top3_chunks[0]  # fallback doc
+
 
 
         
