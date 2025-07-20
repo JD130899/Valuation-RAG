@@ -252,7 +252,10 @@ if user_question:
             st.error("⚠️ Assistant not ready yet. Please wait a moment after uploading the PDF.")
             st.stop()
         
+     
+        assert isinstance(user_question, str), f"user_question is not str: {type(user_question)}"
         question_str = str(user_question).strip()
+        assert question_str != "", "❌ Question is empty!"
         retrieved_docs = st.session_state.retriever.invoke(question_str)
 
 
