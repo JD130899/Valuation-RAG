@@ -252,7 +252,7 @@ if user_question:
             st.error("⚠️ Assistant not ready yet. Please wait a moment after uploading the PDF.")
             st.stop()
         
-        question_str = user_question.content if hasattr(user_question, "content") else str(user_question)
+        question_str = user_question
         retrieved_docs = st.session_state.retriever.invoke(question_str)
 
 
