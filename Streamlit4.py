@@ -140,7 +140,20 @@ if uploaded_file is not None:
                 for i, doc in enumerate(chunks):
                     doc.metadata["chunk_id"] = i + 1
                 embed = CohereEmbeddings(model="embed-english-v3.0", user_agent="langchain")
-                vs = FAISS.from_documents(chunks, embed)
+                texts = [doc.page_content for doc in chunks]
+                metadatas = [doc.metadata for doc in chunks]
+                embeddings = []
+                
+                for i, text in enumerate(texts):
+                    try:
+                        emb = embed.embed_query(text)
+                        embeddings.append(emb)
+                    except Exception as e:
+                        st.error(f"Embedding failed on chunk {i}: {e}")
+                        embeddings.append([0.0] * 1024)  # fallback dummy vector
+                    time.sleep(0.5)  # ⏱️ Add delay to avoid rate limits
+                
+                vs = FAISS.from_embeddings(texts, embeddings, metadatas)
                 base_ret = vs.as_retriever(search_type="mmr", search_kwargs={"k": 50, "fetch_k": 100, "lambda_mult": 0.9})
                 reranker = CohereRerank(model="rerank-english-v3.0", user_agent="langchain", top_n=20)
                 st.session_state.retriever = ContextualCompressionRetriever(base_retriever=base_ret, base_compressor=reranker)
