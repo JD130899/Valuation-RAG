@@ -252,10 +252,13 @@ if user_question:
             st.error("⚠️ Assistant not ready yet. Please wait a moment after uploading the PDF.")
             st.stop()
         
-        retrieved_docs = st.session_state.retriever.invoke(str(user_question))
+        question_str = user_question.content if hasattr(user_question, "content") else str(user_question)
+        retrieved_docs = st.session_state.retriever.invoke(question_str)
+
 
         context_text = "\n\n".join(doc.page_content for doc in retrieved_docs)
-        final_prompt = prompt.invoke({"context": context_text, "question": user_question})
+        final_prompt = prompt.invoke({"context": context_text, "question": question_str})
+
         llm = ChatOpenAI(model="gpt-4o", temperature=0)
         response = llm.invoke(final_prompt)
         #best_doc = st.session_state.reranker.compress_documents(retrieved_docs, query=response.content)[0]
