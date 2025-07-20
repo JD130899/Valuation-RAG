@@ -252,7 +252,7 @@ if user_question:
             st.error("⚠️ Assistant not ready yet. Please wait a moment after uploading the PDF.")
             st.stop()
         
-        retrieved_docs = st.session_state.retriever.invoke(user_question)
+        retrieved_docs = st.session_state.retriever.invoke(str(user_question))
 
         context_text = "\n\n".join(doc.page_content for doc in retrieved_docs)
         final_prompt = prompt.invoke({"context": context_text, "question": user_question})
