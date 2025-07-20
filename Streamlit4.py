@@ -22,6 +22,10 @@ from langchain_core.prompts import PromptTemplate
 from dotenv import load_dotenv
 load_dotenv()
 
+
+import pickle
+from langchain.vectorstores import FAISS as FAISS_LC 
+
 openai.api_key = os.environ["OPENAI_API_KEY"]
 
 # === Streamlit UI Config ===
@@ -139,21 +143,36 @@ if uploaded_file is not None:
                 chunks = RecursiveCharacterTextSplitter(chunk_size=3300, chunk_overlap=0).split_documents(docs)
                 for i, doc in enumerate(chunks):
                     doc.metadata["chunk_id"] = i + 1
-                embed = CohereEmbeddings(model="embed-english-v3.0", user_agent="langchain")
-                texts = [doc.page_content for doc in chunks]
-                metadatas = [doc.metadata for doc in chunks]
-                embeddings = []
+                FAISS_FOLDER = os.path.join("vectorstore", file_name)
+                os.makedirs(FAISS_FOLDER, exist_ok=True)
+                index_file = os.path.join(FAISS_FOLDER, "faiss.index")
+                metadata_file = os.path.join(FAISS_FOLDER, "metadata.pkl")
                 
-                for i, text in enumerate(texts):
-                    try:
-                        emb = embed.embed_query(text)
-                        embeddings.append(emb)
-                    except Exception as e:
-                        st.error(f"Embedding failed on chunk {i}: {e}")
-                        embeddings.append([0.0] * 1024)  # fallback dummy vector
-                    time.sleep(0.5)  # ⏱️ Add delay to avoid rate limits
+                if os.path.exists(index_file) and os.path.exists(metadata_file):
+                    with open(metadata_file, "rb") as f:
+                        stored_metadatas = pickle.load(f)
+                    embed = CohereEmbeddings(model="embed-english-v3.0", user_agent="langchain")
+                    vs = FAISS_LC.load_local(FAISS_FOLDER, embed, index_name="faiss")
+                    print("✅ FAISS loaded from disk.")
+                else:
+                    embed = CohereEmbeddings(model="embed-english-v3.0", user_agent="langchain")
+                    texts = [doc.page_content for doc in chunks]
+                    metadatas = [doc.metadata for doc in chunks]
+                    embeddings = []
+                    for i, text in enumerate(texts):
+                        try:
+                            emb = embed.embed_query(text)
+                            embeddings.append(emb)
+                        except Exception as e:
+                            st.error(f"Embedding failed on chunk {i}: {e}")
+                            embeddings.append([0.0] * 1024)
+                        time.sleep(0.5)
                 
-                vs = FAISS.from_embeddings(texts, embeddings, metadatas)
+                    vs = FAISS_LC.from_embeddings(texts, embeddings, metadatas)
+                    vs.save_local(FAISS_FOLDER, index_name="faiss")
+                    with open(metadata_file, "wb") as f:
+                        pickle.dump(metadatas, f)
+                    print("💾 FAISS saved to disk.")
                 base_ret = vs.as_retriever(search_type="mmr", search_kwargs={"k": 50, "fetch_k": 100, "lambda_mult": 0.9})
                 reranker = CohereRerank(model="rerank-english-v3.0", user_agent="langchain", top_n=20)
                 st.session_state.retriever = ContextualCompressionRetriever(base_retriever=base_ret, base_compressor=reranker)
