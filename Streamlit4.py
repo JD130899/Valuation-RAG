@@ -169,7 +169,9 @@ if uploaded_file is not None:
                             embeddings.append([0.0] * 1024)
                         time.sleep(0.5)
                 
-                    vs = FAISS_LC.from_embeddings(texts, embeddings, metadatas)
+                    text_embeddings = list(zip(texts, embeddings))
+                    vs = FAISS_LC.from_embeddings(text_embeddings, metadatas)
+
                     vs.save_local(FAISS_FOLDER, index_name="faiss")
                     with open(metadata_file, "wb") as f:
                         pickle.dump(metadatas, f)
