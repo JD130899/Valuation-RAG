@@ -248,17 +248,7 @@ if user_question:
     st.session_state.messages.append({"role": "user", "content": user_question})
     st.markdown(f"<div class='user-bubble clearfix'>{user_question}</div>", unsafe_allow_html=True)
     with st.spinner("Thinking..."):
-        if "retriever" not in st.session_state:
-            st.error("⚠️ Assistant not ready yet. Please wait a moment after uploading the PDF.")
-            st.stop()
-        
-     
-        assert isinstance(user_question, str), f"user_question is not str: {type(user_question)}"
-        question_str = str(user_question).strip()
-        assert question_str != "", "❌ Question is empty!"
-        retrieved_docs = st.session_state.retriever.invoke(question_str)
-
-
+        retrieved_docs = st.session_state.retriever.invoke(user_question)
         context_text = "\n\n".join(doc.page_content for doc in retrieved_docs)
         final_prompt = prompt.invoke({"context": context_text, "question": question_str})
 
