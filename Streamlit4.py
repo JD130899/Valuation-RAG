@@ -25,6 +25,7 @@ load_dotenv()
 
 import pickle
 from langchain.vectorstores import FAISS as FAISS_LC 
+st.info(f"Using Cohere API Key: {st.secrets['COHERE_API_KEY'][:8]}...")
 
 openai.api_key = os.environ["OPENAI_API_KEY"]
 
