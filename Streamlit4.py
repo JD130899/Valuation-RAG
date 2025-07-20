@@ -151,11 +151,11 @@ if uploaded_file is not None:
                 if os.path.exists(index_file) and os.path.exists(metadata_file):
                     with open(metadata_file, "rb") as f:
                         stored_metadatas = pickle.load(f)
-                    embed = CohereEmbeddings(model="embed-english-v3.0", user_agent="langchain")
+                    embed = CohereEmbeddings(model="embed-english-v3.0", user_agent="langchain",cohere_api_key=st.secrets["COHERE_API_KEY"])
                     vs = FAISS_LC.load_local(FAISS_FOLDER, embed, index_name="faiss")
                     print("✅ FAISS loaded from disk.")
                 else:
-                    embed = CohereEmbeddings(model="embed-english-v3.0", user_agent="langchain")
+                    embed = CohereEmbeddings(model="embed-english-v3.0", user_agent="langchain",cohere_api_key=st.secrets["COHERE_API_KEY"])
                     texts = [doc.page_content for doc in chunks]
                     metadatas = [doc.metadata for doc in chunks]
                     embeddings = []
@@ -174,7 +174,7 @@ if uploaded_file is not None:
                         pickle.dump(metadatas, f)
                     print("💾 FAISS saved to disk.")
                 base_ret = vs.as_retriever(search_type="mmr", search_kwargs={"k": 50, "fetch_k": 100, "lambda_mult": 0.9})
-                reranker = CohereRerank(model="rerank-english-v3.0", user_agent="langchain", top_n=20)
+                reranker = CohereRerank(model="rerank-english-v3.0", user_agent="langchain", cohere_api_key=st.secrets["COHERE_API_KEY"], top_n=20)
                 st.session_state.retriever = ContextualCompressionRetriever(base_retriever=base_ret, base_compressor=reranker)
                 st.session_state.reranker = reranker
     else:
@@ -252,7 +252,7 @@ if user_question:
         response = llm.invoke(final_prompt)
         #best_doc = st.session_state.reranker.compress_documents(retrieved_docs, query=response.content)[0]
         #best_doc = st.session_state.reranker.compress_documents(retrieved_docs, query=user_question)[0]
-        embed = CohereEmbeddings(model="embed-english-v3.0", user_agent="langchain")
+        embed = CohereEmbeddings(model="embed-english-v3.0", user_agent="langchain",cohere_api_key=st.secrets["COHERE_API_KEY"])
         llm_embedding = embed.embed_query(response.content)
 
         texts = [doc.page_content for doc in retrieved_docs]
