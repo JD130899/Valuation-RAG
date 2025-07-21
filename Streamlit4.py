@@ -310,8 +310,7 @@ if user_question:
             best_doc = top3_docs[best_index]  
         else:
             st.error(f"Ranking response is not a valid index: {response_text}")
-            best_index = 0
-            best_doc = top3_chunks[0]  # fallback doc
+            best_doc = top3_docs[0]  # fallback doc
 
 
 
