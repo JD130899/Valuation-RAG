@@ -172,10 +172,9 @@ if uploaded_file is not None:
                             embeddings.append([0.0] * 1024)
                         time.sleep(0.5)
                 
-                    text_embeddings = list(zip(texts, embeddings))
-                    vs = FAISS_LC.from_embeddings(text_embeddings, metadatas)
-
+                    vs = FAISS.from_documents(chunks, embed)
                     vs.save_local(FAISS_FOLDER, index_name="faiss")
+
                     with open(metadata_file, "wb") as f:
                         pickle.dump(metadatas, f)
                     print("💾 FAISS saved to disk.")
