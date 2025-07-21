@@ -311,9 +311,14 @@ if user_question:
 
 
         
-        page = best_doc.metadata.get("page_number") if best_doc else None
-        raw_img = st.session_state.page_images.get(page)
-        b64_img = pil_to_base64(raw_img) if raw_img else None
+        if response.content.lower().startswith("the report does not specify"):
+            page    = None
+            raw_img = None
+            b64_img = None
+        else:
+            page    = best_doc.metadata.get("page_number") if best_doc else None
+            raw_img = st.session_state.page_images.get(page)
+            b64_img = pil_to_base64(raw_img) if raw_img else None
         #st.session_state.messages.append({
             #"role": "assistant", "content": response.content,
             #"source": f"Page {page}" if page else None,
@@ -333,8 +338,4 @@ if user_question:
         if b64_img:
             with st.popover(f"📘 Reference:"):
                 st.image(Image.open(io.BytesIO(base64.b64decode(b64_img))), caption=f"Page {page}", use_container_width=True)
-        else:
-            st.markdown(
-                "<div class='assistant-bubble clearfix'>📘 No reference found</div>",
-                unsafe_allow_html=True
-            )        
+           
