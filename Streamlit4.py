@@ -26,9 +26,6 @@ load_dotenv()
 
 import pickle
 
-
-st.info(f"Using Cohere API Key: {st.secrets['COHERE_API_KEY'][:8]}...")
-
 openai.api_key = os.environ["OPENAI_API_KEY"]
 
 # === Streamlit UI Config ===
@@ -317,11 +314,21 @@ if user_question:
         page = best_doc.metadata.get("page_number") if best_doc else None
         raw_img = st.session_state.page_images.get(page)
         b64_img = pil_to_base64(raw_img) if raw_img else None
-        st.session_state.messages.append({
-            "role": "assistant", "content": response.content,
-            "source": f"Page {page}" if page else None,
-            "source_img": b64_img
-        })
+        #st.session_state.messages.append({
+            #"role": "assistant", "content": response.content,
+            #"source": f"Page {page}" if page else None,
+            #"source_img": b64_img
+        #})
+        entry = {
+            "role": "assistant",
+            "content": response.content,
+        }
+        # only add a source when page != None and you actually have an image
+        if page is not None and b64_img:
+            entry["source"]     = f"Page {page}"
+            entry["source_img"] = b64_img
+        
+        st.session_state.messages.append(entry)
         typewriter_output(response.content)
         if b64_img:
             with st.popover(f"📘 Reference:"):
