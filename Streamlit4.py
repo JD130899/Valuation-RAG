@@ -309,7 +309,6 @@ if user_question:
             best_index = int(response_text) - 1
             best_doc = top3_docs[best_index]  
         else:
-            st.error(f"Ranking response is not a valid index: {response_text}")
             best_doc = top3_docs[0]  # fallback doc
 
 
@@ -327,3 +326,8 @@ if user_question:
         if b64_img:
             with st.popover(f"📘 Reference:"):
                 st.image(Image.open(io.BytesIO(base64.b64decode(b64_img))), caption=f"Page {page}", use_container_width=True)
+        else:
+            st.markdown(
+                "<div class='assistant-bubble clearfix'>📘 No reference found</div>",
+                unsafe_allow_html=True
+            )        
