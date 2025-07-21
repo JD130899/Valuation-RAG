@@ -15,6 +15,7 @@ from llama_cloud_services import LlamaParse
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import CohereEmbeddings
 from langchain_community.vectorstores import FAISS
+from langchain.vectorstores import FAISS
 from langchain.retrievers.document_compressors import CohereRerank
 from langchain.retrievers import ContextualCompressionRetriever
 from langchain_openai import ChatOpenAI
@@ -24,7 +25,8 @@ load_dotenv()
 
 
 import pickle
-from langchain.vectorstores import FAISS as FAISS_LC 
+
+
 st.info(f"Using Cohere API Key: {st.secrets['COHERE_API_KEY'][:8]}...")
 
 openai.api_key = os.environ["OPENAI_API_KEY"]
@@ -153,8 +155,9 @@ if uploaded_file is not None:
                     with open(metadata_file, "rb") as f:
                         stored_metadatas = pickle.load(f)
                     embed = CohereEmbeddings(model="embed-english-v3.0", user_agent="langchain",cohere_api_key=st.secrets["COHERE_API_KEY"])
-                    vs = FAISS_LC.load_local(FAISS_FOLDER, embed, index_name="faiss")
-                    print("✅ FAISS loaded from disk.")
+                    vs = FAISS.load_local(FAISS_FOLDER, embed, index_name="faiss")
+                    vs = FAISS.from_documents(chunks, embed)
+                    vs.save_local(FAISS_FOLDER, index_name="faiss")
                 else:
                     embed = CohereEmbeddings(model="embed-english-v3.0", user_agent="langchain",cohere_api_key=st.secrets["COHERE_API_KEY"])
                     texts = [doc.page_content for doc in chunks]
@@ -248,9 +251,9 @@ if user_question:
     st.session_state.messages.append({"role": "user", "content": user_question})
     st.markdown(f"<div class='user-bubble clearfix'>{user_question}</div>", unsafe_allow_html=True)
     with st.spinner("Thinking..."):
-        retrieved_docs = st.session_state.retriever.invoke(user_question)
+        retrieved_docs = st.session_state.retriever.get_relevant_documents(user_question)
         context_text = "\n\n".join(doc.page_content for doc in retrieved_docs)
-        final_prompt = prompt.invoke({"context": context_text, "question": question_str})
+        final_prompt = prompt.invoke({"context": context_text, "question": user_question})
 
         llm = ChatOpenAI(model="gpt-4o", temperature=0)
         response = llm.invoke(final_prompt)
