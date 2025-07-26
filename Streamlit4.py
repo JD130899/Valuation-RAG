@@ -22,14 +22,35 @@ from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 from dotenv import load_dotenv
 load_dotenv()
-
+st.set_page_config(page_title="Valuation RAG Chatbot", layout="wide")
 
 import pickle
+from gdrive_utils import get_drive_service, get_latest_pdf, download_pdf
 
 openai.api_key = os.environ["OPENAI_API_KEY"]
+if st.sidebar.button("📡 Sync from Google Drive"):
+    service = get_drive_service()
+    latest = get_latest_pdf(service)
+
+    if latest:
+        file_id = latest["id"]
+        file_name = latest["name"]
+        pdf_path = download_pdf(service, file_id, file_name)
+
+        # ✅ ADD THIS LINE
+        PDF_PATH = os.path.join("uploaded", file_name)
+        
+        st.success(f"✅ Downloaded: {file_name}")
+
+        # Trigger existing pipeline
+        st.session_state.last_uploaded = file_name
+        st.rerun()
+    else:
+        st.warning("No PDF found in Google Drive folder.")
+
 
 # === Streamlit UI Config ===
-st.set_page_config(page_title="Valuation RAG Chatbot", layout="wide")
+
 st.title("Underwriting Agent")
 
 uploaded_file = st.file_uploader("Upload a valuation report PDF", type="pdf")
@@ -63,7 +84,7 @@ if uploaded_file is not None:
             st.session_state.initialized = True
 
            
-            st.session_state.initialized = True
+          
             with st.spinner("Preparing your valuation assistant..."):
                 doc = fitz.open(PDF_PATH)
                 target_headings = {
