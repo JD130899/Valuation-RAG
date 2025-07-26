@@ -37,12 +37,13 @@ if st.sidebar.button("📡 Sync from Google Drive"):
         file_name = latest["name"]
         pdf_path = download_pdf(service, file_id, file_name)
 
-        # ✅ ADD THIS LINE
-        PDF_PATH = os.path.join("uploaded", file_name)
-        
         st.success(f"✅ Downloaded: {file_name}")
 
-        # Trigger existing pipeline
+        # Simulate uploaded file for processing
+        with open(pdf_path, "rb") as f:
+            st.session_state["uploaded_file_from_drive"] = f.read()
+        st.session_state["uploaded_file_name"] = file_name
+
         st.session_state.last_uploaded = file_name
         st.rerun()
     else:
@@ -54,6 +55,12 @@ if st.sidebar.button("📡 Sync from Google Drive"):
 st.title("Underwriting Agent")
 
 uploaded_file = st.file_uploader("Upload a valuation report PDF", type="pdf")
+
+# If nothing uploaded manually, check Drive sync
+if uploaded_file is None and "uploaded_file_from_drive" in st.session_state:
+    uploaded_file = io.BytesIO(st.session_state["uploaded_file_from_drive"])
+    uploaded_file.name = st.session_state["uploaded_file_name"]
+
 
 def pil_to_base64(img: Image.Image) -> str:
     buf = io.BytesIO()
