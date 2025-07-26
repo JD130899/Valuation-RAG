@@ -219,8 +219,7 @@ if uploaded_file is not None:
                 reranker = CohereRerank(model="rerank-english-v3.0", user_agent="langchain", cohere_api_key=st.secrets["COHERE_API_KEY"], top_n=20)
                 st.session_state.retriever = ContextualCompressionRetriever(base_retriever=base_ret, base_compressor=reranker)
                 st.session_state.reranker = reranker
-    else:
-        PDF_PATH = os.path.join("uploaded", file_name) 
+    PDF_PATH = os.path.join("uploaded", file_name) 
 else:
     st.warning("📄 Please upload a PDF to continue.")
     st.stop()
