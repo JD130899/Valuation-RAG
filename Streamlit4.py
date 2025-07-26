@@ -72,28 +72,37 @@ def pil_to_base64(img: Image.Image) -> str:
 
 if uploaded_file is not None:
     file_name = uploaded_file.name
-    if True:
+    FAISS_FOLDER = os.path.join("vectorstore", file_name)
+    index_file = os.path.join(FAISS_FOLDER, "faiss.index")
+    metadata_file = os.path.join(FAISS_FOLDER, "metadata.pkl")
+
+    if "retriever" in st.session_state and st.session_state.get("retriever_for") == file_name:
+        st.success("✅ Using previously processed file and retriever.")
+    else:
         with st.spinner("Processing PDF..."):
             os.makedirs("uploaded", exist_ok=True)
             PDF_PATH = os.path.join("uploaded", file_name)
             with open(PDF_PATH, "wb") as f:
                 f.write(uploaded_file.getbuffer())
+
             EXTRACTED_FOLDER = os.path.join(os.getcwd(), "extracted")
             os.makedirs(EXTRACTED_FOLDER, exist_ok=True)
-
-            # --- Store uploaded file name ---
             st.session_state.last_uploaded = file_name
 
-            # === Load PDF images once ===
             doc = fitz.open(PDF_PATH)
             all_images = [Image.open(io.BytesIO(page.get_pixmap(dpi=300).tobytes("png"))) for page in doc]
             st.session_state.page_images = {i + 1: img for i, img in enumerate(all_images)}
             doc.close()
 
-            # === Initialize session ===
             st.session_state.initialized = True
 
-           
+            # === Do parsing, extraction, embedding and vectorstore creation here ===
+            # (you already have this part of the code and can insert it below this line)
+
+            # At the end of successful processing:
+            st.session_state.retriever = ContextualCompressionRetriever(base_retriever=base_ret, base_compressor=reranker)
+            st.session_state.reranker = reranker
+            st.session_state["retriever_for"] = file_name
           
             with st.spinner("Preparing your valuation assistant..."):
                 doc = fitz.open(PDF_PATH)
