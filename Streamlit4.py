@@ -54,13 +54,14 @@ if st.sidebar.button("📡 Sync from Google Drive"):
 
 st.title("Underwriting Agent")
 
-uploaded_file = st.file_uploader("Upload a valuation report PDF", type="pdf")
+# === Upload logic: Show file uploader only if no Drive file is present ===
+if "uploaded_file_from_drive" not in st.session_state:
+    uploaded_file = st.file_uploader("Upload a valuation report PDF", type="pdf")
+else:
+    st.info(f"✅ Using synced file from Drive: {st.session_state['uploaded_file_name']}")
+    uploaded_file = io.BytesIO(st.session_state["uploaded_file_from_drive"])
+    uploaded_file.name = st.session_state["uploaded_file_name"]
 
-# If nothing uploaded manually, fallback to synced Drive file
-if uploaded_file is None:
-    if "uploaded_file_from_drive" in st.session_state and "uploaded_file_name" in st.session_state:
-        uploaded_file = io.BytesIO(st.session_state["uploaded_file_from_drive"])
-        uploaded_file.name = st.session_state["uploaded_file_name"]
 
 
 
