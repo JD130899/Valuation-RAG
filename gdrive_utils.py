@@ -1,29 +1,29 @@
 # gdrive_utils.py
 import os
 import io
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
+import json
+import streamlit as st
+from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
-FOLDER_ID = "1VglZDFbufOxHTZ4qZ_feUw_XHaxacPxr"  # 🛠️ REPLACE this with your actual folder ID
+FOLDER_ID = "1VglZDFbufOxHTZ4qZ_feUw_XHaxacPxr"  # ✅ REPLACE this with your actual folder ID
 
 def get_drive_service():
-    creds = None
-    if os.path.exists('token.json'):
-        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
-    else:
-        flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
-        creds = flow.run_local_server(port=0)
-        with open('token.json', 'w') as token:
-            token.write(creds.to_json())
+    # Load credentials from Streamlit secrets
+    service_account_info = json.loads(st.secrets["GOOGLE_CREDENTIALS"])
+    creds = Credentials.from_service_account_info(service_account_info, scopes=SCOPES)
     return build('drive', 'v3', credentials=creds)
 
 def get_latest_pdf(service):
     query = f"'{FOLDER_ID}' in parents and mimeType='application/pdf'"
-    results = service.files().list(q=query, orderBy="createdTime desc", pageSize=1,
-                                   fields="files(id, name)").execute()
+    results = service.files().list(
+        q=query,
+        orderBy="createdTime desc",
+        pageSize=1,
+        fields="files(id, name)"
+    ).execute()
     files = results.get("files", [])
     return files[0] if files else None
 
