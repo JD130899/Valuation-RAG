@@ -56,10 +56,12 @@ st.title("Underwriting Agent")
 
 uploaded_file = st.file_uploader("Upload a valuation report PDF", type="pdf")
 
-# If nothing uploaded manually, check Drive sync
-if uploaded_file is None and "uploaded_file_from_drive" in st.session_state:
-    uploaded_file = io.BytesIO(st.session_state["uploaded_file_from_drive"])
-    uploaded_file.name = st.session_state["uploaded_file_name"]
+# If nothing uploaded manually, fallback to synced Drive file
+if uploaded_file is None:
+    if "uploaded_file_from_drive" in st.session_state and "uploaded_file_name" in st.session_state:
+        uploaded_file = io.BytesIO(st.session_state["uploaded_file_from_drive"])
+        uploaded_file.name = st.session_state["uploaded_file_name"]
+
 
 
 def pil_to_base64(img: Image.Image) -> str:
