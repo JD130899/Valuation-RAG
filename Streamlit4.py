@@ -72,7 +72,7 @@ def pil_to_base64(img: Image.Image) -> str:
 
 if uploaded_file is not None:
     file_name = uploaded_file.name
-    if "last_uploaded" not in st.session_state or st.session_state.last_uploaded != file_name:
+    if True:
         with st.spinner("Processing PDF..."):
             os.makedirs("uploaded", exist_ok=True)
             PDF_PATH = os.path.join("uploaded", file_name)
