@@ -28,3 +28,5 @@ __pycache__/
 extracted/
 Structured_Output/
 rough/
+
+credentials.json
