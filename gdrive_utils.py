@@ -19,11 +19,30 @@ def get_drive_service():
     return build('drive', 'v3', credentials=creds)
 
 def get_latest_pdf(service):
-    query = f"'{FOLDER_ID}' in parents and mimeType='application/pdf'"
-    results = service.files().list(q=query, orderBy="createdTime desc", pageSize=1,
-                                   fields="files(id, name)").execute()
+    query = f"'{FOLDER_ID}' in parents and trashed = false"
+    results = service.files().list(
+        q=query,
+        orderBy="createdTime desc",
+        pageSize=10,
+        fields="files(id, name, mimeType)"
+    ).execute()
     files = results.get("files", [])
-    return files[0] if files else None
+
+    if not files:
+        st.write("📭 No files found in Google Drive folder.")
+        return None
+
+    st.write("📂 Files found in folder:")
+    for file in files:
+        st.write(f"🔍 {file['name']} ({file['mimeType']})")
+        if file["name"].lower().endswith(".pdf"):
+            st.write(f"✅ Found PDF: {file['name']}")
+            return file
+
+    st.write("❌ No PDF file found in the folder.")
+    return None
+
+
 
 def download_pdf(service, file_id, file_name):
     request = service.files().get_media(fileId=file_id)
