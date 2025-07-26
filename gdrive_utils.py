@@ -8,11 +8,13 @@ from googleapiclient.http import MediaIoBaseDownload
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 FOLDER_ID = "1VglZDFbufOxHTZ4qZ_feUw_XHaxacPxr"  # 🔁 Update with your folder ID
 
-def get_drive_service():
-    # ✅ Load service account from local JSON file
-    with open("valuation-agent-key.json", "r") as f:
-        service_account_info = json.load(f)
+import streamlit as st
 
+
+
+
+def get_drive_service():
+    service_account_info = st.secrets["service_account"]
     creds = Credentials.from_service_account_info(service_account_info, scopes=SCOPES)
     return build('drive', 'v3', credentials=creds)
 
