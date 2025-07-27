@@ -96,133 +96,85 @@ if uploaded_file is not None:
 
             st.session_state.initialized = True
 
-            # === Do parsing, extraction, embedding and vectorstore creation here ===
-            # (you already have this part of the code and can insert it below this line)
+            # === Start parsing and chunking ===
+            def parse_pdf():
+                parser = LlamaParse(api_key=os.environ["LLAMA_CLOUD_API_KEY"], num_workers=4)
+                result = parser.parse(PDF_PATH)
+                pages = []
+                for page in result.pages:
+                    page_num = page.page
+                    replacement_path = os.path.join(EXTRACTED_FOLDER, f"page_{page_num}.txt")
+                    if os.path.exists(replacement_path):
+                        with open(replacement_path) as f:
+                            content = f.read().strip()
+                    else:
+                        content = page.md.strip()
+                        cleaned = [l for l in content.splitlines() if l.strip() and l.strip().lower() != "null"]
+                        content = "\n".join(cleaned)
+                    if content:
+                        pages.append(Document(page_content=content, metadata={"page_number": page_num}))
+                return pages
 
-            # At the end of successful processing:
-            st.session_state.retriever = ContextualCompressionRetriever(base_retriever=base_ret, base_compressor=reranker)
+            docs = parse_pdf()
+            chunks = RecursiveCharacterTextSplitter(chunk_size=3300, chunk_overlap=0).split_documents(docs)
+            for i, doc in enumerate(chunks):
+                doc.metadata["chunk_id"] = i + 1
+
+            os.makedirs(FAISS_FOLDER, exist_ok=True)
+
+            embed = CohereEmbeddings(
+                model="embed-english-v3.0",
+                user_agent="langchain",
+                cohere_api_key=st.secrets["COHERE_API_KEY"]
+            )
+
+            if os.path.exists(index_file) and os.path.exists(metadata_file):
+                with open(metadata_file, "rb") as f:
+                    stored_metadatas = pickle.load(f)
+                vs = FAISS.load_local(FAISS_FOLDER, embed, index_name="faiss")
+            else:
+                texts = [doc.page_content for doc in chunks]
+                metadatas = [doc.metadata for doc in chunks]
+                embeddings = []
+                for i, text in enumerate(texts):
+                    try:
+                        emb = embed.embed_query(text)
+                        embeddings.append(emb)
+                    except Exception as e:
+                        st.error(f"Embedding failed on chunk {i}: {e}")
+                        embeddings.append([0.0] * 1024)
+                    time.sleep(0.5)
+
+                vs = FAISS.from_documents(chunks, embed)
+                vs.save_local(FAISS_FOLDER, index_name="faiss")
+                with open(metadata_file, "wb") as f:
+                    pickle.dump(metadatas, f)
+                print("💾 FAISS saved to disk.")
+
+            # ✅ Moved retriever + reranker setup HERE — only once
+            base_ret = vs.as_retriever(
+                search_type="mmr",
+                search_kwargs={"k": 50, "fetch_k": 100, "lambda_mult": 0.9}
+            )
+            reranker = CohereRerank(
+                model="rerank-english-v3.0",
+                user_agent="langchain",
+                cohere_api_key=st.secrets["COHERE_API_KEY"],
+                top_n=20
+            )
+
+            st.session_state.retriever = ContextualCompressionRetriever(
+                base_retriever=base_ret,
+                base_compressor=reranker
+            )
             st.session_state.reranker = reranker
             st.session_state["retriever_for"] = file_name
-          
-            with st.spinner("Preparing your valuation assistant..."):
-                doc = fitz.open(PDF_PATH)
-                target_headings = {
-                    "income_approach": {"text": "INCOME APPROACH", "take": 1},
-                    "market_approach": {"text": "MARKET APPROACH", "take": 2},
-                }
-                valuation_summary_text = "VALUATION SUMMARY"
-                valuation_summary_page = None
-                heading_pages = {key: [] for key in target_headings}
-        
-                for i in range(len(doc)):
-                    if i < 5: continue
-                    text = doc[i].get_text().upper()
-                    for key, config in target_headings.items():
-                        if config["text"] in text:
-                            heading_pages[key].append(i)
-                    if valuation_summary_page is None and valuation_summary_text in text:
-                        valuation_summary_page = i
-                final_selections = []
-                for key, pages in heading_pages.items():
-                    idx = target_headings[key]["take"] - 1
-                    if idx < len(pages):
-                        final_selections.append((pages[idx], key))
-                        if key == "market_approach" and pages[idx] + 1 < len(doc):
-                            final_selections.append((pages[idx] + 1, f"{key}_continued"))
-                if valuation_summary_page is not None:
-                    final_selections.append((valuation_summary_page, "valuation_summary"))
-                doc.close()
-        
-                for idx, label in final_selections:
-                    image = all_images[idx]
-                    out_path = os.path.join(EXTRACTED_FOLDER, f"{label}_page_{idx+1}.png")
-                    image.save(out_path)
-        
-                for filename in sorted(os.listdir(EXTRACTED_FOLDER)):
-                    if filename.endswith(".png"):
-                        image_path = os.path.join(EXTRACTED_FOLDER, filename)
-                        match = re.search(r'page_(\d+)', filename)
-                        if not match: continue
-                        page_num = match.group(1)
-                        with open(image_path, "rb") as f:
-                            img_bytes = f.read()
-                        b64_img = base64.b64encode(img_bytes).decode("utf-8")
-                        resp = openai.chat.completions.create(
-                            model="gpt-4o",
-                            messages=[
-                                {"role": "user", "content": [
-                                    {"type": "text", "text": "Extract all values from this image."},
-                                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64_img}"}}
-                                ]},
-                            ],
-                            max_tokens=512,
-                        )
-                        text_out = resp.choices[0].message.content
-                        with open(os.path.join(EXTRACTED_FOLDER, f"page_{page_num}.txt"), "w") as f:
-                            f.write(text_out)
-        
-                def parse_pdf():
-                    parser = LlamaParse(api_key=os.environ["LLAMA_CLOUD_API_KEY"], num_workers=4)
-                    result = parser.parse(PDF_PATH)
-                    pages = []
-                    for page in result.pages:
-                        page_num = page.page
-                        replacement_path = os.path.join(EXTRACTED_FOLDER, f"page_{page_num}.txt")
-                        if os.path.exists(replacement_path):
-                            with open(replacement_path) as f:
-                                content = f.read().strip()
-                        else:
-                            content = page.md.strip()
-                            cleaned = [l for l in content.splitlines() if l.strip() and l.strip().lower() != "null"]
-                            content = "\n".join(cleaned)
-                        if content:
-                            pages.append(Document(page_content=content, metadata={"page_number": page_num}))
-                    return pages
-        
-                docs = parse_pdf()
-                chunks = RecursiveCharacterTextSplitter(chunk_size=3300, chunk_overlap=0).split_documents(docs)
-                for i, doc in enumerate(chunks):
-                    doc.metadata["chunk_id"] = i + 1
-                FAISS_FOLDER = os.path.join("vectorstore", file_name)
-                os.makedirs(FAISS_FOLDER, exist_ok=True)
-                index_file = os.path.join(FAISS_FOLDER, "faiss.index")
-                metadata_file = os.path.join(FAISS_FOLDER, "metadata.pkl")
-                
-                if os.path.exists(index_file) and os.path.exists(metadata_file):
-                    with open(metadata_file, "rb") as f:
-                        stored_metadatas = pickle.load(f)
-                    embed = CohereEmbeddings(model="embed-english-v3.0", user_agent="langchain",cohere_api_key=st.secrets["COHERE_API_KEY"])
-                    vs = FAISS.load_local(FAISS_FOLDER, embed, index_name="faiss")
-                    vs = FAISS.from_documents(chunks, embed)
-                    vs.save_local(FAISS_FOLDER, index_name="faiss")
-                else:
-                    embed = CohereEmbeddings(model="embed-english-v3.0", user_agent="langchain",cohere_api_key=st.secrets["COHERE_API_KEY"])
-                    texts = [doc.page_content for doc in chunks]
-                    metadatas = [doc.metadata for doc in chunks]
-                    embeddings = []
-                    for i, text in enumerate(texts):
-                        try:
-                            emb = embed.embed_query(text)
-                            embeddings.append(emb)
-                        except Exception as e:
-                            st.error(f"Embedding failed on chunk {i}: {e}")
-                            embeddings.append([0.0] * 1024)
-                        time.sleep(0.5)
-                
-                    vs = FAISS.from_documents(chunks, embed)
-                    vs.save_local(FAISS_FOLDER, index_name="faiss")
 
-                    with open(metadata_file, "wb") as f:
-                        pickle.dump(metadatas, f)
-                    print("💾 FAISS saved to disk.")
-                base_ret = vs.as_retriever(search_type="mmr", search_kwargs={"k": 50, "fetch_k": 100, "lambda_mult": 0.9})
-                reranker = CohereRerank(model="rerank-english-v3.0", user_agent="langchain", cohere_api_key=st.secrets["COHERE_API_KEY"], top_n=20)
-                st.session_state.retriever = ContextualCompressionRetriever(base_retriever=base_ret, base_compressor=reranker)
-                st.session_state.reranker = reranker
-    PDF_PATH = os.path.join("uploaded", file_name) 
+    PDF_PATH = os.path.join("uploaded", file_name)
 else:
     st.warning("📄 Please upload a PDF to continue.")
     st.stop()
+
 
 st.markdown("""
 <style>
