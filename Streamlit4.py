@@ -41,6 +41,7 @@ if st.sidebar.button("📡 Sync from Google Drive"):
 
         # ✅ Skip if already synced
         if file_id == st.session_state.get("last_synced_file_id"):
+            pass
             #st.info(f"ℹ️ Already synced latest file: {file_name}")
         else:
             pdf_path = download_pdf(service, file_id, file_name)
