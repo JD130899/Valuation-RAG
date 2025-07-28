@@ -77,7 +77,8 @@ if uploaded_file is not None:
     metadata_file = os.path.join(FAISS_FOLDER, "metadata.pkl")
 
     if "retriever" in st.session_state and st.session_state.get("retriever_for") == file_name:
-        st.success("✅ Using previously processed file and retriever.")
+        #st.success("✅ Using previously processed file and retriever.")
+        pass
     else:
         with st.spinner("Processing PDF..."):
             os.makedirs("uploaded", exist_ok=True)
