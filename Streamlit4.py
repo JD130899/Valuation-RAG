@@ -241,11 +241,22 @@ def typewriter_output(answer):
             container.markdown(f"<div class='assistant-bubble clearfix'>{typed}</div>", unsafe_allow_html=True)
             time.sleep(0.008)
 
-if "messages" not in st.session_state:
+if pdf_path:
+    with open(pdf_path, "rb") as f:
+        st.session_state["uploaded_file_from_drive"] = f.read()
+    st.session_state["uploaded_file_name"] = file_name
+    st.session_state["last_uploaded"] = file_name
+    st.session_state["last_synced_file_id"] = file_id
+
+    # ✅ Reset chat when a new file is loaded
     st.session_state.messages = [
         {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
         {"role": "assistant", "content": "What can I help you with?"}
     ]
+
+    st.rerun()
+
+
 
 user_question = st.chat_input("Message")
 
