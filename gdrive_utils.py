@@ -40,7 +40,7 @@ def get_latest_pdf(service):
         for file in files:
             st.write(f"🔍 {file['name']} ({file['mimeType']})")
             if file["name"].lower().endswith(".pdf"):
-                st.success(f"✅ Found PDF: {file['name']}")
+                #st.success(f"✅ Found PDF: {file['name']}")
                 return file
 
         st.warning("❌ No PDF found in the folder. Falling back to hardcoded file.")
@@ -68,7 +68,7 @@ def download_pdf(service, file_id, file_name):
             done = False
             while not done:
                 status, done = downloader.next_chunk()
-        st.success(f"📥 Downloaded {file_name} to {file_path}")
+        #st.success(f"📥 Downloaded {file_name} to {file_path}")
         return file_path
     except Exception as e:
         st.error(f"❌ Failed to download PDF: {e}")
