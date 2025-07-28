@@ -50,21 +50,24 @@ if pdf_files:
             st.sidebar.info("✅ Already loaded.")
         else:
             pdf_path = download_pdf(service, file_id, file_name)
-
+    
             if pdf_path:
                 with open(pdf_path, "rb") as f:
                     st.session_state["uploaded_file_from_drive"] = f.read()
                 st.session_state["uploaded_file_name"] = file_name
                 st.session_state["last_uploaded"] = file_name
                 st.session_state["last_synced_file_id"] = file_id
+    
+                # ✅ Clear chat messages when switching files
+                st.session_state.messages = [
+                    {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
+                    {"role": "assistant", "content": "What can I help you with?"}
+                ]
+    
                 st.rerun()
-            else:
-                st.sidebar.warning("⚠️ Failed to download selected PDF.")
+
 else:
     st.sidebar.warning("📭 No PDFs found in Google Drive.")
-
-
-
 
 # === Streamlit UI Config ===
 
