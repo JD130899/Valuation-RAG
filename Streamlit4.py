@@ -24,6 +24,9 @@ from dotenv import load_dotenv
 load_dotenv()
 st.set_page_config(page_title="Valuation RAG Chatbot", layout="wide")
 
+if "last_synced_file_id" not in st.session_state:
+    st.session_state.last_synced_file_id = None
+    
 import pickle
 from gdrive_utils import get_drive_service, get_latest_pdf, download_pdf
 
@@ -35,19 +38,28 @@ if st.sidebar.button("📡 Sync from Google Drive"):
     if latest:
         file_id = latest["id"]
         file_name = latest["name"]
-        pdf_path = download_pdf(service, file_id, file_name)
 
-        st.success(f"✅ Downloaded: {file_name}")
+        # ✅ Skip if already synced
+        if file_id == st.session_state.get("last_synced_file_id"):
+            st.info(f"ℹ️ Already synced latest file: {file_name}")
+        else:
+            pdf_path = download_pdf(service, file_id, file_name)
 
-        # Simulate uploaded file for processing
-        with open(pdf_path, "rb") as f:
-            st.session_state["uploaded_file_from_drive"] = f.read()
-        st.session_state["uploaded_file_name"] = file_name
+            if pdf_path:
+                # Simulate uploaded file
+                with open(pdf_path, "rb") as f:
+                    st.session_state["uploaded_file_from_drive"] = f.read()
+                st.session_state["uploaded_file_name"] = file_name
+                st.session_state["last_uploaded"] = file_name
+                st.session_state["last_synced_file_id"] = file_id  # ✅ Update file tracker
 
-        st.session_state.last_uploaded = file_name
-        st.rerun()
+                st.success(f"✅ Synced and loaded new file: {file_name}")
+                st.rerun()
+            else:
+                st.warning("⚠️ Failed to download the latest PDF.")
     else:
         st.warning("No PDF found in Google Drive folder.")
+
 
 
 # === Streamlit UI Config ===
