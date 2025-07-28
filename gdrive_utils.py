@@ -18,44 +18,27 @@ def get_drive_service():
     return build('drive', 'v3', credentials=creds)
 
 # === Fetch Latest PDF ===
-def get_latest_pdf(service):
+def get_all_pdfs(service):
     query = f"'{FOLDER_ID}' in parents and trashed = false"
     try:
         results = service.files().list(
             q=query,
             orderBy="createdTime desc",
-            pageSize=10,
+            pageSize=20,  # You can increase this if needed
             fields="files(id, name, mimeType)"
         ).execute()
         files = results.get("files", [])
 
-        if not files:
-            st.warning("📭 No files found in Google Drive folder. Falling back to hardcoded file.")
-            return {
-                "id": HARDCODED_FILE_ID,
-                "name": "JB Tile & Stone Certified Valuation Report.pdf"
-            }
+        pdfs = [file for file in files if file["name"].lower().endswith(".pdf")]
 
-        st.success("📂 Files found in folder:")
-        for file in files:
-            st.write(f"🔍 {file['name']} ({file['mimeType']})")
-            if file["name"].lower().endswith(".pdf"):
-                #st.success(f"✅ Found PDF: {file['name']}")
-                return file
-
-        st.warning("❌ No PDF found in the folder. Falling back to hardcoded file.")
-        return {
-            "id": HARDCODED_FILE_ID,
-            "name": "JB Tile & Stone Certified Valuation Report.pdf"
-        }
+        if not pdfs:
+            st.warning("📭 No PDF files found in Google Drive folder.")
+        return pdfs
 
     except Exception as e:
         st.error(f"❌ Error accessing Drive folder: {e}")
-        st.info("Falling back to hardcoded file ID...")
-        return {
-            "id": HARDCODED_FILE_ID,
-            "name": "JB Tile & Stone Certified Valuation Report.pdf"
-        }
+        return []
+
 
 # === Download PDF ===
 def download_pdf(service, file_id, file_name):
