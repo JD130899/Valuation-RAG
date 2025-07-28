@@ -74,7 +74,12 @@ st.title("Underwriting Agent")
 if "uploaded_file_from_drive" not in st.session_state:
     uploaded_file = st.file_uploader("Upload a valuation report PDF", type="pdf")
 else:
-    st.info(f"✅ Using synced file from Drive: {st.session_state['uploaded_file_name']}")
+    st.markdown(
+        f"<div style='background-color:#1f2c3a;padding:10px;border-radius:10px;color:white;'>"
+        f"✅ <b>Using synced file from Drive:</b> {st.session_state['uploaded_file_name']}"
+        f"</div>",
+        unsafe_allow_html=True
+    )
     uploaded_file = io.BytesIO(st.session_state["uploaded_file_from_drive"])
     uploaded_file.name = st.session_state["uploaded_file_name"]
 
