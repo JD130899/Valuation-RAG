@@ -28,38 +28,41 @@ if "last_synced_file_id" not in st.session_state:
     st.session_state.last_synced_file_id = None
     
 import pickle
-from gdrive_utils import get_drive_service, get_latest_pdf, download_pdf
+from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
+
 
 openai.api_key = os.environ["OPENAI_API_KEY"]
-if st.sidebar.button("📡 Sync from Google Drive"):
-    service = get_drive_service()
-    latest = get_latest_pdf(service)
+# === List and select from multiple PDFs ===
+service = get_drive_service()
+pdf_files = get_all_pdfs(service)
 
-    if latest:
-        file_id = latest["id"]
-        file_name = latest["name"]
+if pdf_files:
+    pdf_names = [f["name"] for f in pdf_files]
+    selected_name = st.sidebar.selectbox("📂 Select a PDF from Google Drive", pdf_names)
 
-        # ✅ Skip if already synced
+    selected_file = next(f for f in pdf_files if f["name"] == selected_name)
+
+    if st.sidebar.button("📥 Load Selected PDF"):
+        file_id = selected_file["id"]
+        file_name = selected_file["name"]
+
         if file_id == st.session_state.get("last_synced_file_id"):
-            pass
-            #st.info(f"ℹ️ Already synced latest file: {file_name}")
+            st.sidebar.info("✅ Already loaded.")
         else:
             pdf_path = download_pdf(service, file_id, file_name)
 
             if pdf_path:
-                # Simulate uploaded file
                 with open(pdf_path, "rb") as f:
                     st.session_state["uploaded_file_from_drive"] = f.read()
                 st.session_state["uploaded_file_name"] = file_name
                 st.session_state["last_uploaded"] = file_name
-                st.session_state["last_synced_file_id"] = file_id  # ✅ Update file tracker
-
-                #st.success(f"✅ Synced and loaded new file: {file_name}")
+                st.session_state["last_synced_file_id"] = file_id
                 st.rerun()
             else:
-                st.warning("⚠️ Failed to download the latest PDF.")
-    else:
-        st.warning("No PDF found in Google Drive folder.")
+                st.sidebar.warning("⚠️ Failed to download selected PDF.")
+else:
+    st.sidebar.warning("📭 No PDFs found in Google Drive.")
+
 
 
 
