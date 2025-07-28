@@ -9,7 +9,7 @@ from googleapiclient.http import MediaIoBaseDownload
 # === CONFIG ===
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 FOLDER_ID = "1VglZDFbufOxHTZ4qZ_feUw_XHaxacPxr"  # Folder to watch
-HARDCODED_FILE_ID = "1S1ZkbQBQVYBUIKVuXAIsL-AZttzmX2So"  # ✅ Your known PDF ID
+
 
 # === Auth ===
 def get_drive_service():
