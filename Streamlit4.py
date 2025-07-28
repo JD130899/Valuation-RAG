@@ -41,7 +41,7 @@ if st.sidebar.button("📡 Sync from Google Drive"):
 
         # ✅ Skip if already synced
         if file_id == st.session_state.get("last_synced_file_id"):
-            st.info(f"ℹ️ Already synced latest file: {file_name}")
+            #st.info(f"ℹ️ Already synced latest file: {file_name}")
         else:
             pdf_path = download_pdf(service, file_id, file_name)
 
@@ -53,7 +53,7 @@ if st.sidebar.button("📡 Sync from Google Drive"):
                 st.session_state["last_uploaded"] = file_name
                 st.session_state["last_synced_file_id"] = file_id  # ✅ Update file tracker
 
-                st.success(f"✅ Synced and loaded new file: {file_name}")
+                #st.success(f"✅ Synced and loaded new file: {file_name}")
                 st.rerun()
             else:
                 st.warning("⚠️ Failed to download the latest PDF.")
