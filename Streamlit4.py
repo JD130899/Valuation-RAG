@@ -109,7 +109,7 @@ if uploaded_file is not None:
     # Check if FAISS index and metadata already exist
     faiss_exists = os.path.exists(index_file) and os.path.exists(metadata_file)
     
-    if retriever_exists and faiss_exists:
+    if faiss_exists:
         # ✅ Use cached retriever directly
         embed = CohereEmbeddings(
             model="embed-english-v3.0",
