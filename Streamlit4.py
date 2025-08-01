@@ -100,10 +100,43 @@ if uploaded_file is not None:
     index_file = os.path.join(FAISS_FOLDER, "faiss.index")
     metadata_file = os.path.join(FAISS_FOLDER, "metadata.pkl")
 
-    if "retriever" in st.session_state and st.session_state.get("retriever_for") == file_name:
-        #st.success("✅ Using previously processed file and retriever.")
-        pass
+    # Check if retriever is already in session for same file
+    retriever_exists = (
+        "retriever" in st.session_state
+        and st.session_state.get("retriever_for") == file_name
+    )
+    
+    # Check if FAISS index and metadata already exist
+    faiss_exists = os.path.exists(index_file) and os.path.exists(metadata_file)
+    
+    if retriever_exists and faiss_exists:
+        # ✅ Use cached retriever directly
+        embed = CohereEmbeddings(
+            model="embed-english-v3.0",
+            user_agent="langchain",
+            cohere_api_key=st.secrets["COHERE_API_KEY"]
+        )
+        vs = FAISS.load_local(FAISS_FOLDER, embed, index_name="faiss")
+    
+        base_ret = vs.as_retriever(
+            search_type="mmr",
+            search_kwargs={"k": 50, "fetch_k": 100, "lambda_mult": 0.9}
+        )
+        reranker = CohereRerank(
+            model="rerank-english-v3.0",
+            user_agent="langchain",
+            cohere_api_key=st.secrets["COHERE_API_KEY"],
+            top_n=20
+        )
+        st.session_state.retriever = ContextualCompressionRetriever(
+            base_retriever=base_ret,
+            base_compressor=reranker
+        )
+        st.session_state.reranker = reranker
+        st.session_state["retriever_for"] = file_name
+    
     else:
+        # 🌀 Proceed with full PDF processing
         with st.spinner("Processing PDF..."):
             os.makedirs("uploaded", exist_ok=True)
             PDF_PATH = os.path.join("uploaded", file_name)
