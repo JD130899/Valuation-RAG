@@ -9,6 +9,7 @@ from googleapiclient.http import MediaIoBaseDownload
 # === CONFIG ===
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 FOLDER_ID = "1VglZDFbufOxHTZ4qZ_feUw_XHaxacPxr"  # Folder to watch
+st.write("✅ Keys in secrets:", list(st.secrets.keys()))
 
 
 # === Auth ===
