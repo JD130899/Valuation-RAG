@@ -5,18 +5,22 @@ import streamlit as st
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
-
+# === Auth ===
+import streamlit as st
+from google.oauth2.service_account import Credentials
 # === CONFIG ===
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 FOLDER_ID = "1VglZDFbufOxHTZ4qZ_feUw_XHaxacPxr"  # Folder to watch
 st.write("✅ Keys in secrets:", list(st.secrets.keys()))
 
 
-# === Auth ===
+
+
 def get_drive_service():
     service_account_info = st.secrets["service_account"]
     creds = Credentials.from_service_account_info(service_account_info, scopes=SCOPES)
     return build('drive', 'v3', credentials=creds)
+
 
 # === Fetch Latest PDF ===
 def get_all_pdfs(service):
