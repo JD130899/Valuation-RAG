@@ -9,7 +9,7 @@ from googleapiclient.http import MediaIoBaseDownload
 # === CONFIG ===
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 FOLDER_ID = "1VglZDFbufOxHTZ4qZ_feUw_XHaxacPxr"  # Folder to watch
-
+HARDCODED_FILE_ID = "1S1ZkbQBQVYBUIKVuXAIsL-AZttzmX2So"  # ✅ Your known PDF ID
 
 # === Auth ===
 def get_drive_service():
@@ -18,27 +18,44 @@ def get_drive_service():
     return build('drive', 'v3', credentials=creds)
 
 # === Fetch Latest PDF ===
-def get_all_pdfs(service):
+def get_latest_pdf(service):
     query = f"'{FOLDER_ID}' in parents and trashed = false"
     try:
         results = service.files().list(
             q=query,
             orderBy="createdTime desc",
-            pageSize=20,  # You can increase this if needed
+            pageSize=10,
             fields="files(id, name, mimeType)"
         ).execute()
         files = results.get("files", [])
 
-        pdfs = [file for file in files if file["name"].lower().endswith(".pdf")]
+        if not files:
+            st.warning("📭 No files found in Google Drive folder. Falling back to hardcoded file.")
+            return {
+                "id": HARDCODED_FILE_ID,
+                "name": "JB Tile & Stone Certified Valuation Report.pdf"
+            }
 
-        if not pdfs:
-            st.warning("📭 No PDF files found in Google Drive folder.")
-        return pdfs
+        st.success("📂 Files found in folder:")
+        for file in files:
+            st.write(f"🔍 {file['name']} ({file['mimeType']})")
+            if file["name"].lower().endswith(".pdf"):
+                st.success(f"✅ Found PDF: {file['name']}")
+                return file
+
+        st.warning("❌ No PDF found in the folder. Falling back to hardcoded file.")
+        return {
+            "id": HARDCODED_FILE_ID,
+            "name": "JB Tile & Stone Certified Valuation Report.pdf"
+        }
 
     except Exception as e:
         st.error(f"❌ Error accessing Drive folder: {e}")
-        return []
-
+        st.info("Falling back to hardcoded file ID...")
+        return {
+            "id": HARDCODED_FILE_ID,
+            "name": "JB Tile & Stone Certified Valuation Report.pdf"
+        }
 
 # === Download PDF ===
 def download_pdf(service, file_id, file_name):
@@ -51,7 +68,7 @@ def download_pdf(service, file_id, file_name):
             done = False
             while not done:
                 status, done = downloader.next_chunk()
-        #st.success(f"📥 Downloaded {file_name} to {file_path}")
+        st.success(f"📥 Downloaded {file_name} to {file_path}")
         return file_path
     except Exception as e:
         st.error(f"❌ Failed to download PDF: {e}")
