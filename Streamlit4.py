@@ -1,6 +1,4 @@
-[media pointer="file-service://file-Dwbx6DyP9zsxJqVwTMZtqq"]
-Ya currently, when i close and restart, it restarts loading ...is there a way to fix this
-Code:
+
 import streamlit as st
 import os
 import re
