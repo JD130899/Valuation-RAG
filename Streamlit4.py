@@ -234,8 +234,7 @@ prompt = PromptTemplate(
         )
 
 def typewriter_output(answer):
-    if answer.strip().startswith("
-markdown"):
+    if answer.strip().startswith("markdown"):
         st.markdown(answer.strip().removeprefix("
 markdown").removesuffix("
 " ).strip())
