@@ -24,50 +24,31 @@ from dotenv import load_dotenv
 load_dotenv()
 st.set_page_config(page_title="Valuation RAG Chatbot", layout="wide")
 
-if "last_synced_file_id" not in st.session_state:
-    st.session_state.last_synced_file_id = None
-    
 import pickle
-from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
-
+from gdrive_utils import get_drive_service, get_latest_pdf, download_pdf
 
 openai.api_key = os.environ["OPENAI_API_KEY"]
-# === List and select from multiple PDFs ===
-service = get_drive_service()
-pdf_files = get_all_pdfs(service)
+if st.sidebar.button("📡 Sync from Google Drive"):
+    service = get_drive_service()
+    latest = get_latest_pdf(service)
 
-if pdf_files:
-    pdf_names = [f["name"] for f in pdf_files]
-    selected_name = st.sidebar.selectbox("📂 Select a PDF from Google Drive", pdf_names)
+    if latest:
+        file_id = latest["id"]
+        file_name = latest["name"]
+        pdf_path = download_pdf(service, file_id, file_name)
 
-    selected_file = next(f for f in pdf_files if f["name"] == selected_name)
+        st.success(f"✅ Downloaded: {file_name}")
 
-    if st.sidebar.button("📥 Load Selected PDF"):
-        file_id = selected_file["id"]
-        file_name = selected_file["name"]
+        # Simulate uploaded file for processing
+        with open(pdf_path, "rb") as f:
+            st.session_state["uploaded_file_from_drive"] = f.read()
+        st.session_state["uploaded_file_name"] = file_name
 
-        if file_id == st.session_state.get("last_synced_file_id"):
-            st.sidebar.info("✅ Already loaded.")
-        else:
-            pdf_path = download_pdf(service, file_id, file_name)
-    
-            if pdf_path:
-                with open(pdf_path, "rb") as f:
-                    st.session_state["uploaded_file_from_drive"] = f.read()
-                st.session_state["uploaded_file_name"] = file_name
-                st.session_state["last_uploaded"] = file_name
-                st.session_state["last_synced_file_id"] = file_id
-    
-                # ✅ Clear chat messages when switching files
-                st.session_state.messages = [
-                    {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
-                    {"role": "assistant", "content": "What can I help you with?"}
-                ]
-    
-                st.rerun()
+        st.session_state.last_uploaded = file_name
+        st.rerun()
+    else:
+        st.warning("No PDF found in Google Drive folder.")
 
-else:
-    st.sidebar.warning("📭 No PDFs found in Google Drive.")
 
 # === Streamlit UI Config ===
 
@@ -77,12 +58,7 @@ st.title("Underwriting Agent")
 if "uploaded_file_from_drive" not in st.session_state:
     uploaded_file = st.file_uploader("Upload a valuation report PDF", type="pdf")
 else:
-    st.markdown(
-        f"<div style='background-color:#1f2c3a;padding:10px;border-radius:10px;color:white;'>"
-        f"✅ <b>Using synced file from Drive:</b> {st.session_state['uploaded_file_name']}"
-        f"</div>",
-        unsafe_allow_html=True
-    )
+    st.info(f"✅ Using synced file from Drive: {st.session_state['uploaded_file_name']}")
     uploaded_file = io.BytesIO(st.session_state["uploaded_file_from_drive"])
     uploaded_file.name = st.session_state["uploaded_file_name"]
 
@@ -234,8 +210,8 @@ prompt = PromptTemplate(
         )
 
 def typewriter_output(answer):
-    if answer.strip().startswith("markdown"):
-        st.markdown(answer.strip().removeprefix("markdown").removesuffix("").strip())
+    if answer.strip().startswith("```markdown"):
+        st.markdown(answer.strip().removeprefix("```markdown").removesuffix("```" ).strip())
     else:
         container = st.empty()
         typed = ""
@@ -244,6 +220,11 @@ def typewriter_output(answer):
             container.markdown(f"<div class='assistant-bubble clearfix'>{typed}</div>", unsafe_allow_html=True)
             time.sleep(0.008)
 
+if "messages" not in st.session_state:
+    st.session_state.messages = [
+        {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
+        {"role": "assistant", "content": "What can I help you with?"}
+    ]
 
 user_question = st.chat_input("Message")
 
@@ -349,3 +330,4 @@ if user_question:
         if b64_img:
             with st.popover(f"📘 Reference:"):
                 st.image(Image.open(io.BytesIO(base64.b64decode(b64_img))), caption=f"Page {page}", use_container_width=True)
+           
