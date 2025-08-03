@@ -96,70 +96,44 @@ def pil_to_base64(img: Image.Image) -> str:
 
 if uploaded_file is not None:
     file_name = uploaded_file.name
-    if (
-        "processed_file_name" in st.session_state
-        and st.session_state["processed_file_name"] == file_name
-    ):
+
+    # Skip if already processed
+    if st.session_state.get("processed_file_name") == file_name:
         PDF_PATH = os.path.join("uploaded", file_name)
+
     else:
         FAISS_FOLDER = os.path.join("vectorstore", file_name)
         index_file = os.path.join(FAISS_FOLDER, "faiss.index")
         metadata_file = os.path.join(FAISS_FOLDER, "metadata.pkl")
-    
-        # Check if retriever is already in session for same file
-        retriever_exists = (
-            "retriever" in st.session_state
-            and st.session_state.get("retriever_for") == file_name
-        )
-        
-        # Check if FAISS index and metadata already exist
+
         faiss_exists = os.path.exists(index_file) and os.path.exists(metadata_file)
-        
+
         if faiss_exists:
-            # ✅ Use cached retriever directly
             embed = CohereEmbeddings(
                 model="embed-english-v3.0",
                 user_agent="langchain",
                 cohere_api_key=st.secrets["COHERE_API_KEY"]
             )
             vs = FAISS.load_local(FAISS_FOLDER, embed, index_name="faiss")
-        
-            base_ret = vs.as_retriever(
-                search_type="mmr",
-                search_kwargs={"k": 50, "fetch_k": 100, "lambda_mult": 0.9}
-            )
-            reranker = CohereRerank(
-                model="rerank-english-v3.0",
-                user_agent="langchain",
-                cohere_api_key=st.secrets["COHERE_API_KEY"],
-                top_n=20
-            )
-            st.session_state.retriever = ContextualCompressionRetriever(
-                base_retriever=base_ret,
-                base_compressor=reranker
-            )
-            st.session_state.reranker = reranker
-            st.session_state["retriever_for"] = file_name
-        
+
         else:
-            # 🌀 Proceed with full PDF processing
             with st.spinner("Processing PDF..."):
                 os.makedirs("uploaded", exist_ok=True)
                 PDF_PATH = os.path.join("uploaded", file_name)
                 with open(PDF_PATH, "wb") as f:
                     f.write(uploaded_file.getbuffer())
-    
+
                 EXTRACTED_FOLDER = os.path.join(os.getcwd(), "extracted")
                 os.makedirs(EXTRACTED_FOLDER, exist_ok=True)
                 st.session_state.last_uploaded = file_name
-    
+
                 doc = fitz.open(PDF_PATH)
                 all_images = [Image.open(io.BytesIO(page.get_pixmap(dpi=300).tobytes("png"))) for page in doc]
                 st.session_state.page_images = {i + 1: img for i, img in enumerate(all_images)}
                 doc.close()
-    
+
                 st.session_state.initialized = True
-    
+
                 # === Start parsing and chunking ===
                 def parse_pdf():
                     parser = LlamaParse(api_key=os.environ["LLAMA_CLOUD_API_KEY"], num_workers=4)
@@ -178,63 +152,59 @@ if uploaded_file is not None:
                         if content:
                             pages.append(Document(page_content=content, metadata={"page_number": page_num}))
                     return pages
-    
+
                 docs = parse_pdf()
                 chunks = RecursiveCharacterTextSplitter(chunk_size=3300, chunk_overlap=0).split_documents(docs)
                 for i, doc in enumerate(chunks):
                     doc.metadata["chunk_id"] = i + 1
-    
+
                 os.makedirs(FAISS_FOLDER, exist_ok=True)
-    
+
                 embed = CohereEmbeddings(
                     model="embed-english-v3.0",
                     user_agent="langchain",
                     cohere_api_key=st.secrets["COHERE_API_KEY"]
                 )
-    
-                if os.path.exists(index_file) and os.path.exists(metadata_file):
-                    with open(metadata_file, "rb") as f:
-                        stored_metadatas = pickle.load(f)
-                    vs = FAISS.load_local(FAISS_FOLDER, embed, index_name="faiss")
-                else:
-                    texts = [doc.page_content for doc in chunks]
-                    metadatas = [doc.metadata for doc in chunks]
-                    embeddings = []
-                    for i, text in enumerate(texts):
-                        try:
-                            emb = embed.embed_query(text)
-                            embeddings.append(emb)
-                        except Exception as e:
-                            st.error(f"Embedding failed on chunk {i}: {e}")
-                            embeddings.append([0.0] * 1024)
-                        time.sleep(0.5)
-    
-                    vs = FAISS.from_documents(chunks, embed)
-                    vs.save_local(FAISS_FOLDER, index_name="faiss")
-                    with open(metadata_file, "wb") as f:
-                        pickle.dump(metadatas, f)
-                    print("💾 FAISS saved to disk.")
-    
-                # ✅ Moved retriever + reranker setup HERE — only once
-                base_ret = vs.as_retriever(
-                    search_type="mmr",
-                    search_kwargs={"k": 50, "fetch_k": 100, "lambda_mult": 0.9}
-                )
-                reranker = CohereRerank(
-                    model="rerank-english-v3.0",
-                    user_agent="langchain",
-                    cohere_api_key=st.secrets["COHERE_API_KEY"],
-                    top_n=20
-                )
-    
-                st.session_state.retriever = ContextualCompressionRetriever(
-                    base_retriever=base_ret,
-                    base_compressor=reranker
-                )
-                st.session_state.reranker = reranker
-                st.session_state["retriever_for"] = file_name
-    
+
+                texts = [doc.page_content for doc in chunks]
+                metadatas = [doc.metadata for doc in chunks]
+                embeddings = []
+                for i, text in enumerate(texts):
+                    try:
+                        emb = embed.embed_query(text)
+                        embeddings.append(emb)
+                    except Exception as e:
+                        st.error(f"Embedding failed on chunk {i}: {e}")
+                        embeddings.append([0.0] * 1024)
+                    time.sleep(0.5)
+
+                vs = FAISS.from_documents(chunks, embed)
+                vs.save_local(FAISS_FOLDER, index_name="faiss")
+                with open(metadata_file, "wb") as f:
+                    pickle.dump(metadatas, f)
+
+        # ✅ Set retriever once only
+        base_ret = vs.as_retriever(
+            search_type="mmr",
+            search_kwargs={"k": 50, "fetch_k": 100, "lambda_mult": 0.9}
+        )
+        reranker = CohereRerank(
+            model="rerank-english-v3.0",
+            user_agent="langchain",
+            cohere_api_key=st.secrets["COHERE_API_KEY"],
+            top_n=20
+        )
+
+        st.session_state.retriever = ContextualCompressionRetriever(
+            base_retriever=base_ret,
+            base_compressor=reranker
+        )
+        st.session_state.reranker = reranker
+        st.session_state["retriever_for"] = file_name
+        st.session_state["processed_file_name"] = file_name  # ✅ store for next run
+
         PDF_PATH = os.path.join("uploaded", file_name)
+
 else:
     st.warning("📄 Please upload a PDF to continue.")
     st.stop()
