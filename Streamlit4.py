@@ -95,6 +95,11 @@ def pil_to_base64(img: Image.Image) -> str:
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 if uploaded_file is not None:
+    file_name = (
+    uploaded_file.name 
+    if hasattr(uploaded_file, "name") 
+    else st.session_state["uploaded_file_name"]
+    )
     FAISS_FOLDER    = os.path.join("vectorstore", file_name)
     INDEX_FILE      = os.path.join(FAISS_FOLDER, "faiss.index")
     METADATA_FILE   = os.path.join(FAISS_FOLDER, "metadata.pkl")
