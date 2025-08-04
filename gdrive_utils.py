@@ -9,7 +9,7 @@ from googleapiclient.http import MediaIoBaseDownload
 # === CONFIG ===
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 FOLDER_ID = "1VglZDFbufOxHTZ4qZ_feUw_XHaxacPxr"  # Folder to watch
-HARDCODED_FILE_ID = "1S1ZkbQBQVYBUIKVuXAIsL-AZttzmX2So"  # ✅ Your known PDF ID
+
 
 # === Auth ===
 def get_drive_service():
@@ -24,11 +24,17 @@ def get_all_pdfs(service):
         results = service.files().list(
             q=query,
             orderBy="createdTime desc",
-            pageSize=50,
+            pageSize=20,  # You can increase this if needed
             fields="files(id, name, mimeType)"
         ).execute()
         files = results.get("files", [])
-        return [f for f in files if f["name"].lower().endswith(".pdf")]
+
+        pdfs = [file for file in files if file["name"].lower().endswith(".pdf")]
+
+        if not pdfs:
+            st.warning("📭 No PDF files found in Google Drive folder.")
+        return pdfs
+
     except Exception as e:
         st.error(f"❌ Error accessing Drive folder: {e}")
         return []
@@ -45,7 +51,7 @@ def download_pdf(service, file_id, file_name):
             done = False
             while not done:
                 status, done = downloader.next_chunk()
-        st.success(f"📥 Downloaded {file_name} to {file_path}")
+        #st.success(f"📥 Downloaded {file_name} to {file_path}")
         return file_path
     except Exception as e:
         st.error(f"❌ Failed to download PDF: {e}")
