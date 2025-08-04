@@ -152,6 +152,14 @@ else:
 if not up:
     st.warning("Please upload or load a PDF to continue.")
     st.stop()
+#extra    
+if st.session_state.get("last_processed_pdf") != up.name:
+    st.session_state.messages = [
+        {"role":"assistant","content":"Hi! I am here to answer any questions you may have about your valuation report."},
+        {"role":"assistant","content":"What can I help you with?"}
+    ]
+    st.session_state["last_processed_pdf"] = up.name
+
 
 # — build (or fetch from cache) ————————————————————————————————
 # — build (or fetch from cache) ————————————————————————————————
