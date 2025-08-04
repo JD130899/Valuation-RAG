@@ -174,7 +174,7 @@ if uploaded_file is not None:
                 cohere_api_key=st.secrets["COHERE_API_KEY"]
             )
 
-            if os.path.exists(index_file) and os.path.exists(metadata_file):
+            if os.path.exists(INDEX_FILE) and os.path.exists(METADATA_FILE):
                 with open(metadata_file, "rb") as f:
                     stored_metadatas = pickle.load(f)
                 vs = FAISS.load_local(FAISS_FOLDER, embed, index_name="faiss")
