@@ -19,7 +19,7 @@ from langchain.retrievers.document_compressors import CohereRerank
 from langchain.retrievers import ContextualCompressionRetriever
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
-
+import openai
 from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
 
 # ————————————— Setup —————————————————————————————————————
