@@ -112,7 +112,9 @@ if uploaded_file is not None:
         doc.close()
     
         # 2) load your faiss + metadata
-        embed = CohereEmbeddings(…)
+        embed = CohereEmbeddings(model="embed-english-v3.0",
+                user_agent="langchain",
+                cohere_api_key=st.secrets["COHERE_API_KEY"])
         vs    = FAISS.load_local(FAISS_FOLDER, embed, index_name="faiss")
         st.session_state.retriever       = vs.as_retriever(…)
         st.session_state.retriever_for   = file_name
