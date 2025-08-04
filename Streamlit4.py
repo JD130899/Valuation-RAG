@@ -239,10 +239,27 @@ if uploaded_file is not None:
                     top3_docs = [doc for _, doc, _ in ranked[:3]]
                     top3_chunks = [doc.page_content for doc in top3_docs]
             
-                    ranking_prompt = PromptTemplate(
-                        template=\"\"\"\n            Given a user question and 3 candidate context chunks, return the number (1-3) of the chunk that best answers it.\n            Question:\n            {question}\n            Chunk 1:\n            {chunk1}\n            Chunk 2:\n            {chunk2}\n            Chunk 3:\n            {chunk3}\n            Best Chunk Number:\n            \"\"\",\n            input_variables=[\"question\", \"chunk1\", \"chunk2\", \"chunk3\"]\n        )\n\n        ranking_input = ranking_prompt.invoke({\n            \"question\": user_question,\n            \"chunk1\": top3_chunks[0],\n            \"chunk2\": top3_chunks[1],\n            \"chunk3\": top3_chunks[2]\n        })\n\n        ranking_response = llm.invoke(ranking_input)\n        response_text = ranking_response.content.strip()\n        best_index = int(response_text) - 1 if response_text.isdigit() else 0\n        best_doc = top3_docs[best_index]\n\n        page = best_doc.metadata.get(\"page_number\")\n        raw_img = st.session_state.page_images.get(page)\n        b64_img = pil_to_base64(raw_img) if raw_img else None\n\n        entry = {\"role\": \"assistant\", \"content\": response.content}\n        if page and b64_img:\n            entry[\"source\"] = f\"Page {page}\"\n            entry[\"source_img\"] = b64_img\n\n        st.session_state.messages.append(entry)\n        container = st.empty()\n        typed = \"\"\n        for ch in response.content:\n            typed += ch\n            container.markdown(f\"<div class='assistant-bubble clearfix'>{typed}</div>\", unsafe_allow_html=True)\n            time.sleep(0.008)\n        if b64_img:\n            with st.popover(f\"📘 Reference:\"):\n                st.image(Image.open(io.BytesIO(base64.b64decode(b64_img))), caption=f\"Page {page}\", use_container_width=True)\n"
-            }
-            
+                   ranking_prompt = PromptTemplate(
+                    template="""
+                    Given a user question and 3 candidate context chunks, return the number (1-3) of the chunk that best answers it.
+                    
+                    Question:
+                    {question}
+                    
+                    Chunk 1:
+                    {chunk1}
+                    
+                    Chunk 2:
+                    {chunk2}
+                    
+                    Chunk 3:
+                    {chunk3}
+                    
+                    Best Chunk Number:
+                    """,
+                    input_variables=["question", "chunk1", "chunk2", "chunk3"]
+                )
+
   
 else:
     st.warning("📄 Please upload or select a PDF to continue.")
