@@ -239,26 +239,27 @@ if uploaded_file is not None:
                     top3_docs = [doc for _, doc, _ in ranked[:3]]
                     top3_chunks = [doc.page_content for doc in top3_docs]
             
-                   ranking_prompt = PromptTemplate(template=
-                    """
+                   ranking_prompt = PromptTemplate(
+                    template="""
                     Given a user question and 3 candidate context chunks, return the number (1-3) of the chunk that best answers it.
-                    
+                
                     Question:
                     {question}
-                    
+                
                     Chunk 1:
                     {chunk1}
-                    
+                
                     Chunk 2:
                     {chunk2}
-                    
+                
                     Chunk 3:
                     {chunk3}
-                    
+                
                     Best Chunk Number:
                     """,
                     input_variables=["question", "chunk1", "chunk2", "chunk3"]
                 )
+
 
   
 else:
