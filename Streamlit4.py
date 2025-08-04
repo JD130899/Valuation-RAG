@@ -116,7 +116,8 @@ if uploaded_file is not None:
                 user_agent="langchain",
                 cohere_api_key=st.secrets["COHERE_API_KEY"])
         vs    = FAISS.load_local(FAISS_FOLDER, embed, index_name="faiss")
-        st.session_state.retriever       = vs.as_retriever(…)
+        st.session_state.retriever       = vs.as_retriever(search_type="mmr",
+                search_kwargs={"k": 50, "fetch_k": 100, "lambda_mult": 0.9})
         st.session_state.retriever_for   = file_name
     else:
         with st.spinner("Processing PDF..."):
