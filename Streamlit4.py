@@ -175,7 +175,7 @@ if uploaded_file is not None:
             )
 
             if os.path.exists(INDEX_FILE) and os.path.exists(METADATA_FILE):
-                with open(metadata_file, "rb") as f:
+                with open(METADATA_FILE, "rb") as f:
                     stored_metadatas = pickle.load(f)
                 vs = FAISS.load_local(FAISS_FOLDER, embed, index_name="faiss")
             else:
@@ -193,7 +193,7 @@ if uploaded_file is not None:
 
                 vs = FAISS.from_documents(chunks, embed)
                 vs.save_local(FAISS_FOLDER, index_name="faiss")
-                with open(metadata_file, "wb") as f:
+                with open(METADATA_FILE, "wb") as f:
                     pickle.dump(metadatas, f)
                 print("💾 FAISS saved to disk.")
 
