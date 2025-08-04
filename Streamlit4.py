@@ -196,7 +196,7 @@ for msg in st.session_state.messages:
 user_q = st.chat_input("Message")
 if user_q:
     st.session_state.messages.append({"role":"user","content":user_q})
-    st.experimental_rerun()
+    st.rerun()
 
 # — answer when last role was user —————————————————————————————————
 if st.session_state.messages and st.session_state.messages[-1]["role"]=="user":
@@ -264,4 +264,4 @@ Best Chunk Number:
             entry["source_img"] = b64
         st.session_state.messages.append(entry)
 
-    st.experimental_rerun()
+    st.rerun()
