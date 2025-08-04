@@ -154,7 +154,11 @@ if not up:
     st.stop()
 
 # — build (or fetch from cache) ————————————————————————————————
-retriever, page_images = build_index_and_images(up.getbuffer(), up.name)
+# — build (or fetch from cache) ————————————————————————————————
+# Convert to plain `bytes` so st.cache_resource can hash it
+pdf_bytes = up.getvalue()
+retriever, page_images = build_index_and_images(pdf_bytes, up.name)
+
 
 
 # ————————————— Chat bubbles styling —————————————————————————————————
