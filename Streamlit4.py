@@ -95,14 +95,27 @@ def pil_to_base64(img: Image.Image) -> str:
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 if uploaded_file is not None:
-    file_name = uploaded_file.name
-    FAISS_FOLDER = os.path.join("vectorstore", file_name)
-    index_file = os.path.join(FAISS_FOLDER, "faiss.index")
-    metadata_file = os.path.join(FAISS_FOLDER, "metadata.pkl")
-
-    if "retriever" in st.session_state and st.session_state.get("retriever_for") == file_name:
-        #st.success("✅ Using previously processed file and retriever.")
-        pass
+    FAISS_FOLDER    = os.path.join("vectorstore", file_name)
+    INDEX_FILE      = os.path.join(FAISS_FOLDER, "faiss.index")
+    METADATA_FILE   = os.path.join(FAISS_FOLDER, "metadata.pkl")
+    UPLOAD_PATH     = os.path.join("uploaded", file_name)
+    
+    # if we’ve cached it on disk, just load everything
+    if os.path.exists(INDEX_FILE) and os.path.exists(METADATA_FILE) and os.path.exists(UPLOAD_PATH):
+        # 1) set PDF_PATH and page_images
+        PDF_PATH = UPLOAD_PATH
+        doc = fitz.open(PDF_PATH)
+        st.session_state.page_images = {
+            i+1: Image.open(io.BytesIO(page.get_pixmap(dpi=300).tobytes("png")))
+            for i, page in enumerate(doc)
+        }
+        doc.close()
+    
+        # 2) load your faiss + metadata
+        embed = CohereEmbeddings(…)
+        vs    = FAISS.load_local(FAISS_FOLDER, embed, index_name="faiss")
+        st.session_state.retriever       = vs.as_retriever(…)
+        st.session_state.retriever_for   = file_name
     else:
         with st.spinner("Processing PDF..."):
             os.makedirs("uploaded", exist_ok=True)
