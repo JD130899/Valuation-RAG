@@ -257,7 +257,7 @@ for msg in st.session_state.messages:
 user_q = st.chat_input("Message")
 if user_q:
     st.session_state.messages.append({"role":"user","content":user_q})
-    st.experimental_rerun()
+    st.rerun()
   
 
 # — answer when last role was user —————————————————————————————————
