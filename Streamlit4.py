@@ -129,7 +129,7 @@ if pdf_files:
                     {"role":"assistant","content":"Hi! I am here to answer any questions you may have about your valuation report."},
                     {"role":"assistant","content":"What can I help you with?"}
                 ]
-                st.rerun()
+              
 else:
     st.sidebar.warning("📭 No PDFs found in Drive.")
 
@@ -333,5 +333,6 @@ Best Chunk Number:
             entry["source"]     = f"Page {page}"
             entry["source_img"] = b64
         st.session_state.messages.append(entry)
+        st.rerun()
 
 
