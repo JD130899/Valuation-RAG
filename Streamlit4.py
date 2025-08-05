@@ -223,7 +223,17 @@ if st.session_state.messages and st.session_state.messages[-1]["role"]=="user":
         ctx  = "\n\n".join(d.page_content for d in docs)
 
         llm = ChatOpenAI(model="gpt-4o", temperature=0)
-        ans = llm.invoke(prompt.invoke({"context":ctx,"question":q})).content
+         # 1) build the full prompt string
+        full_prompt = prompt.invoke({
+            "context":  ctx,
+            "question": q
+        })
+        with st.expander("🔍 Preview prompt sent to GPT"):
+            st.text_area("Full prompt", full_prompt, height=300)
+
+        # 3) actually call the LLM
+        ans = llm.invoke(full_prompt).content
+        #ans = llm.invoke(prompt.invoke({"context":ctx,"question":q})).content
 
         # — your 3-chunk reranking logic intact ——————————————
         texts = [d.page_content for d in docs]
