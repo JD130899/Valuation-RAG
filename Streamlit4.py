@@ -188,13 +188,15 @@ def format_chat_history(messages):
     
 prompt = PromptTemplate(
         template = """
-        You are a financial-data extraction assistant.
+       You are a financial-data extraction assistant.
     
+       **IMPORTANT CONDITIONAL FOLLOW-UP**  
+        🛎️ After you answer the user’s question (using steps 1–4), **only if** there is still **unused** relevant report content, **ask**:  
+          “Would you like more detail on [X]?”  
+       Otherwise, **do not** ask any follow-up.
+
     **Use ONLY what appears under “Context”.**
-    ### MUST-DO AFTER ANSWERING
-    🛎️ ALWAYS ask:
-    “Would you like more detail on [X]?”, (PROVIDED only if there’s still relevant report content not shown.)
-     
+
     ### How to answer
     1. **Single value questions**  
        • Find the row + column that match the user's words.  
