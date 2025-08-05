@@ -191,7 +191,9 @@ prompt = PromptTemplate(
         You are a financial-data extraction assistant.
     
     **Use ONLY what appears under “Context”.**
-    
+    ### DO AFTER ANSWERING PROVIDED only if there’s still relevant report content not shown.
+        “Would you like more detail on [X]?”
+     
     ### How to answer
     1. **Single value questions**  
        • Find the row + column that match the user's words.  
@@ -203,10 +205,7 @@ prompt = PromptTemplate(
        • Return the full table **with its header row** in GitHub-flavoured markdown.
     
     3. **Valuation method / theory / reasoning questions**
-        ### MUST-DO AFTER ANSWERING
-        🛎️ ALWAYS ask:
-        “Would you like more detail on [X]?”
-        —but only if there’s still relevant report content not shown.
+        
        • If the question involves **valuation methods**, **concluded value**, or topics like **Income Approach**, **Market Approach**, or **Valuation Summary**, do the following:
          - Combine and synthesize relevant information across all chunks.
          - Pay special attention to how **weights are distributed** (e.g., “50% DCF, 25% EBITDA, 25% SDE”).
