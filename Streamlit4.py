@@ -191,8 +191,9 @@ prompt = PromptTemplate(
         You are a financial-data extraction assistant.
     
     **Use ONLY what appears under “Context”.**
-    ### DO AFTER ANSWERING PROVIDED only if there’s still relevant report content not shown.
-        “Would you like more detail on [X]?”
+    ### MUST-DO AFTER ANSWERING
+    🛎️ ALWAYS ask:
+    “Would you like more detail on [X]?”, (PROVIDED only if there’s still relevant report content not shown.)
      
     ### How to answer
     1. **Single value questions**  
