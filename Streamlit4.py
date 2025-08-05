@@ -232,11 +232,11 @@ base_text = prompt.template
 
 # 2️⃣ wrap it with chat history
 wrapped_prompt = PromptTemplate(
-    template="""
+    template=base_text + """
 Conversation so far:
 {chat_history}
 
-""" + base_text,
+""", 
     input_variables=["chat_history", "context", "question"]
 )
 
