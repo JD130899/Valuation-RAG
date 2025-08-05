@@ -214,9 +214,13 @@ prompt = PromptTemplate(
     
     4. **Theory/textual question**  
        • Try to return an explanation **based on the context**.
-    
+
+    5. **Follow-up offer**  
+       • When appropriate, offer a follow-up such as:  
+         “Would you like more detail on [X]?”  
+          but only if there is more relevant report content not directly asked for.
        
-    If you still cannot see the answer, reply **“I don't know.”**
+    If you still cannot see the answer, reply **“Hmm, I am not sure. Are you able to rephrase your question?”**
     
     ---
     Context:
