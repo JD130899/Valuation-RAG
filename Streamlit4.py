@@ -257,7 +257,7 @@ for msg in st.session_state.messages:
 user_q = st.chat_input("Message")
 if user_q:
     st.session_state.messages.append({"role":"user","content":user_q})
-    st.rerun()
+    
   
 
 # — answer when last role was user —————————————————————————————————
@@ -276,7 +276,7 @@ if st.session_state.messages and st.session_state.messages[-1]["role"]=="user":
         }
         ans = llm.invoke(wrapped_prompt.invoke(full_input)).content
       
-
+        st.session_state.messages.append({"role":"assistant","content":ans})
         # — your 3-chunk reranking logic intact ——————————————
         texts = [d.page_content for d in docs]
         emb_query = CohereEmbeddings(
