@@ -228,6 +228,25 @@ prompt = PromptTemplate(
             input_variables=["context", "question"]
         )
 
+base_text = prompt.template
+
+# 2️⃣ wrap it with chat history
+wrapped_prompt = PromptTemplate(
+    template=base_text + """
+
+Conversation so far:
+{chat_history}
+
+Context:
+{context}
+
+Question:
+{question}
+
+Answer:""",
+    input_variables=["chat_history", "context", "question"]
+)
+
 # — render history —————————————————————————————————————————
 for msg in st.session_state.messages:
     cls = "user-bubble" if msg["role"]=="user" else "assistant-bubble"
@@ -250,15 +269,14 @@ if st.session_state.messages and st.session_state.messages[-1]["role"]=="user":
         docs = retriever.get_relevant_documents(q)
         ctx  = "\n\n".join(d.page_content for d in docs)
         history_to_use = st.session_state.messages[-10:]
-        chat_history = format_chat_history(history_to_use)
 
         llm = ChatOpenAI(model="gpt-4o", temperature=0)
         full_input = {
-            "chat_history": chat_history,
+            "chat_history": format_chat_history(history_to_use),
             "context":      ctx,
             "question":     q
         }
-        ans = llm.invoke(prompt.invoke(full_input)).content
+        ans = llm.invoke(wrapped_prompt.invoke(full_input)).content
       
 
         # — your 3-chunk reranking logic intact ——————————————
