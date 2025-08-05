@@ -178,6 +178,14 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+def format_chat_history(messages):
+    """Turn st.session_state.messages into a single history string."""
+    lines = []
+    for m in messages:
+        speaker = "User" if m["role"] == "user" else "Assistant"
+        lines.append(f"{speaker}: {m['content']}")
+    return "\n".join(lines)
+    
 prompt = PromptTemplate(
     template="""
 You are Underwriting Assistant, a helpful and precise virtual assistant for SBA loan officer underwriters and commercial lenders. You work for Value Buddy, a firm that provides SBA-compliant business valuation and underwriting risk assessment reports. Clients submit onboarding data about a company a borrower is acquiring, and Value Buddy returns a report with valuation analysis and risk commentary tailored to that specific business.
@@ -191,13 +199,16 @@ Maintain a professional, concise tone.
 When appropriate, offer a follow-up such as: “Would you like more detail on [X]?” but only if there is more relevant report content not directly asked for.
 Refuse to answer any question outside the report scope. Never break character.
 
-Context:
+Conversation so far:
+{chat_history}
+
+RAG Context:
 {context}
 
 ---
-Question: {question}
+New Question: {question}
 Answer:""",
-    input_variables=["context","question"]
+    input_variables=["chat_history", "context", "question"]
 )
 
 # — render history —————————————————————————————————————————
@@ -221,9 +232,17 @@ if st.session_state.messages and st.session_state.messages[-1]["role"]=="user":
     with st.spinner("Thinking…"):
         docs = retriever.get_relevant_documents(q)
         ctx  = "\n\n".join(d.page_content for d in docs)
+        history_to_use = st.session_state.messages[-10:]
+        chat_history = format_chat_history(history_to_use)
 
         llm = ChatOpenAI(model="gpt-4o", temperature=0)
-        ans = llm.invoke(prompt.invoke({"context":ctx,"question":q})).content
+        full_input = {
+            "chat_history": chat_history,
+            "context":      ctx,
+            "question":     q
+        }
+        ans = llm.invoke(prompt.invoke(full_input)).content
+      
 
         # — your 3-chunk reranking logic intact ——————————————
         texts = [d.page_content for d in docs]
