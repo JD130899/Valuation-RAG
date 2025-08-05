@@ -129,7 +129,6 @@ if pdf_files:
                     {"role":"assistant","content":"Hi! I am here to answer any questions you may have about your valuation report."},
                     {"role":"assistant","content":"What can I help you with?"}
                 ]
-                st.rerun()
 else:
     st.sidebar.warning("📭 No PDFs found in Drive.")
 
@@ -258,7 +257,7 @@ for msg in st.session_state.messages:
 user_q = st.chat_input("Message")
 if user_q:
     st.session_state.messages.append({"role":"user","content":user_q})
-    st.rerun()
+  
 
 # — answer when last role was user —————————————————————————————————
 if st.session_state.messages and st.session_state.messages[-1]["role"]=="user":
@@ -333,4 +332,4 @@ Best Chunk Number:
             entry["source_img"] = b64
         st.session_state.messages.append(entry)
 
-    st.rerun()
+
