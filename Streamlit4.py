@@ -210,15 +210,11 @@ prompt = PromptTemplate(
          - If a table gives a simplified view (e.g., "50% Market Approach"), but other parts break it down (e.g., 25% EBITDA + 25% SDE), **prefer the detailed breakdown with percent value**.   
          - When describing weights, also mention the **corresponding dollar values** used in the context (e.g., “50% DCF = $3,712,000, 25% EBITDA = $4,087,000...”)
          - **If Market approach is composed of sub-methods like EBITDA and SDE, then explicitly extract and show their individual weights and values, even if not listed together in a single table.**
-    
+         - Also, importantly, if the question is open ended and demands more information, that **you did not include** in your answer, YOU MUST ask:  
+         “Would you like more detail on [X]?”
  
     4. **Theory/textual question**  
        • Try to return an explanation **based on the context**.
-
-   5. **🛎️ IMPORTANT FOLLOW UP QUESTIONS**  
-       • **Only for steps 3 & 4**: if there remains relevant report content **you did not include** in your answer, YOU MUST ask:  
-         “Would you like more detail on [X]?”  
-       • For steps 1 & 2, **DO NOT** ask any follow-up.    
        
     If you still cannot see the answer, reply **“Hmm, I am not sure. Are you able to rephrase your question?”**
     
