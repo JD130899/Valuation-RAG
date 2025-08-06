@@ -255,7 +255,14 @@ with chat_container:
                 data = base64.b64decode(msg["source_img"])
                 st.image(Image.open(io.BytesIO(data)), caption=msg["source"], use_container_width=True)
 
-
+st.markdown("""
+<script>
+    const mainArea = window.parent.document.querySelector('.main');
+    if (mainArea) {
+        mainArea.scrollTo({ top: mainArea.scrollHeight, behavior: 'smooth' });
+    }
+</script>
+""", unsafe_allow_html=True)
 # — user input ——————————————————————————————————————————————
 # — user input and assistant reply (merged block to avoid flicker) ————————
 user_q = st.chat_input("Message")
