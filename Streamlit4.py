@@ -338,4 +338,4 @@ Best Chunk Number:
             entry["source"] = f"Page {page}"
             entry["source_img"] = b64
         st.session_state.messages.append(entry)
-        st.rerun()
+    
