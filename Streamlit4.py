@@ -245,13 +245,16 @@ Conversation so far:
     input_variables=["chat_history", "context", "question"]
 )
 
-for msg in st.session_state.messages:
-    cls = "user-bubble" if msg["role"]=="user" else "assistant-bubble"
-    st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
-    if msg.get("source_img"):
-        with st.popover("📘 Reference:"):
-            data = base64.b64decode(msg["source_img"])
-            st.image(Image.open(io.BytesIO(data)), caption=msg["source"], use_container_width=True)
+chat_container = st.container()
+with chat_container:
+    for msg in st.session_state.messages:
+        cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
+        st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
+        if msg.get("source_img"):
+            with st.popover("📘 Reference:"):
+                data = base64.b64decode(msg["source_img"])
+                st.image(Image.open(io.BytesIO(data)), caption=msg["source"], use_container_width=True)
+
 
 # — user input ——————————————————————————————————————————————
 # — user input and assistant reply (merged block to avoid flicker) ————————
@@ -328,3 +331,4 @@ Best Chunk Number:
             entry["source"] = f"Page {page}"
             entry["source_img"] = b64
         st.session_state.messages.append(entry)
+        st.experimental_rerun()
