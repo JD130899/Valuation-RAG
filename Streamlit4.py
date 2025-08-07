@@ -1,3 +1,4 @@
+
 import os
 import io
 import time
@@ -31,9 +32,10 @@ if "last_synced_file_id" not in st.session_state:
     st.session_state.last_synced_file_id = None
 if "messages" not in st.session_state:
     st.session_state.messages = [
-        {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
-        {"role": "assistant", "content": "What can I help you with?"}
+        {"role":"assistant","content":"Hi! I am here to answer any questions you may have about your valuation report."},
+        {"role":"assistant","content":"What can I help you with?"}
     ]
+
 
 # ————————————— CACHING BUILDER —————————————————————————————————
 @st.cache_resource(show_spinner="📦 Processing & indexing PDF…")
@@ -47,7 +49,7 @@ def build_index_and_images(pdf_bytes: bytes, file_name: str):
     # 2) Extract page images
     doc = fitz.open(pdf_path)
     page_images = {
-        i + 1: Image.open(io.BytesIO(page.get_pixmap(dpi=300).tobytes("png")))
+        i+1: Image.open(io.BytesIO(page.get_pixmap(dpi=300).tobytes("png")))
         for i, page in enumerate(doc)
     }
     doc.close()
@@ -57,16 +59,16 @@ def build_index_and_images(pdf_bytes: bytes, file_name: str):
     result = parser.parse(pdf_path)
     pages = []
     for pg in result.pages:
-        cleaned = [l for l in pg.md.splitlines() if l.strip() and l.lower() != "null"]
+        cleaned = [l for l in pg.md.splitlines() if l.strip() and l.lower()!="null"]
         text = "\n".join(cleaned)
         if text:
-            pages.append(Document(page_content=text, metadata={"page_number": pg.page}))
+            pages.append(Document(page_content=text, metadata={"page_number":pg.page}))
 
     # 4) Chunk
     splitter = RecursiveCharacterTextSplitter(chunk_size=3300, chunk_overlap=0)
     chunks = splitter.split_documents(pages)
     for idx, c in enumerate(chunks):
-        c.metadata["chunk_id"] = idx + 1
+        c.metadata["chunk_id"] = idx+1
 
     # 5) Embed & index
     embedder = CohereEmbeddings(
@@ -93,7 +95,7 @@ def build_index_and_images(pdf_bytes: bytes, file_name: str):
     retriever = ContextualCompressionRetriever(
         base_retriever=vs.as_retriever(
             search_type="mmr",
-            search_kwargs={"k": 50, "fetch_k": 100, "lambda_mult": 0.9}
+            search_kwargs={"k":50,"fetch_k":100,"lambda_mult":0.9}
         ),
         base_compressor=reranker
     )
@@ -112,8 +114,8 @@ service = get_drive_service()
 pdf_files = get_all_pdfs(service)
 if pdf_files:
     names = [f["name"] for f in pdf_files]
-    sel = st.sidebar.selectbox("📂 Select a PDF from Google Drive", names)
-    chosen = next(f for f in pdf_files if f["name"] == sel)
+    sel   = st.sidebar.selectbox("📂 Select a PDF from Google Drive", names)
+    chosen = next(f for f in pdf_files if f["name"]==sel)
     if st.sidebar.button("📥 Load Selected PDF"):
         fid, fname = chosen["id"], chosen["name"]
         if fid == st.session_state.last_synced_file_id:
@@ -121,15 +123,17 @@ if pdf_files:
         else:
             path = download_pdf(service, fid, fname)
             if path:
-                st.session_state.uploaded_file_from_drive = open(path, "rb").read()
+                st.session_state.uploaded_file_from_drive = open(path,"rb").read()
                 st.session_state.uploaded_file_name = fname
                 st.session_state.last_synced_file_id = fid
                 st.session_state.messages = [
-                    {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
-                    {"role": "assistant", "content": "What can I help you with?"}
+                    {"role":"assistant","content":"Hi! I am here to answer any questions you may have about your valuation report."},
+                    {"role":"assistant","content":"What can I help you with?"}
                 ]
+              
 else:
     st.sidebar.warning("📭 No PDFs found in Drive.")
+
 
 # ————————————— Main UI —————————————————————————————————————————
 st.title("Underwriting Agent")
@@ -149,18 +153,22 @@ else:
 if not up:
     st.warning("Please upload or load a PDF to continue.")
     st.stop()
-
-# Reset messages if new PDF
+#extra    
 if st.session_state.get("last_processed_pdf") != up.name:
     st.session_state.messages = [
-        {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
-        {"role": "assistant", "content": "What can I help you with?"}
+        {"role":"assistant","content":"Hi! I am here to answer any questions you may have about your valuation report."},
+        {"role":"assistant","content":"What can I help you with?"}
     ]
     st.session_state["last_processed_pdf"] = up.name
 
+
 # — build (or fetch from cache) ————————————————————————————————
+# — build (or fetch from cache) ————————————————————————————————
+# Convert to plain `bytes` so st.cache_resource can hash it
 pdf_bytes = up.getvalue()
 retriever, page_images = build_index_and_images(pdf_bytes, up.name)
+
+
 
 # ————————————— Chat bubbles styling —————————————————————————————————
 st.markdown("""
@@ -178,9 +186,9 @@ def format_chat_history(messages):
         speaker = "User" if m["role"] == "user" else "Assistant"
         lines.append(f"{speaker}: {m['content']}")
     return "\n".join(lines)
-
+    
 prompt = PromptTemplate(
-    template="""
+        template = """
        You are a financial-data extraction assistant.
     
        **IMPORTANT CONDITIONAL FOLLOW-UP**  
@@ -223,116 +231,89 @@ prompt = PromptTemplate(
     ---
     Question: {question}
     Answer:""",
-    input_variables=["context", "question"]
-)
+            input_variables=["context", "question"]
+        )
+
 base_text = prompt.template
 
+# 2️⃣ wrap it with chat history
 wrapped_prompt = PromptTemplate(
     template=base_text + """
 Conversation so far:
 {chat_history}
 
-""",
+""", 
     input_variables=["chat_history", "context", "question"]
 )
 
-# ————————————— Input ——————————————————————————————————————————————
-user_q = st.chat_input("Message", key="chat_input_box")
-if user_q:
+for msg in st.session_state.messages:
+    cls = "user-bubble" if msg["role"]=="user" else "assistant-bubble"
+    st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
+    if msg.get("source_img"):
+        with st.popover("📘 Reference:"):
+            data = base64.b64decode(msg["source_img"])
+            st.image(Image.open(io.BytesIO(data)), caption=msg["source"], use_container_width=True)
+
+# ───────────────── user input ─────────────────
+# (1) Set up a tiny state machine
+if "waiting_for_response" not in st.session_state:
+    st.session_state.waiting_for_response = False
+if "pending_question" not in st.session_state:
+    st.session_state.pending_question = None
+
+user_q = st.chat_input("Message")
+if user_q and not st.session_state.waiting_for_response:
+    # Add user message to history and mark we're going to answer
     st.session_state.messages.append({"role": "user", "content": user_q})
-    st.session_state.pending_user_input = user_q
     st.session_state.waiting_for_response = True
-    st.session_state._scroll_to_bottom = True  # smooth out the submit rerun look
+    st.session_state.pending_question = user_q
 
-# -------------------- FRAGMENTED CHAT PANEL (no flicker) --------------------
-try:
-    fragment = st.fragment
-except AttributeError:
-    fragment = st.experimental_fragment  # older Streamlit fallback
+# ─────────────── render chat so far ───────────────
+for msg in st.session_state.messages:
+    cls = "user-bubble" if msg["role"]=="user" else "assistant-bubble"
+    st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
+    if msg.get("source_img"):
+        with st.popover("📘 Reference:"):
+            data = base64.b64decode(msg["source_img"])
+            st.image(Image.open(io.BytesIO(data)), caption=msg["source"], use_container_width=True)
 
-@fragment
-def chat_panel():
-    # Only render the last K messages to avoid layout thrash as history grows
-    K = 40
-    msgs = st.session_state.messages
-    older = msgs[:-K] if len(msgs) > K else []
-    recent = msgs[-K:]
+# ─────────────── show 'Thinking…' immediately ───────────────
+if st.session_state.waiting_for_response and st.session_state.pending_question:
+    # 1) Draw a placeholder assistant bubble
+    thinking_placeholder = st.empty()
+    with thinking_placeholder.container():
+        st.markdown("<div class='assistant-bubble clearfix'>🧠 <i>Thinking…</i></div>", unsafe_allow_html=True)
 
-    # Put older into an expander (optional)
-    if older:
-        with st.expander(f"Show older messages ({len(older)})"):
-            for msg in older:
-                cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
-                st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
-                if msg.get("source_img"):
-                    with st.popover("📘 Reference:"):
-                        data = base64.b64decode(msg["source_img"])
-                        st.image(Image.open(io.BytesIO(data)), caption=msg["source"], use_container_width=True)
+    # 2) Do the actual work
+    try:
+        q = st.session_state.pending_question
 
-    # Stable container for live chat
-    chat_area = st.container()
-    with chat_area:
-        # Render only the recent set
-        for msg in recent:
-            cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
-            st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
-            if msg.get("source_img"):
-                with st.popover("📘 Reference:"):
-                    data = base64.b64decode(msg["source_img"])
-                    st.image(Image.open(io.BytesIO(data)), caption=msg["source"], use_container_width=True)
+        # Retrieve context
+        docs = retriever.get_relevant_documents(q)
+        ctx  = "\n\n".join(d.page_content for d in docs)
+        history_to_use = st.session_state.messages[-10:]
 
-        # Thinking placeholder
-        rb = st.empty()
-        if st.session_state.get("waiting_for_response"):
-            rb.markdown("<div class='assistant-bubble clearfix'>🧠 <i>Thinking...</i></div>", unsafe_allow_html=True)
+        llm = ChatOpenAI(model="gpt-4o", temperature=0)
+        full_input = {
+            "chat_history": format_chat_history(history_to_use),
+            "context":      ctx,
+            "question":     q
+        }
+        ans = llm.invoke(wrapped_prompt.invoke(full_input)).content
 
-    # save a handle for the generator to replace in-place
-    st.session_state._response_box = rb
+        # 3-chunk rerank (unchanged)
+        texts = [d.page_content for d in docs]
+        embedder = CohereEmbeddings(
+            model="embed-english-v3.0", user_agent="langchain", cohere_api_key=st.secrets["COHERE_API_KEY"]
+        )
+        emb_query  = embedder.embed_query(ans)
+        chunk_embs = embedder.embed_documents(texts)
+        sims = cosine_similarity([emb_query], chunk_embs)[0]
+        ranked = sorted(list(zip(docs, sims)), key=lambda x: x[1], reverse=True)
+        top3 = [d for d,_ in ranked[:3]]
 
-# render the chat region (isolated from the rest of the page)
-chat_panel()
-
-# -------------------- AUTO-SCROLL (mask submit rerun) --------------------
-if st.session_state.get("_scroll_to_bottom"):
-    st.markdown(
-        """
-        <script>
-        setTimeout(() => { window.scrollTo({ top: document.body.scrollHeight, behavior: 'instant' }); }, 0);
-        </script>
-        """,
-        unsafe_allow_html=True,
-    )
-    st.session_state._scroll_to_bottom = False
-
-# ————————————— Generate assistant response ——————————————————————————
-if st.session_state.get("pending_user_input") and st.session_state.get("waiting_for_response"):
-    q = st.session_state.pending_user_input
-
-    # Retrieval
-    docs = retriever.get_relevant_documents(q)
-    ctx = "\n\n".join(d.page_content for d in docs)
-    history_to_use = st.session_state.messages[-10:]
-
-    # LLM
-    llm = ChatOpenAI(model="gpt-4o", temperature=0)
-    full_input = {
-        "chat_history": format_chat_history(history_to_use),
-        "context": ctx,
-        "question": q
-    }
-    ans = llm.invoke(wrapped_prompt.invoke(full_input)).content
-
-    # Rerank
-    texts = [d.page_content for d in docs]
-    emb = CohereEmbeddings(model="embed-english-v3.0", user_agent="langchain", cohere_api_key=st.secrets["COHERE_API_KEY"])
-    emb_query = emb.embed_query(ans)
-    chunk_embs = emb.embed_documents(texts)
-    sims = cosine_similarity([emb_query], chunk_embs)[0]
-    ranked = sorted(list(zip(docs, sims)), key=lambda x: x[1], reverse=True)
-    top3 = [d for d, _ in ranked[:3]]
-
-    ranking_prompt = PromptTemplate(
-        template="""
+        ranking_prompt = PromptTemplate(
+            template="""
 Given a user question and 3 candidate context chunks, return the number (1-3) of the chunk that best answers it.
 
 Question:
@@ -349,38 +330,40 @@ Chunk 3:
 
 Best Chunk Number:
 """,
-        input_variables=["question", "chunk1", "chunk2", "chunk3"]
-    )
-    pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
-        ranking_prompt.invoke({
-            "question": q,
-            "chunk1": top3[0].page_content,
-            "chunk2": top3[1].page_content,
-            "chunk3": top3[2].page_content
-        })
-    ).content.strip()
+            input_variables=["question","chunk1","chunk2","chunk3"]
+        )
+        pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
+            ranking_prompt.invoke({
+                "question": q,
+                "chunk1": top3[0].page_content,
+                "chunk2": top3[1].page_content,
+                "chunk3": top3[2].page_content
+            })
+        ).content.strip()
+        best_doc = top3[int(pick)-1] if pick.isdigit() else top3[0]
 
-    best_doc = top3[int(pick) - 1] if pick.isdigit() else top3[0]
-    page = best_doc.metadata.get("page_number")
-    img = page_images.get(page)
-    b64 = pil_to_base64(img) if img else None
+        page = best_doc.metadata.get("page_number")
+        img = page_images.get(page)
+        b64 = pil_to_base64(img) if img else None
 
-    # Prepare assistant entry
-    entry = {"role": "assistant", "content": ans}
-    if page and b64:
-        entry["source"] = f"Page {page}"
-        entry["source_img"] = b64
+        # 3) Replace the placeholder with the real answer (no rerun)
+        with thinking_placeholder.container():
+            st.markdown(f"<div class='assistant-bubble clearfix'>{ans}</div>", unsafe_allow_html=True)
+            if page and b64:
+                with st.popover("📘 Reference:"):
+                    st.image(Image.open(io.BytesIO(base64.b64decode(b64))), caption=f"Page {page}", use_container_width=True)
 
-    # Replace "Thinking..." with the actual response (in-place)
-    rb = st.session_state.get("_response_box")
-    if rb is not None:
-        rb.markdown(f"<div class='assistant-bubble clearfix'>{entry['content']}</div>", unsafe_allow_html=True)
+        # 4) Commit to history & reset flags
+        entry = {"role":"assistant","content":ans}
         if page and b64:
-            with st.popover("📘 Reference:"):
-                data = base64.b64decode(b64)
-                st.image(Image.open(io.BytesIO(data)), caption=f"Page {page}", use_container_width=True)
+            entry["source"]     = f"Page {page}"
+            entry["source_img"] = b64
+        st.session_state.messages.append(entry)
 
-    # Persist to history + clear flags
-    st.session_state.messages.append(entry)
-    st.session_state.pending_user_input = None
-    st.session_state.waiting_for_response = False
+    except Exception as e:
+        with thinking_placeholder.container():
+            st.markdown(f"<div class='assistant-bubble clearfix'>❌ Error: {e}</div>", unsafe_allow_html=True)
+
+    finally:
+        st.session_state.waiting_for_response = False
+        st.session_state.pending_question = None
