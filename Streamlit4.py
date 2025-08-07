@@ -1,4 +1,3 @@
-
 import os
 import io
 import time
@@ -254,41 +253,17 @@ for msg in st.session_state.messages:
             data = base64.b64decode(msg["source_img"])
             st.image(Image.open(io.BytesIO(data)), caption=msg["source"], use_container_width=True)
 
-# ───────────────── user input ─────────────────
-# (1) Set up a tiny state machine
-if "waiting_for_response" not in st.session_state:
-    st.session_state.waiting_for_response = False
-if "pending_question" not in st.session_state:
-    st.session_state.pending_question = None
-
+# — user input ——————————————————————————————————————————————
 user_q = st.chat_input("Message")
-if user_q and not st.session_state.waiting_for_response:
-    # Add user message to history and mark we're going to answer
-    st.session_state.messages.append({"role": "user", "content": user_q})
-    st.session_state.waiting_for_response = True
-    st.session_state.pending_question = user_q
+if user_q:
+    st.session_state.messages.append({"role":"user","content":user_q})
+    st.rerun()
+  
 
-# ─────────────── render chat so far ───────────────
-for msg in st.session_state.messages:
-    cls = "user-bubble" if msg["role"]=="user" else "assistant-bubble"
-    st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
-    if msg.get("source_img"):
-        with st.popover("📘 Reference:"):
-            data = base64.b64decode(msg["source_img"])
-            st.image(Image.open(io.BytesIO(data)), caption=msg["source"], use_container_width=True)
-
-# ─────────────── show 'Thinking…' immediately ───────────────
-if st.session_state.waiting_for_response and st.session_state.pending_question:
-    # 1) Draw a placeholder assistant bubble
-    thinking_placeholder = st.empty()
-    with thinking_placeholder.container():
-        st.markdown("<div class='assistant-bubble clearfix'>🧠 <i>Thinking…</i></div>", unsafe_allow_html=True)
-
-    # 2) Do the actual work
-    try:
-        q = st.session_state.pending_question
-
-        # Retrieve context
+# — answer when last role was user —————————————————————————————————
+if st.session_state.messages and st.session_state.messages[-1]["role"]=="user":
+    q = st.session_state.messages[-1]["content"]
+    with st.spinner("Thinking…"):
         docs = retriever.get_relevant_documents(q)
         ctx  = "\n\n".join(d.page_content for d in docs)
         history_to_use = st.session_state.messages[-10:]
@@ -300,14 +275,16 @@ if st.session_state.waiting_for_response and st.session_state.pending_question:
             "question":     q
         }
         ans = llm.invoke(wrapped_prompt.invoke(full_input)).content
-
-        # 3-chunk rerank (unchanged)
+      
+        #st.session_state.messages.append({"role":"assistant","content":ans})
+        # — your 3-chunk reranking logic intact ——————————————
         texts = [d.page_content for d in docs]
-        embedder = CohereEmbeddings(
+        emb_query = CohereEmbeddings(
             model="embed-english-v3.0", user_agent="langchain", cohere_api_key=st.secrets["COHERE_API_KEY"]
-        )
-        emb_query  = embedder.embed_query(ans)
-        chunk_embs = embedder.embed_documents(texts)
+        ).embed_query(ans)
+        chunk_embs = CohereEmbeddings(
+            model="embed-english-v3.0", user_agent="langchain", cohere_api_key=st.secrets["COHERE_API_KEY"]
+        ).embed_documents(texts)
         sims = cosine_similarity([emb_query], chunk_embs)[0]
         ranked = sorted(list(zip(docs, sims)), key=lambda x: x[1], reverse=True)
         top3 = [d for d,_ in ranked[:3]]
@@ -340,30 +317,20 @@ Best Chunk Number:
                 "chunk3": top3[2].page_content
             })
         ).content.strip()
-        best_doc = top3[int(pick)-1] if pick.isdigit() else top3[0]
+
+        if pick.isdigit():
+            best_doc = top3[int(pick)-1]
+        else:
+            best_doc = top3[0]
 
         page = best_doc.metadata.get("page_number")
         img = page_images.get(page)
         b64 = pil_to_base64(img) if img else None
 
-        # 3) Replace the placeholder with the real answer (no rerun)
-        with thinking_placeholder.container():
-            st.markdown(f"<div class='assistant-bubble clearfix'>{ans}</div>", unsafe_allow_html=True)
-            if page and b64:
-                with st.popover("📘 Reference:"):
-                    st.image(Image.open(io.BytesIO(base64.b64decode(b64))), caption=f"Page {page}", use_container_width=True)
-
-        # 4) Commit to history & reset flags
         entry = {"role":"assistant","content":ans}
         if page and b64:
             entry["source"]     = f"Page {page}"
             entry["source_img"] = b64
         st.session_state.messages.append(entry)
+        st.rerun()
 
-    except Exception as e:
-        with thinking_placeholder.container():
-            st.markdown(f"<div class='assistant-bubble clearfix'>❌ Error: {e}</div>", unsafe_allow_html=True)
-
-    finally:
-        st.session_state.waiting_for_response = False
-        st.session_state.pending_question = None
