@@ -197,6 +197,10 @@ prompt = PromptTemplate(
 
     **Use ONLY what appears under “Context”.**
 
+    ### Special interpretation rules  
+          • If the question is about **"valuation"** in general (e.g., “What is the valuation?”), treat it as a request for the **Conclusion of Value** or **Overall Valuation**.  
+          • If the question is about **risk** (e.g., “How risky is the business?”), use the **risk assessment section**, and include the **risk classification** (e.g., secure, controlled, etc.).
+
     ### How to answer
     1. **Single value questions**  
        • Find the row + column that match the user's words.  
