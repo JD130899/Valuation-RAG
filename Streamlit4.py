@@ -246,7 +246,7 @@ Conversation so far:
 )
 
 # User input first
-user_q = st.chat_input("Message")
+user_q = st.chat_input("Message", key="chat_input_box")
 if user_q:
     st.session_state.messages.append({"role":"user","content":user_q})
     st.session_state.pending_user_input = user_q
@@ -265,15 +265,6 @@ for msg in st.session_state.messages:
 if st.session_state.get("waiting_for_response"):
     st.markdown("<div class='assistant-bubble clearfix'>🧠 <i>Thinking...</i></div>", unsafe_allow_html=True)
 
-
-
-# — user input ——————————————————————————————————————————————
-user_q = st.chat_input("Message")
-if user_q:
-    st.session_state.messages.append({"role":"user","content":user_q})
-    st.session_state.pending_user_input = user_q
-    st.session_state.waiting_for_response = True
-  
 
 # — answer when last role was user —————————————————————————————————
 if st.session_state.get("pending_user_input") and st.session_state.get("waiting_for_response"):
