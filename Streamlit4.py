@@ -245,6 +245,10 @@ Conversation so far:
     input_variables=["chat_history", "context", "question"]
 )
 
+if st.session_state.get("pending_user_input"):
+    st.markdown(f"<div class='user-bubble clearfix'>{st.session_state.pending_user_input}</div>", unsafe_allow_html=True)
+
+
 for msg in st.session_state.messages:
     cls = "user-bubble" if msg["role"]=="user" else "assistant-bubble"
     st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
@@ -256,7 +260,7 @@ for msg in st.session_state.messages:
 # — user input ——————————————————————————————————————————————
 user_q = st.chat_input("Message")
 if user_q:
-    st.session_state.messages.append({"role":"user","content":user_q})
+
     st.session_state.pending_user_input = user_q
   
 
@@ -347,6 +351,7 @@ Best Chunk Number:
         if b64:
             with st.popover("📘 Reference:"):
                 st.image(Image.open(io.BytesIO(base64.b64decode(b64))), caption=f"Page {page}", use_container_width=True)
-
+    st.session_state.messages.append({"role": "user", "content": q})
+    st.session_state.messages.append(entry)
     st.session_state.pending_user_input = None  
 
