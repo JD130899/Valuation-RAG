@@ -257,7 +257,10 @@ for msg in st.session_state.messages:
 user_q = st.chat_input("Message")
 if user_q:
     st.session_state.messages.append({"role":"user","content":user_q})
-    st.rerun()
+    #st.rerun()
+    thinking_placeholder = st.empty()
+    with thinking_placeholder.container():
+        st.markdown("<div class='assistant-bubble clearfix'>🧠 <i>Thinking…</i></div>", unsafe_allow_html=True)
   
 
 # — answer when last role was user —————————————————————————————————
@@ -331,6 +334,11 @@ Best Chunk Number:
         if page and b64:
             entry["source"]     = f"Page {page}"
             entry["source_img"] = b64
+        with thinking_placeholder.container():
+            st.markdown(f"<div class='assistant-bubble clearfix'>{ans}</div>", unsafe_allow_html=True)
+            if page and b64:
+                with st.popover("📘 Reference:"):
+                    st.image(Image.open(io.BytesIO(base64.b64decode(b64))), caption=f"Page {page}", use_container_width=True)
+        
         st.session_state.messages.append(entry)
-        st.rerun()
 
