@@ -39,7 +39,7 @@ if "messages" not in st.session_state:
 if "pending_response" not in st.session_state:
     st.session_state.pending_response = False
 
- ————————————— CACHING BUILDER —————————————————————————————————
+
 @st.cache_resource(show_spinner="📦 Processing & indexing PDF…")
 def build_index_and_images(pdf_bytes: bytes, file_name: str):
     os.makedirs("uploaded", exist_ok=True)
