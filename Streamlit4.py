@@ -251,21 +251,38 @@ if user_q:
     st.session_state.messages.append({"role":"user","content":user_q})
     st.session_state.pending_user_input = user_q
     st.session_state.waiting_for_response = True
+    st.session_state._scroll_to_bottom = True  # <— set flag
 
+chat_area = st.container()
+
+with chat_area:
 # Then render full history
-for msg in st.session_state.messages:
-    cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
-    st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
-    if msg.get("source_img"):
-        with st.popover("📘 Reference:"):
-            data = base64.b64decode(msg["source_img"])
-            st.image(Image.open(io.BytesIO(data)), caption=msg["source"], use_container_width=True)
+    for msg in st.session_state.messages:
+        cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
+        st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
+        if msg.get("source_img"):
+            with st.popover("📘 Reference:"):
+                data = base64.b64decode(msg["source_img"])
+                st.image(Image.open(io.BytesIO(data)), caption=msg["source"], use_container_width=True)
 
-# Then temporary "Thinking..." if response is being generated
-# Show "Thinking..." immediately
-response_box = st.empty()
-if st.session_state.get("waiting_for_response"):
-    response_box.markdown("<div class='assistant-bubble clearfix'>🧠 <i>Thinking...</i></div>", unsafe_allow_html=True)
+    # Then temporary "Thinking..." if response is being generated
+    # Show "Thinking..." immediately
+    response_box = st.empty()
+    if st.session_state.get("waiting_for_response"):
+        response_box.markdown("<div class='assistant-bubble clearfix'>🧠 <i>Thinking...</i></div>", unsafe_allow_html=True)
+
+# — Auto-scroll to bottom once per submit (masks the rerun flash) ——————
+if st.session_state.get("_scroll_to_bottom"):
+    st.markdown(
+        """
+        <script>
+        // jump to bottom after the rerun paints
+        setTimeout(() => { window.scrollTo({ top: document.body.scrollHeight, behavior: 'instant' }); }, 0);
+        </script>
+        """,
+        unsafe_allow_html=True,
+    )
+    st.session_state._scroll_to_bottom = False
 
 
 # — answer when last role was user —————————————————————————————————
