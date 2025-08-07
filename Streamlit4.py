@@ -262,8 +262,10 @@ for msg in st.session_state.messages:
             st.image(Image.open(io.BytesIO(data)), caption=msg["source"], use_container_width=True)
 
 # Then temporary "Thinking..." if response is being generated
+# Show "Thinking..." immediately
+response_box = st.empty()
 if st.session_state.get("waiting_for_response"):
-    st.markdown("<div class='assistant-bubble clearfix'>🧠 <i>Thinking...</i></div>", unsafe_allow_html=True)
+    response_box.markdown("<div class='assistant-bubble clearfix'>🧠 <i>Thinking...</i></div>", unsafe_allow_html=True)
 
 
 # — answer when last role was user —————————————————————————————————
@@ -339,6 +341,15 @@ Best Chunk Number:
         entry["source"] = f"Page {page}"
         entry["source_img"] = b64
 
+    # Replace "Thinking..." with actual assistant response
+    response_box.markdown(f"<div class='assistant-bubble clearfix'>{entry['content']}</div>", unsafe_allow_html=True)
+    if page and b64:
+        with st.popover("📘 Reference:"):
+            data = base64.b64decode(b64)
+            st.image(Image.open(io.BytesIO(data)), caption=f"Page {page}", use_container_width=True)
+    
+    # Then update session state for history
     st.session_state.messages.append(entry)
     st.session_state.pending_user_input = None
     st.session_state.waiting_for_response = False
+
