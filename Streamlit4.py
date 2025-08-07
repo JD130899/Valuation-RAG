@@ -245,10 +245,14 @@ Conversation so far:
     input_variables=["chat_history", "context", "question"]
 )
 
-if st.session_state.get("pending_user_input"):
-    st.markdown(f"<div class='user-bubble clearfix'>{st.session_state.pending_user_input}</div>", unsafe_allow_html=True)
+# User input first
+user_q = st.chat_input("Message")
+if user_q:
+    st.session_state.messages.append({"role":"user","content":user_q})
+    st.session_state.pending_user_input = user_q
+    st.session_state.waiting_for_response = True
 
-
+# Then render full history
 for msg in st.session_state.messages:
     cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
     st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
@@ -257,9 +261,10 @@ for msg in st.session_state.messages:
             data = base64.b64decode(msg["source_img"])
             st.image(Image.open(io.BytesIO(data)), caption=msg["source"], use_container_width=True)
 
-# — show temporary "Thinking..." message below user input —
+# Then temporary "Thinking..." if response is being generated
 if st.session_state.get("waiting_for_response"):
     st.markdown("<div class='assistant-bubble clearfix'>🧠 <i>Thinking...</i></div>", unsafe_allow_html=True)
+
 
 
 # — user input ——————————————————————————————————————————————
