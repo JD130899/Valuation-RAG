@@ -236,27 +236,27 @@ def render_msg(i, msg):
 for i, msg in enumerate(st.session_state.messages):
     render_msg(i, msg)
 
-
-
-# — Chat Input ————————————————————————————————————————————————
+# — Chat Input and Spinner Handling ———————————————————————
+placeholder = st.empty()  # For "Thinking..." and answer
 user_q = st.chat_input("Message")
-if user_q:
-    st.session_state.messages.append({"role": "user", "content": user_q})
-    st.session_state.pending_response = True
 
-# — Response (flicker-free) ——————————————————————————————————————
-if st.session_state.pending_response and st.session_state.messages[-1]["role"] == "user":
-    q = st.session_state.messages[-1]["content"]
-    placeholder = st.empty()
+
+if user_q:
+    st.session_state.messages.append({"role": "user", "content": user_q})    
     with placeholder.container():
         st.markdown("<div class='assistant-bubble clearfix'>🧠 Thinking…</div>", unsafe_allow_html=True)
 
-    docs = retriever.get_relevant_documents(q)
+    # Proceed to retrieve and generate answer
+    docs = retriever.get_relevant_documents(user_q)
     ctx = "\n\n".join(d.page_content for d in docs)
     history_to_use = st.session_state.messages[-10:]
 
     llm = ChatOpenAI(model="gpt-4o", temperature=0)
-    full_input = {"chat_history": format_chat_history(history_to_use), "context": ctx, "question": q}
+    full_input = {
+        "chat_history": format_chat_history(history_to_use),
+        "context": ctx,
+        "question": user_q
+    }
     ans = llm.invoke(wrapped_prompt.invoke(full_input)).content
       
     #st.session_state.messages.append({"role":"assistant","content":ans})
@@ -319,4 +319,4 @@ if st.session_state.pending_response and st.session_state.messages[-1]["role"] =
         render_msg(len(st.session_state.messages), entry)
 
     st.session_state.messages.append(entry)
-    st.session_state.pending_response = False
+
