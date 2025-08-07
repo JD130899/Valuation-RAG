@@ -250,28 +250,29 @@ if st.session_state.get("pending_user_input"):
 
 
 for msg in st.session_state.messages:
-    cls = "user-bubble" if msg["role"]=="user" else "assistant-bubble"
+    cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
     st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
     if msg.get("source_img"):
         with st.popover("📘 Reference:"):
             data = base64.b64decode(msg["source_img"])
             st.image(Image.open(io.BytesIO(data)), caption=msg["source"], use_container_width=True)
 
+# — show temporary "Thinking..." message below user input —
+if st.session_state.get("waiting_for_response"):
+    st.markdown("<div class='assistant-bubble clearfix'>🧠 <i>Thinking...</i></div>", unsafe_allow_html=True)
+
+
 # — user input ——————————————————————————————————————————————
 user_q = st.chat_input("Message")
 if user_q:
-
+    st.session_state.messages.append({"role":"user","content":user_q})
     st.session_state.pending_user_input = user_q
+    st.session_state.waiting_for_response = True
   
 
 # — answer when last role was user —————————————————————————————————
-if st.session_state.get("pending_user_input"):
+if st.session_state.get("pending_user_input") and st.session_state.get("waiting_for_response"):
     q = st.session_state.pending_user_input
-
-    response_placeholder = st.empty()
-    with response_placeholder.container():
-        cls = "assistant-bubble"
-        st.markdown(f"<div class='{cls} clearfix'>🧠 <i>Thinking...</i></div>", unsafe_allow_html=True)
 
     # Background LLM + Retrieval work
     docs = retriever.get_relevant_documents(q)
@@ -343,15 +344,5 @@ Best Chunk Number:
         entry["source_img"] = b64
 
     st.session_state.messages.append(entry)
-
-    # Replace "Thinking..." with actual answer
-    with response_placeholder.container():
-        cls = "assistant-bubble"
-        st.markdown(f"<div class='{cls} clearfix'>{ans}</div>", unsafe_allow_html=True)
-        if b64:
-            with st.popover("📘 Reference:"):
-                st.image(Image.open(io.BytesIO(base64.b64decode(b64))), caption=f"Page {page}", use_container_width=True)
-    st.session_state.messages.append({"role": "user", "content": q})
-    st.session_state.messages.append(entry)
-    st.session_state.pending_user_input = None  
-
+    st.session_state.pending_user_input = None
+    st.session_state.waiting_for_response = False
