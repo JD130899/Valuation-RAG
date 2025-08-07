@@ -294,7 +294,7 @@ if user_q:
     )
     pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
         ranking_prompt.invoke({
-            "question": q,
+            "question": user_q,
             "chunk1": top3[0].page_content,
             "chunk2": top3[1].page_content,
             "chunk3": top3[2].page_content
