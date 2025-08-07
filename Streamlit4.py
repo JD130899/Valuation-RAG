@@ -245,55 +245,57 @@ Conversation so far:
     input_variables=["chat_history", "context", "question"]
 )
 
+
+# — user input ——————————————————————————————————————————————
+user_q = st.chat_input("Message")
+if user_q:
+    # Add the user's message to history first
+    st.session_state.messages.append({"role": "user", "content": user_q})
+
+# — render chat history (after possibly adding the new user message) —
 for msg in st.session_state.messages:
-    cls = "user-bubble" if msg["role"]=="user" else "assistant-bubble"
+    cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
     st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
     if msg.get("source_img"):
         with st.popover("📘 Reference:"):
             data = base64.b64decode(msg["source_img"])
             st.image(Image.open(io.BytesIO(data)), caption=msg["source"], use_container_width=True)
 
-# — user input ——————————————————————————————————————————————
-user_q = st.chat_input("Message")
-if user_q:
-    st.session_state.messages.append({"role":"user","content":user_q})
-    #st.rerun()
+# — if last message is from user, answer it with a placeholder —
+if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
+    q = st.session_state.messages[-1]["content"]
+
+    # 1) show Thinking… bubble (no st.spinner to avoid double indicator)
     thinking_placeholder = st.empty()
     with thinking_placeholder.container():
         st.markdown("<div class='assistant-bubble clearfix'>🧠 <i>Thinking…</i></div>", unsafe_allow_html=True)
-  
 
-# — answer when last role was user —————————————————————————————————
-if st.session_state.messages and st.session_state.messages[-1]["role"]=="user":
-    q = st.session_state.messages[-1]["content"]
-    with st.spinner("Thinking…"):
-        docs = retriever.get_relevant_documents(q)
-        ctx  = "\n\n".join(d.page_content for d in docs)
-        history_to_use = st.session_state.messages[-10:]
+    # 2) retrieve + LLM
+    docs = retriever.get_relevant_documents(q)
+    ctx  = "\n\n".join(d.page_content for d in docs)
+    history_to_use = st.session_state.messages[-10:]
 
-        llm = ChatOpenAI(model="gpt-4o", temperature=0)
-        full_input = {
-            "chat_history": format_chat_history(history_to_use),
-            "context":      ctx,
-            "question":     q
-        }
-        ans = llm.invoke(wrapped_prompt.invoke(full_input)).content
-      
-        #st.session_state.messages.append({"role":"assistant","content":ans})
-        # — your 3-chunk reranking logic intact ——————————————
-        texts = [d.page_content for d in docs]
-        emb_query = CohereEmbeddings(
-            model="embed-english-v3.0", user_agent="langchain", cohere_api_key=st.secrets["COHERE_API_KEY"]
-        ).embed_query(ans)
-        chunk_embs = CohereEmbeddings(
-            model="embed-english-v3.0", user_agent="langchain", cohere_api_key=st.secrets["COHERE_API_KEY"]
-        ).embed_documents(texts)
-        sims = cosine_similarity([emb_query], chunk_embs)[0]
-        ranked = sorted(list(zip(docs, sims)), key=lambda x: x[1], reverse=True)
-        top3 = [d for d,_ in ranked[:3]]
+    llm = ChatOpenAI(model="gpt-4o", temperature=0)
+    full_input = {
+        "chat_history": format_chat_history(history_to_use),
+        "context":      ctx,
+        "question":     q
+    }
+    ans = llm.invoke(wrapped_prompt.invoke(full_input)).content
 
-        ranking_prompt = PromptTemplate(
-            template="""
+    # — your 3-chunk reranking logic (unchanged) —
+    texts = [d.page_content for d in docs]
+    embedder = CohereEmbeddings(
+        model="embed-english-v3.0", user_agent="langchain", cohere_api_key=st.secrets["COHERE_API_KEY"]
+    )
+    emb_query  = embedder.embed_query(ans)
+    chunk_embs = embedder.embed_documents(texts)
+    sims = cosine_similarity([emb_query], chunk_embs)[0]
+    ranked = sorted(list(zip(docs, sims)), key=lambda x: x[1], reverse=True)
+    top3 = [d for d,_ in ranked[:3]]
+
+    ranking_prompt = PromptTemplate(
+        template="""
 Given a user question and 3 candidate context chunks, return the number (1-3) of the chunk that best answers it.
 
 Question:
@@ -310,35 +312,32 @@ Chunk 3:
 
 Best Chunk Number:
 """,
-            input_variables=["question","chunk1","chunk2","chunk3"]
-        )
-        pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
-            ranking_prompt.invoke({
-                "question": q,
-                "chunk1": top3[0].page_content,
-                "chunk2": top3[1].page_content,
-                "chunk3": top3[2].page_content
-            })
-        ).content.strip()
+        input_variables=["question","chunk1","chunk2","chunk3"]
+    )
+    pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
+        ranking_prompt.invoke({
+            "question": q,
+            "chunk1": top3[0].page_content,
+            "chunk2": top3[1].page_content,
+            "chunk3": top3[2].page_content
+        })
+    ).content.strip()
+    best_doc = top3[int(pick)-1] if pick.isdigit() else top3[0]
 
-        if pick.isdigit():
-            best_doc = top3[int(pick)-1]
-        else:
-            best_doc = top3[0]
+    page = best_doc.metadata.get("page_number")
+    img = page_images.get(page)
+    b64 = pil_to_base64(img) if img else None
 
-        page = best_doc.metadata.get("page_number")
-        img = page_images.get(page)
-        b64 = pil_to_base64(img) if img else None
-
-        entry = {"role":"assistant","content":ans}
+    # 3) swap Thinking… with final answer (no rerun)
+    with thinking_placeholder.container():
+        st.markdown(f"<div class='assistant-bubble clearfix'>{ans}</div>", unsafe_allow_html=True)
         if page and b64:
-            entry["source"]     = f"Page {page}"
-            entry["source_img"] = b64
-        with thinking_placeholder.container():
-            st.markdown(f"<div class='assistant-bubble clearfix'>{ans}</div>", unsafe_allow_html=True)
-            if page and b64:
-                with st.popover("📘 Reference:"):
-                    st.image(Image.open(io.BytesIO(base64.b64decode(b64))), caption=f"Page {page}", use_container_width=True)
-        
-        st.session_state.messages.append(entry)
+            with st.popover("📘 Reference:"):
+                st.image(Image.open(io.BytesIO(base64.b64decode(b64))), caption=f"Page {page}", use_container_width=True)
 
+    # 4) persist assistant message
+    entry = {"role": "assistant", "content": ans}
+    if page and b64:
+        entry["source"] = f"Page {page}"
+        entry["source_img"] = b64
+    st.session_state.messages.append(entry)
