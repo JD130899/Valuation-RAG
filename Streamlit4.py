@@ -257,12 +257,12 @@ for msg in st.session_state.messages:
 user_q = st.chat_input("Message")
 if user_q:
     st.session_state.messages.append({"role":"user","content":user_q})
-    st.rerun()
+    st.session_state.pending_user_input = user_q
   
 
 # — answer when last role was user —————————————————————————————————
-if st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
-    q = st.session_state.messages[-1]["content"]
+if st.session_state.get("pending_user_input"):
+    q = st.session_state.pending_user_input
 
     response_placeholder = st.empty()
     with response_placeholder.container():
@@ -348,4 +348,5 @@ Best Chunk Number:
             with st.popover("📘 Reference:"):
                 st.image(Image.open(io.BytesIO(base64.b64decode(b64))), caption=f"Page {page}", use_container_width=True)
 
+    st.session_state.pending_user_input = None  
 
