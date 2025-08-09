@@ -184,7 +184,10 @@ for msg in st.session_state.messages:
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
         # Optional source image (from RAG best chunk)
-
+        if msg.get("source_img"):
+            with st.popover(msg.get("source", "📘 Reference")):
+                data = base64.b64decode(msg["source_img"]) if isinstance(msg["source_img"], str) else msg["source_img"]
+                st.image(Image.open(io.BytesIO(data)), use_container_width=True)
 
 # ─────────────────────── While waiting: Thinking… then answer ───────────────────────
 if st.session_state.waiting_for_response:
@@ -277,7 +280,10 @@ if st.session_state.waiting_for_response:
         answer = f"❌ Error: {e}"
 
     # Replace the spinner with actual content
-
+    with response_placeholder.container():
+        with st.chat_message("assistant"):
+            st.markdown(answer)
+    
 
     # Append the assistant message back into the same chat history structure
     new_assistant_msg = {"role": "assistant", "content": answer}
