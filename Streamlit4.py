@@ -190,6 +190,9 @@ prompt = PromptTemplate(
     template="""
 You are a financial-data extraction assistant.
 
+If the question is about **"valuation"** in general (e.g., “What is the valuation?”), just specify the amount for Concluded value for that company  
+
+
 Context:
 {context}
 
