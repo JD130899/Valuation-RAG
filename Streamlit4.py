@@ -259,11 +259,7 @@ if st.session_state.waiting_for_response:
                     except Exception:
                         best_doc = top3[0]
 
-                    page = best_doc.metadata.get("page_number") if best_doc else None
-                    img = page_images.get(page) if page else None
-                    b64 = pil_to_base64(img) if img else None
-                    if page and b64:
-                        best_source_entry = {"source": f"Page {page}", "source_img": b64}
+               
     except Exception as rag_e:
         # Fail open: if RAG fails, continue with vanilla chat
         st.sidebar.warning(f"RAG pipeline issue: {rag_e}")
