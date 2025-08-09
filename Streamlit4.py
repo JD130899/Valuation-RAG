@@ -1,6 +1,5 @@
 import os
 import io
-import time
 import pickle
 import base64
 from io import BytesIO
@@ -21,21 +20,20 @@ from langchain.retrievers import ContextualCompressionRetriever
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 
-# If you use these utils in your project:
 from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
 
 
 # ============================== Setup ==============================
 load_dotenv()
-st.set_page_config(page_title="Underwriting Agent", layout="wide")
+st.set_page_config(page_title="Valuation RAG Chatbot", layout="wide")
 
-# Init session state
+# Session state
 if "last_synced_file_id" not in st.session_state:
     st.session_state.last_synced_file_id = None
 if "messages" not in st.session_state:
     st.session_state.messages = [
-        {"role":"assistant","content":"Hi! I am here to answer any questions you may have about your valuation report."},
-        {"role":"assistant","content":"What can I help you with?"}
+        {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
+        {"role": "assistant", "content": "What can I help you with?"}
     ]
 if "pending_input" not in st.session_state:
     st.session_state.pending_input = None
@@ -43,14 +41,13 @@ if "waiting_for_response" not in st.session_state:
     st.session_state.waiting_for_response = False
 
 
-# ====================== Helpers (images, history) ==================
+# ====================== Helpers ======================
 def pil_to_base64(img: Image.Image) -> str:
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 def format_chat_history(messages):
-    """Turn st.session_state.messages into a single history string for the prompt."""
     lines = []
     for m in messages:
         speaker = "User" if m["role"] == "user" else "Assistant"
@@ -58,7 +55,7 @@ def format_chat_history(messages):
     return "\n".join(lines)
 
 
-# ===================== Build index + page images ====================
+# ================== Build index & images (cached) ==================
 @st.cache_resource(show_spinner="📦 Processing & indexing PDF…")
 def build_index_and_images(pdf_bytes: bytes, file_name: str):
     # 1) Save PDF
@@ -67,9 +64,9 @@ def build_index_and_images(pdf_bytes: bytes, file_name: str):
     with open(pdf_path, "wb") as f:
         f.write(pdf_bytes)
 
-    # 2) Extract page images
+    # 2) Page images
     doc = fitz.open(pdf_path)
-    page_images = {i+1: Image.open(io.BytesIO(page.get_pixmap(dpi=300).tobytes("png")))
+    page_images = {i + 1: Image.open(io.BytesIO(page.get_pixmap(dpi=300).tobytes("png")))
                    for i, page in enumerate(doc)}
     doc.close()
 
@@ -123,8 +120,8 @@ def build_index_and_images(pdf_bytes: bytes, file_name: str):
 
 
 # ============================ Prompt ===============================
-base_prompt = PromptTemplate(
-    template = """
+prompt = PromptTemplate(
+    template="""
 You are a financial-data extraction assistant.
 
 **IMPORTANT CONDITIONAL FOLLOW-UP**  
@@ -138,7 +135,7 @@ Otherwise, **do not** ask any follow-up.
 1. **Single value questions**  
    • Find the row + column that match the user's words.  
    • Return the answer in a **short, clear sentence** using the exact number from the context.  
-   • **Do NOT repeat the metric name or company name** unless asked.
+   • **Do NOT repeat the metric name or company name** unless the user asks.
 
 2. **Table questions**  
    • Return the full table **with its header row** in GitHub-flavoured markdown.
@@ -165,7 +162,7 @@ Answer:""",
 )
 
 wrapped_prompt = PromptTemplate(
-    template=base_prompt.template + """
+    template=prompt.template + """
 Conversation so far:
 {chat_history}
 """,
@@ -173,27 +170,29 @@ Conversation so far:
 )
 
 
-# ===================== RAG + rerank main logic =====================
+# ===================== RAG + rerank (returns refs) =====================
 def answer_with_rag_and_rerank(question: str, retriever, page_images):
     """
     Returns: (answer_text, refs)
-      - refs: list of {"label": "Page X", "b64": "..."} (may be empty)
+      refs = list of {"label": "Page X", "b64": "<base64 png>"} (may be empty)
     """
     # 1) Retrieve
     docs = retriever.get_relevant_documents(question)
     ctx = "\n\n".join(d.page_content for d in docs)
 
-    # 2) Build history (last 10)
+    # 2) History (last 10)
     history_to_use = st.session_state.messages[-10:]
     chat_hist = format_chat_history(history_to_use)
 
-    full_input = {"chat_history": chat_hist, "context": ctx, "question": question}
-
     # 3) Initial answer
     llm = ChatOpenAI(model="gpt-4o", temperature=0)
-    ans = llm.invoke(wrapped_prompt.invoke(full_input)).content
+    ans = llm.invoke(wrapped_prompt.invoke({
+        "chat_history": chat_hist,
+        "context": ctx,
+        "question": question
+    })).content
 
-    # 4) Rerank top 3 chunks vs the answer text
+    # 4) Rerank vs answer text, keep top-3 refs
     refs = []
     if docs:
         texts = [d.page_content for d in docs]
@@ -214,7 +213,6 @@ def answer_with_rag_and_rerank(question: str, retriever, page_images):
         except Exception:
             top3 = [docs[0]]
 
-        # Build reference list (labels + images) for dropdown
         for d in top3:
             p = d.metadata.get("page_number")
             img = page_images.get(p)
@@ -224,7 +222,7 @@ def answer_with_rag_and_rerank(question: str, retriever, page_images):
     return ans, refs
 
 
-# ================== Sidebar: Google Drive loader ====================
+# ================== Sidebar: Google Drive loader ==================
 service = get_drive_service()
 pdf_files = get_all_pdfs(service)
 if pdf_files:
@@ -242,14 +240,14 @@ if pdf_files:
                 st.session_state.uploaded_file_name = fname
                 st.session_state.last_synced_file_id = fid
                 st.session_state.messages = [
-                    {"role":"assistant","content":"Hi! I am here to answer any questions you may have about your valuation report."},
-                    {"role":"assistant","content":"What can I help you with?"}
+                    {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
+                    {"role": "assistant", "content": "What can I help you with?"}
                 ]
 else:
     st.sidebar.warning("📭 No PDFs found in Drive.")
 
 
-# ============================ Main UI ===============================
+# ============================ Main UI =============================
 st.title("Underwriting Agent")
 
 # Load file (Drive or uploader)
@@ -272,52 +270,54 @@ if not up:
 # Reset chat if a new PDF is selected
 if st.session_state.get("last_processed_pdf") != up.name:
     st.session_state.messages = [
-        {"role":"assistant","content":"Hi! I am here to answer any questions you may have about your valuation report."},
-        {"role":"assistant","content":"What can I help you with?"}
+        {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
+        {"role": "assistant", "content": "What can I help you with?"}
     ]
     st.session_state["last_processed_pdf"] = up.name
 
-# Build index/images from cache
+# Build (cached)
 pdf_bytes = up.getvalue()
 retriever, page_images = build_index_and_images(pdf_bytes, up.name)
 
 
-# ===================== Render history + dropdown refs ==============
+# ===================== Display history (once) =====================
 for idx, msg in enumerate(st.session_state.messages):
     with st.chat_message(msg["role"]):
         st.markdown(msg["content"])
-
-        # If this message has references, show them inside a dropdown (expander + selectbox)
+        # if previous assistant messages had refs, show dropdown
         if msg.get("refs"):
             with st.expander("📘 Reference (click to open)"):
                 labels = [r["label"] for r in msg["refs"]]
                 choice = st.selectbox("Page", labels, key=f"refsel_hist_{idx}")
                 chosen = next(r for r in msg["refs"] if r["label"] == choice)
-                st.image(BytesIO(base64.b64decode(chosen["b64"])), use_container_width=True, caption=choice)
+                st.image(BytesIO(base64.b64decode(chosen["b64"])),
+                         use_container_width=True, caption=choice)
 
 
-# =============================== Input =============================
-user_input = st.chat_input("Type your question here...")
-if user_input:
-    st.session_state.messages.append({"role": "user", "content": user_input})
-    st.session_state.pending_input = user_input
+# ============================== Input =============================
+user_q = st.chat_input("Message")
+if user_q:
+    st.session_state.messages.append({"role": "user", "content": user_q})
+    st.session_state.pending_input = user_q
     st.session_state.waiting_for_response = True
 
 
-# ============ While waiting: spinner → then answer + dropdown ======
+# ====== While waiting: show spinner, compute, then replace it ======
 if st.session_state.waiting_for_response:
+    # 1) placeholder
     response_placeholder = st.empty()
     with response_placeholder.container():
         with st.chat_message("assistant"):
             st.markdown("🧠 *Thinking...*")
 
+    # 2) compute
     q = st.session_state.pending_input
     try:
         answer, refs = answer_with_rag_and_rerank(q, retriever, page_images)
     except Exception as e:
         answer, refs = f"❌ Error: {e}", []
 
-    # Replace spinner with actual content + dropdown
+    # 3) replace placeholder (no rerun)
     with response_placeholder.container():
         with st.chat_message("assistant"):
             st.markdown(answer)
@@ -329,12 +329,12 @@ if st.session_state.waiting_for_response:
                     st.image(BytesIO(base64.b64decode(chosen["b64"])),
                              use_container_width=True, caption=choice)
 
-    # Persist to history (so it renders on next refresh without the placeholder)
+    # 4) persist to history for next render
     entry = {"role": "assistant", "content": answer}
     if refs:
         entry["refs"] = refs
     st.session_state.messages.append(entry)
 
-    # Reset waiting flags
+    # 5) reset flags
     st.session_state.pending_input = None
     st.session_state.waiting_for_response = False
