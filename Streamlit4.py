@@ -106,6 +106,17 @@ def pil_to_base64(img: Image.Image) -> str:
     img.save(buf, format="PNG")
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
+def ensure_public_view(service, file_id):
+    """Make the Drive file readable by 'Anyone with the link' (no sign-in)."""
+    try:
+        service.permissions().create(
+            fileId=file_id,
+            body={"type": "anyone", "role": "reader"},
+            fields="id",
+        ).execute()
+    except Exception:
+        # If permission already exists or you don't have rights, just ignore
+        pass
 
 # ————————————— Sidebar: Google Drive loader —————————————————————————
 service = get_drive_service()
@@ -116,6 +127,9 @@ if pdf_files:
     chosen = next(f for f in pdf_files if f["name"]==sel)
     if st.sidebar.button("📥 Load Selected PDF"):
         fid, fname = chosen["id"], chosen["name"]
+
+        ensure_public_view(service, fid)
+        
         if fid == st.session_state.last_synced_file_id:
             st.sidebar.info("✅ Already loaded.")
         else:
