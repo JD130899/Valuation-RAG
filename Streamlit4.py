@@ -35,7 +35,6 @@ if "messages" not in st.session_state:
         {"role":"assistant","content":"What can I help you with?"}
     ]
 
-
 # ————————————— CACHING BUILDER —————————————————————————————————
 @st.cache_resource(show_spinner="📦 Processing & indexing PDF…")
 def build_index_and_images(pdf_bytes: bytes, file_name: str):
@@ -125,11 +124,16 @@ if pdf_files:
                 st.session_state.uploaded_file_from_drive = open(path,"rb").read()
                 st.session_state.uploaded_file_name = fname
                 st.session_state.last_synced_file_id = fid
+
+                # 🔗 Set display name (no .pdf) and a Drive view link
+                st.session_state.report_display_name = os.path.splitext(fname)[0]
+                st.session_state.report_link = f"https://drive.google.com/file/d/{fid}/view"
+
+                # reset chat
                 st.session_state.messages = [
                     {"role":"assistant","content":"Hi! I am here to answer any questions you may have about your valuation report."},
                     {"role":"assistant","content":"What can I help you with?"}
                 ]
-              
 else:
     st.sidebar.warning("📭 No PDFs found in Drive.")
 
@@ -137,13 +141,9 @@ else:
 # ————————————— Main UI —————————————————————————————————————————
 st.title("Underwriting Agent")
 
+# Figure out the active file (Drive vs local upload)
 if "uploaded_file_from_drive" in st.session_state:
-    st.markdown(
-        f"<div style='background:#1f2c3a; padding:8px; border-radius:8px; color:#fff;'>"
-        f"✅ <b>Using synced file:</b> {st.session_state.uploaded_file_name}"
-        "</div>",
-        unsafe_allow_html=True
-    )
+    # We have a Drive-loaded file
     up = io.BytesIO(st.session_state.uploaded_file_from_drive)
     up.name = st.session_state.uploaded_file_name
 else:
@@ -152,7 +152,8 @@ else:
 if not up:
     st.warning("Please upload or load a PDF to continue.")
     st.stop()
-#extra    
+
+# Reset greeting if the PDF changed
 if st.session_state.get("last_processed_pdf") != up.name:
     st.session_state.messages = [
         {"role":"assistant","content":"Hi! I am here to answer any questions you may have about your valuation report."},
@@ -160,14 +161,31 @@ if st.session_state.get("last_processed_pdf") != up.name:
     ]
     st.session_state["last_processed_pdf"] = up.name
 
-
-# — build (or fetch from cache) ————————————————————————————————
-# — build (or fetch from cache) ————————————————————————————————
-# Convert to plain `bytes` so st.cache_resource can hash it
+# Convert to bytes for caching
 pdf_bytes = up.getvalue()
+
+# 🔗 For locally uploaded PDFs, create display name + data URL link
+if "uploaded_file_from_drive" not in st.session_state:
+    st.session_state.report_display_name = os.path.splitext(up.name)[0]
+    st.session_state.report_link = "data:application/pdf;base64," + base64.b64encode(pdf_bytes).decode("utf-8")
+
+# — Top banner with hyperlink (no “.pdf”) ————————————————————————
+if "report_link" in st.session_state and "report_display_name" in st.session_state:
+    st.markdown(
+        f"""
+        <div style='background:#1f2c3a; padding:8px; border-radius:8px; color:#fff;'>
+          ✅ <b>Using synced file:</b>
+          <a href="{st.session_state.report_link}" target="_blank"
+             style="color:#fff; text-decoration:underline;">
+             {st.session_state.report_display_name}
+          </a>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+# — build (or fetch from cache) ————————————————————————————————
 retriever, page_images = build_index_and_images(pdf_bytes, up.name)
-
-
 
 # ————————————— Chat bubbles styling —————————————————————————————————
 st.markdown("""
@@ -179,69 +197,57 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 def format_chat_history(messages):
-    """Turn st.session_state.messages into a single history string."""
     lines = []
     for m in messages:
         speaker = "User" if m["role"] == "user" else "Assistant"
         lines.append(f"{speaker}: {m['content']}")
     return "\n".join(lines)
-    
 
 prompt = PromptTemplate(
-        template = """
-       You are a financial-data extraction assistant.
+    template = """
+   You are a financial-data extraction assistant.
     
-       **IMPORTANT CONDITIONAL FOLLOW-UP**  
-        🛎️ After you answer the user’s question (using steps 1–4), **only if** there is still **unused** relevant report content, **ask**:  
-          “Would you like more detail on [X]?”  
-       Otherwise, **do not** ask any follow-up.
+   **IMPORTANT CONDITIONAL FOLLOW-UP**  
+    🛎️ After you answer the user’s question (using steps 1–4), **only if** there is still **unused** relevant report content, **ask**:  
+      “Would you like more detail on [X]?”  
+   Otherwise, **do not** ask any follow-up.
 
-    **Use ONLY what appears under “Context”.**
+**Use ONLY what appears under “Context”.**
 
-    ### Special interpretation rules  
-          • If the question is about **"valuation"** in general (e.g., “What is the valuation?”), answer by giving the Fair Market Value   
-          • If the question is about **risk** (e.g., “How risky is the business?”), use the **risk assessment section**, and include the **risk classification** (e.g., secure, controlled, etc.).
+### Special interpretation rules  
+      • If the question is about **"valuation"** in general (e.g., “What is the valuation?”), answer by giving the Fair Market Value   
+      • If the question is about **risk** (e.g., “How risky is the business?”), use the **risk assessment section**, and include the **risk classification** (e.g., secure, controlled, etc.).
 
-    ### How to answer
-    1. **Single value questions**  
-       • Find the row + column that match the user's words.  
-       • Return the answer in a **short, clear sentence** using the exact number from the context.  
-         Example: “The Income (DCF) approach value is $1,150,000.”  
-       • **Do NOT repeat the metric name or company name** unless the user asks.
+### How to answer
+1. **Single value questions**  
+   • Find the row + column that match the user's words.  
+   • Return the answer in a **short, clear sentence** using the exact number from the context.  
+     Example: “The Income (DCF) approach value is $1,150,000.”  
+   • **Do NOT repeat the metric name or company name** unless the user asks.
+
+2. **Table questions**  
+   • Return the full table **with its header row** in GitHub-flavoured markdown.
     
-    2. **Table questions**  
-       • Return the full table **with its header row** in GitHub-flavoured markdown.
-    
-    3. **Valuation method / theory / reasoning questions**
-        
-       • If the question involves **valuation methods**, **concluded value**, or topics like **Income Approach**, **Market Approach**, or **Valuation Summary**, do the following:
-         - Combine and synthesize relevant information across all chunks.
-         - Pay special attention to how **weights are distributed** (e.g., “50% DCF, 25% EBITDA, 25% SDE”).
-         - Avoid oversimplifying if more detailed breakdowns (like subcomponents of market approach) are available.
-         - If a table gives a simplified view (e.g., "50% Market Approach"), but other parts break it down (e.g., 25% EBITDA + 25% SDE), **prefer the detailed breakdown with percent value**.   
-         - When describing weights, also mention the **corresponding dollar values** used in the context (e.g., “50% DCF = $3,712,000, 25% EBITDA = $4,087,000...”)
-         - **If Market approach is composed of sub-methods like EBITDA and SDE, then explicitly extract and show their individual weights and values, even if not listed together in a single table.**
-        
- 
-    4. **Theory/textual question**  
-       • Try to return an explanation **based on the context**.
+3. **Valuation method / theory / reasoning questions**
+    • Combine and synthesize relevant information across all chunks.
+    • Prefer detailed breakdowns (weights + dollar values) when available.
+
+4. **Theory/textual question**  
+   • Try to return an explanation **based on the context**.
        
-    If you still cannot see the answer, reply **“Hmm, I am not sure. Are you able to rephrase your question?”**
+If you still cannot see the answer, reply **“Hmm, I am not sure. Are you able to rephrase your question?”**
     
-    ---
-    Context:
-    {context}
+---
+Context:
+{context}
     
-    ---
-    Question: {question}
-    Answer:""",
-            input_variables=["context", "question"]
-        )
-
+---
+Question: {question}
+Answer:""",
+    input_variables=["context", "question"]
+)
 
 base_text = prompt.template
-
-# 2️⃣ wrap it with chat history
 wrapped_prompt = PromptTemplate(
     template=base_text + """
 Conversation so far:
@@ -251,6 +257,7 @@ Conversation so far:
     input_variables=["chat_history", "context", "question"]
 )
 
+# — Render chat so far (add link inside popover if present) ————————————
 for msg in st.session_state.messages:
     cls = "user-bubble" if msg["role"]=="user" else "assistant-bubble"
     st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
@@ -258,13 +265,14 @@ for msg in st.session_state.messages:
         with st.popover("📘 Reference:"):
             data = base64.b64decode(msg["source_img"])
             st.image(Image.open(io.BytesIO(data)), caption=msg["source"], use_container_width=True)
+            if msg.get("source_link"):
+                st.markdown(f"[Open this page in new tab]({msg['source_link']})")
 
 # — user input ——————————————————————————————————————————————
 user_q = st.chat_input("Message")
 if user_q:
     st.session_state.messages.append({"role":"user","content":user_q})
     st.rerun()
-  
 
 # — answer when last role was user —————————————————————————————————
 if st.session_state.messages and st.session_state.messages[-1]["role"]=="user":
@@ -282,7 +290,6 @@ if st.session_state.messages and st.session_state.messages[-1]["role"]=="user":
         }
         ans = llm.invoke(wrapped_prompt.invoke(full_input)).content
       
-        #st.session_state.messages.append({"role":"assistant","content":ans})
         # — your 3-chunk reranking logic intact ——————————————
         texts = [d.page_content for d in docs]
         emb_query = CohereEmbeddings(
@@ -337,5 +344,9 @@ Best Chunk Number:
         if page and b64:
             entry["source"]     = f"Page {page}"
             entry["source_img"] = b64
+            # 🔗 Deep link to specific page (works great for Google Drive /view links)
+            if "report_link" in st.session_state:
+                entry["source_link"] = f"{st.session_state.report_link}#page={page}"
+
         st.session_state.messages.append(entry)
         st.rerun()
