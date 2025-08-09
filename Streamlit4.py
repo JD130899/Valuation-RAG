@@ -126,8 +126,11 @@ if pdf_files:
                 st.session_state.last_synced_file_id = fid
 
                 # 🔗 Set display name (no .pdf) and a Drive view link
+                # 🔗 Store display name, pretty viewer link, and direct PDF link
                 st.session_state.report_display_name = os.path.splitext(fname)[0]
-                st.session_state.report_link = f"https://drive.google.com/file/d/{fid}/view"
+                st.session_state.report_link_view = f"https://drive.google.com/file/d/{fid}/view"           # for banner
+                st.session_state.report_link_pdf  = f"https://drive.google.com/uc?export=download&id={fid}" # for deep links
+
 
                 # reset chat
                 st.session_state.messages = [
@@ -170,12 +173,12 @@ if "uploaded_file_from_drive" not in st.session_state:
     st.session_state.report_link = "data:application/pdf;base64," + base64.b64encode(pdf_bytes).decode("utf-8")
 
 # — Top banner with hyperlink (no “.pdf”) ————————————————————————
-if "report_link" in st.session_state and "report_display_name" in st.session_state:
+if "report_link_view" in st.session_state and "report_display_name" in st.session_state:
     st.markdown(
         f"""
         <div style='background:#1f2c3a; padding:8px; border-radius:8px; color:#fff;'>
           ✅ <b>Using synced file:</b>
-          <a href="{st.session_state.report_link}" target="_blank"
+          <a href="{st.session_state.report_link_view}" target="_blank"
              style="color:#fff; text-decoration:underline;">
              {st.session_state.report_display_name}
           </a>
@@ -344,9 +347,11 @@ Best Chunk Number:
         if page and b64:
             entry["source"]     = f"Page {page}"
             entry["source_img"] = b64
-            # 🔗 Deep link to specific page (works great for Google Drive /view links)
-            if "report_link" in st.session_state:
-                entry["source_link"] = f"{st.session_state.report_link}#page={page}"
+            # Use direct PDF link for page jumping
+            base = st.session_state.get("report_link_pdf") or st.session_state.get("report_link")
+            if base:
+                entry["source_link"] = f"{base}#page={page}"
+
 
         st.session_state.messages.append(entry)
         st.rerun()
