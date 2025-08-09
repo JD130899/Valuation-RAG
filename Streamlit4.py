@@ -328,9 +328,9 @@ Best Chunk Number:
         b64 = pil_to_base64(img) if img else None
 
         entry = {"role":"assistant","content":ans}
-        if page and b64:
-            entry["source"]     = f"Page {page}"
-            entry["source_img"] = b64
+        #if page and b64:
+            #entry["source"]     = f"Page {page}"
+            #entry["source_img"] = b64
         st.session_state.messages.append(entry)
         st.rerun()
 ￼
