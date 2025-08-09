@@ -34,7 +34,7 @@ if "messages" not in st.session_state:
         {"role":"assistant","content":"Hi! I am here to answer any questions you may have about your valuation report."},
         {"role":"assistant","content":"What can I help you with?"}
     ]
-# NEW: pending/waiting flags (for no-rerun placeholder flow)
+# Flags for flicker-free flow
 if "pending_input" not in st.session_state:
     st.session_state.pending_input = None
 if "waiting_for_response" not in st.session_state:
@@ -43,13 +43,11 @@ if "waiting_for_response" not in st.session_state:
 # ————————————— CACHING BUILDER —————————————————————————————————
 @st.cache_resource(show_spinner="📦 Processing & indexing PDF…")
 def build_index_and_images(pdf_bytes: bytes, file_name: str):
-    # 1) Save PDF
     os.makedirs("uploaded", exist_ok=True)
     pdf_path = os.path.join("uploaded", file_name)
     with open(pdf_path, "wb") as f:
         f.write(pdf_bytes)
 
-    # 2) Extract page images
     doc = fitz.open(pdf_path)
     page_images = {
         i+1: Image.open(io.BytesIO(page.get_pixmap(dpi=300).tobytes("png")))
@@ -57,7 +55,6 @@ def build_index_and_images(pdf_bytes: bytes, file_name: str):
     }
     doc.close()
 
-    # 3) Parse with LlamaParse
     parser = LlamaParse(api_key=os.environ["LLAMA_CLOUD_API_KEY"], num_workers=4)
     result = parser.parse(pdf_path)
     pages = []
@@ -67,13 +64,11 @@ def build_index_and_images(pdf_bytes: bytes, file_name: str):
         if text:
             pages.append(Document(page_content=text, metadata={"page_number":pg.page}))
 
-    # 4) Chunk
     splitter = RecursiveCharacterTextSplitter(chunk_size=3300, chunk_overlap=0)
     chunks = splitter.split_documents(pages)
     for idx, c in enumerate(chunks):
         c.metadata["chunk_id"] = idx+1
 
-    # 5) Embed & index
     embedder = CohereEmbeddings(
         model="embed-english-v3.0",
         user_agent="langchain",
@@ -81,14 +76,12 @@ def build_index_and_images(pdf_bytes: bytes, file_name: str):
     )
     vs = FAISS.from_documents(chunks, embedder)
 
-    # 6) Persist
     store = os.path.join("vectorstore", file_name)
     os.makedirs(store, exist_ok=True)
     vs.save_local(store, index_name="faiss")
     with open(os.path.join(store, "metadata.pkl"), "wb") as mf:
         pickle.dump([c.metadata for c in chunks], mf)
 
-    # 7) Retriever + reranker
     reranker = CohereRerank(
         model="rerank-english-v3.0",
         user_agent="langchain",
@@ -105,12 +98,10 @@ def build_index_and_images(pdf_bytes: bytes, file_name: str):
 
     return retriever, page_images
 
-
 def pil_to_base64(img: Image.Image) -> str:
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return base64.b64encode(buf.getvalue()).decode("ascii")
-
 
 # ————————————— Sidebar: Google Drive loader —————————————————————————
 service = get_drive_service()
@@ -198,22 +189,18 @@ prompt = PromptTemplate(
     1. **Single value questions**  
        • Find the row + column that match the user's words.  
        • Return the answer in a **short, clear sentence** using the exact number from the context.  
-         Example: “The Income (DCF) approach value is $1,150,000.”  
        • **Do NOT repeat the metric name or company name** unless the user asks.
     
     2. **Table questions**  
        • Return the full table **with its header row** in GitHub-flavoured markdown.
     
     3. **Valuation method / theory / reasoning questions**
-         - Combine and synthesize relevant information across all chunks.
-         - Pay special attention to how **weights are distributed**.
-         - Prefer detailed breakdowns and mention corresponding **dollar values**.
-         - If Market approach has sub-methods (EBITDA/SDE), **show their individual weights and values**.
+       • Combine/synthesize across chunks; show weights and dollar values; break down Market (EBITDA/SDE) if present.
  
     4. **Theory/textual question**  
-       • Try to return an explanation **based on the context**.
-       
-    If you still cannot see the answer, reply **“Hmm, I am not sure. Are you able to rephrase your question?”**
+       • Base explanation on the context.
+
+    If you still cannot see the answer, say: “Hmm, I am not sure. Are you able to rephrase your question?”
     
     ---
     Context:
@@ -235,7 +222,14 @@ Conversation so far:
     input_variables=["chat_history", "context", "question"]
 )
 
-# — render history ONCE (keep your custom bubbles) ——————————————————
+# ——————————————————— INPUT FIRST (so the question shows immediately) ———
+user_q = st.chat_input("Message")
+if user_q:
+    st.session_state.messages.append({"role":"user","content":user_q})
+    st.session_state.pending_input = user_q
+    st.session_state.waiting_for_response = True
+
+# ——————————————————— RENDER HISTORY ONCE ————————————————————————
 for msg in st.session_state.messages:
     cls = "user-bubble" if msg["role"]=="user" else "assistant-bubble"
     st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
@@ -244,23 +238,13 @@ for msg in st.session_state.messages:
             data = base64.b64decode(msg["source_img"])
             st.image(Image.open(io.BytesIO(data)), caption=msg["source"], use_container_width=True)
 
-# — user input (NO rerun) ————————————————————————————————————————
-user_q = st.chat_input("Message")
-if user_q:
-    st.session_state.messages.append({"role":"user","content":user_q})
-    st.session_state.pending_input = user_q
-    st.session_state.waiting_for_response = True
-
-# — compute + show answer IN-PLACE (NO rerun) ——————————————————————
+# ———————————— COMPUTE + SHOW ANSWER IN-PLACE (NO RERUN) ——————————
 if st.session_state.waiting_for_response:
-    # placeholder shows “Thinking…” then gets replaced by the final answer
     response_placeholder = st.empty()
     with response_placeholder.container():
         st.markdown("<div class='assistant-bubble clearfix'>🧠 <i>Thinking…</i></div>", unsafe_allow_html=True)
 
-    # do the work
     q = st.session_state.pending_input
-    # (optional) spinner overlay while computing
     with st.spinner("Thinking…"):
         docs = retriever.get_relevant_documents(q)
         ctx  = "\n\n".join(d.page_content for d in docs)
@@ -274,7 +258,6 @@ if st.session_state.waiting_for_response:
         }
         ans = llm.invoke(wrapped_prompt.invoke(full_input)).content
       
-        # — 3-chunk reranking ——————————————
         texts = [d.page_content for d in docs] if docs else []
         b64 = None
         page = None
@@ -318,16 +301,11 @@ Best Chunk Number:
                 })
             ).content.strip()
 
-            if pick.isdigit():
-                best_doc = top3[int(pick)-1]
-            else:
-                best_doc = top3[0]
-
+            best_doc = top3[int(pick)-1] if pick.isdigit() else top3[0]
             page = best_doc.metadata.get("page_number")
             img = page_images.get(page)
             b64 = pil_to_base64(img) if img else None
 
-    # replace the placeholder with the final content
     with response_placeholder.container():
         st.markdown(f"<div class='assistant-bubble clearfix'>{ans}</div>", unsafe_allow_html=True)
         if page and b64:
@@ -335,13 +313,11 @@ Best Chunk Number:
                 data = base64.b64decode(b64)
                 st.image(Image.open(io.BytesIO(data)), caption=f"Page {page}", use_container_width=True)
 
-    # persist to history so it appears next run naturally
     entry = {"role":"assistant","content":ans}
     if page and b64:
         entry["source"]     = f"Page {page}"
         entry["source_img"] = b64
     st.session_state.messages.append(entry)
 
-    # reset flags
     st.session_state.pending_input = None
     st.session_state.waiting_for_response = False
