@@ -1,4 +1,17 @@
 import os
+import base64
+from io import BytesIO
+
+import streamlit as st
+from dotenv import load_dotenv
+
+# ——— OPTIONAL: your RAG deps ———
+# Assumes you already have these wired up somewhere in your project:
+#   retriever, wrapped_prompt, format_chat_history, page_images, pil_to_base64
+# If not, just import them from your modules, e.g.:
+# from my_rag_setup import retriever, wrapped_prompt, format_chat_history, page_images, pil_to_base64
+
+import os
 import io
 import time
 import pickle
@@ -252,46 +265,111 @@ for msg in st.session_state.messages:
         with st.popover("📘 Reference:"):
             data = base64.b64decode(msg["source_img"])
             st.image(Image.open(io.BytesIO(data)), caption=msg["source"], use_container_width=True)
-
-# — user input ——————————————————————————————————————————————
-user_q = st.chat_input("Message")
-if user_q:
-    st.session_state.messages.append({"role":"user","content":user_q})
-    st.rerun()
   
 
-# — answer when last role was user —————————————————————————————————
-if st.session_state.messages and st.session_state.messages[-1]["role"]=="user":
-    q = st.session_state.messages[-1]["content"]
-    with st.spinner("Thinking…"):
-        docs = retriever.get_relevant_documents(q)
-        ctx  = "\n\n".join(d.page_content for d in docs)
-        history_to_use = st.session_state.messages[-10:]
 
-        llm = ChatOpenAI(model="gpt-4o", temperature=0)
-        full_input = {
-            "chat_history": format_chat_history(history_to_use),
-            "context":      ctx,
-            "question":     q
-        }
-        ans = llm.invoke(wrapped_prompt.invoke(full_input)).content
-      
-        #st.session_state.messages.append({"role":"assistant","content":ans})
-        # — your 3-chunk reranking logic intact ——————————————
+# ──────────────────────────────── Input ─────────────────────────────────
+user_input = st.chat_input("Type your question here...")
+if user_input:
+    st.session_state.messages.append({"role": "user", "content": user_input})
+    st.session_state.pending_input = user_input
+    st.session_state.waiting_for_response = True
+
+# ─────────────────────── Render history (incl. source img) ──────────────
+for msg in st.session_state.messages:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+        # If a source page + image were attached by the RAG step, show them:
+        if isinstance(msg, dict) and msg.get("source") and msg.get("source_img"):
+            try:
+                st.caption(msg["source"])
+                img_bytes = base64.b64decode(msg["source_img"])
+                st.image(BytesIO(img_bytes))
+            except Exception:
+                pass
+
+# ────────────────────── RAG + rerank wrapped as a function ─────────────
+def answer_with_rag_and_rerank(question: str):
+    """
+    Returns (answer_text, source_page, source_b64) — source_* may be None.
+    Uses your:
+      - retriever.get_relevant_documents
+      - wrapped_prompt (if available; otherwise a simple fallback prompt)
+      - CohereEmbeddings to rerank top 3 chunks
+      - page_images + pil_to_base64 to attach the page image
+    """
+    # 1) Retrieve
+    try:
+        docs = retriever.get_relevant_documents(question)
+    except NameError:
+        # If retriever not wired, just answer directly
+        docs = []
+    ctx = "\n\n".join(d.page_content for d in docs)
+
+    # 2) Build history (last 10)
+    history_to_use = st.session_state.messages[-10:]
+    try:
+        chat_hist = format_chat_history(history_to_use)
+    except NameError:
+        # Minimal fallback: join role: content
+        chat_hist = "\n".join(f"{m['role']}: {m['content']}" for m in history_to_use)
+
+    full_input = {
+        "chat_history": chat_hist,
+        "context": ctx,
+        "question": question
+    }
+
+    # 3) Call LLM for the initial answer
+    llm = ChatOpenAI(model="gpt-4o", temperature=0)
+    try:
+        prompt_value = wrapped_prompt.invoke(full_input)  # your nice prompt
+        ans = llm.invoke(prompt_value).content
+    except NameError:
+        # Simple fallback if you don't have wrapped_prompt handy
+        fallback = f"""You are a helpful assistant. Use ONLY the provided Context.
+If the answer isn't in Context, say you don't have enough info.
+
+Context:
+{ctx}
+
+Chat History (most recent last):
+{chat_hist}
+
+Question: {question}
+Answer:"""
+        ans = llm.invoke(fallback).content
+
+    # 4) Rerank top 3 chunks against the answer
+    source_page = None
+    source_b64  = None
+    if docs:
         texts = [d.page_content for d in docs]
-        emb_query = CohereEmbeddings(
-            model="embed-english-v3.0", user_agent="langchain", cohere_api_key=st.secrets["COHERE_API_KEY"]
-        ).embed_query(ans)
-        chunk_embs = CohereEmbeddings(
-            model="embed-english-v3.0", user_agent="langchain", cohere_api_key=st.secrets["COHERE_API_KEY"]
-        ).embed_documents(texts)
-        sims = cosine_similarity([emb_query], chunk_embs)[0]
-        ranked = sorted(list(zip(docs, sims)), key=lambda x: x[1], reverse=True)
-        top3 = [d for d,_ in ranked[:3]]
+        try:
+            emb_query  = CohereEmbeddings(
+                model="embed-english-v3.0",
+                user_agent="langchain",
+                cohere_api_key=st.secrets["COHERE_API_KEY"]
+            ).embed_query(ans)
+            chunk_embs = CohereEmbeddings(
+                model="embed-english-v3.0",
+                user_agent="langchain",
+                cohere_api_key=st.secrets["COHERE_API_KEY"]
+            ).embed_documents(texts)
+            sims   = cosine_similarity([emb_query], chunk_embs)[0]
+            ranked = sorted(list(zip(docs, sims)), key=lambda x: x[1], reverse=True)
+            top3   = [d for d, _ in ranked[:3]]
+        except Exception:
+            # If embeddings/rerank fails, just pick doc[0]
+            top3 = [docs[0]]
 
-        ranking_prompt = PromptTemplate(
-            template="""
-Given a user question and 3 candidate context chunks, return the number (1-3) of the chunk that best answers it.
+        # If we have at least one chunk, optionally ask LLM to pick best of 3
+        best_doc = top3[0]
+        if len(top3) >= 2:
+            # Build a tiny ranking prompt (pads missing chunks with "")
+            def _pc(i): return top3[i].page_content if i < len(top3) else ""
+            rank_prompt = PromptTemplate(
+                template="""Given a user question and 3 candidate context chunks, return the number (1-3) of the chunk that best answers it.
 
 Question:
 {question}
@@ -307,29 +385,63 @@ Chunk 3:
 
 Best Chunk Number:
 """,
-            input_variables=["question","chunk1","chunk2","chunk3"]
-        )
-        pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
-            ranking_prompt.invoke({
-                "question": q,
-                "chunk1": top3[0].page_content,
-                "chunk2": top3[1].page_content,
-                "chunk3": top3[2].page_content
-            })
-        ).content.strip()
+                input_variables=["question", "chunk1", "chunk2", "chunk3"]
+            )
+            try:
+                pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
+                    rank_prompt.invoke({
+                        "question": question,
+                        "chunk1": _pc(0),
+                        "chunk2": _pc(1),
+                        "chunk3": _pc(2),
+                    })
+                ).content.strip()
+                if pick.isdigit():
+                    idx = max(1, min(3, int(pick))) - 1
+                    best_doc = top3[idx]
+            except Exception:
+                pass
 
-        if pick.isdigit():
-            best_doc = top3[int(pick)-1]
-        else:
-            best_doc = top3[0]
+        # 5) Attach page image if available
+        try:
+            page_no = best_doc.metadata.get("page_number")
+            img     = page_images.get(page_no)  # PIL image
+            if page_no and img:
+                source_page = f"Page {page_no}"
+                source_b64  = pil_to_base64(img)
+        except Exception:
+            pass
 
-        page = best_doc.metadata.get("page_number")
-        img = page_images.get(page)
-        b64 = pil_to_base64(img) if img else None
+    return ans, source_page, source_b64
 
-        entry = {"role":"assistant","content":ans}
-        #if page and b64:
-            #entry["source"]     = f"Page {page}"
-            #entry["source_img"] = b64
-        st.session_state.messages.append(entry)
-        st.rerun()
+# ─────────────── While waiting: show spinner, then replace with answer ─────────
+if st.session_state.waiting_for_response:
+    response_placeholder = st.empty()
+    with response_placeholder.container():
+        with st.chat_message("assistant"):
+            st.markdown("🧠 *Thinking...*")
+
+    q = st.session_state.pending_input
+    try:
+        answer, src_page, src_b64 = answer_with_rag_and_rerank(q)
+    except Exception as e:
+        answer, src_page, src_b64 = f"❌ Error: {e}", None, None
+
+    # Replace the spinner with the actual content
+    with response_placeholder.container():
+        with st.chat_message("assistant"):
+            st.markdown(answer)
+            if src_page and src_b64:
+                st.caption(src_page)
+                st.image(BytesIO(base64.b64decode(src_b64)))
+
+    # Persist to history (so it renders on next refresh without the placeholder)
+    entry = {"role": "assistant", "content": answer}
+    if src_page and src_b64:
+        entry["source"] = src_page
+        entry["source_img"] = src_b64
+    st.session_state.messages.append(entry)
+
+    # Reset waiting flags
+    st.session_state.pending_input = None
+    st.session_state.waiting_for_response = False
