@@ -1,13 +1,15 @@
+import streamlit as st
+import openai
 import os
 import io
 import time
 import pickle
 import base64
+from dotenv import load_dotenv
 
-import streamlit as st
+# RAG deps
 import fitz  # PyMuPDF
 from PIL import Image
-from dotenv import load_dotenv
 from sklearn.metrics.pairwise import cosine_similarity
 
 from langchain_core.documents import Document
@@ -17,30 +19,42 @@ from langchain_community.embeddings import CohereEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain.retrievers.document_compressors import CohereRerank
 from langchain.retrievers import ContextualCompressionRetriever
+
+# Optional (for LLM ranking helper, but we keep core send/receive logic the same)
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
-import openai
+
 from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
 
-# Optional (for clearer error messages when Drive perms fail)
-try:
-    from googleapiclient.errors import HttpError
-except Exception:
-    class HttpError(Exception): ...
-# ————————————— Setup —————————————————————————————————————
+# ───────────────────────────── Setup ─────────────────────────────
 load_dotenv()
-st.set_page_config(page_title="Valuation RAG Chatbot", layout="wide")
-openai.api_key = os.environ["OPENAI_API_KEY"]
+openai.api_key = os.getenv("OPENAI_API_KEY")
+COHERE_API_KEY = st.secrets.get("COHERE_API_KEY")
 
-if "last_synced_file_id" not in st.session_state:
-    st.session_state.last_synced_file_id = None
+st.set_page_config(page_title="Chat QA", layout="wide")
+st.title("🧠 Ask Me Anything (Chat Style)")
+
+# ─────────────────────── Init state (chat core) ───────────────────────
 if "messages" not in st.session_state:
     st.session_state.messages = [
-        {"role":"assistant","content":"Hi! I am here to answer any questions you may have about your valuation report."},
-        {"role":"assistant","content":"What can I help you with?"}
+        {"role": "assistant", "content": "Hi! Ask me anything about AI, ML, DL, or GenAI 🤖"}
     ]
+if "pending_input" not in st.session_state:
+    st.session_state.pending_input = None
+if "waiting_for_response" not in st.session_state:
+    st.session_state.waiting_for_response = False
 
-# ————————————— CACHING BUILDER —————————————————————————————————
+# ─────────────────────── Extra state for RAG ───────────────────────
+if "last_synced_file_id" not in st.session_state:
+    st.session_state.last_synced_file_id = None
+if "uploaded_file_from_drive" not in st.session_state:
+    st.session_state.uploaded_file_from_drive = None
+if "uploaded_file_name" not in st.session_state:
+    st.session_state.uploaded_file_name = None
+if "last_processed_pdf" not in st.session_state:
+    st.session_state.last_processed_pdf = None
+
+# ─────────────────────── CACHING BUILDER (RAG) ───────────────────────
 @st.cache_resource(show_spinner="📦 Processing & indexing PDF…")
 def build_index_and_images(pdf_bytes: bytes, file_name: str):
     # 1) Save PDF
@@ -51,10 +65,7 @@ def build_index_and_images(pdf_bytes: bytes, file_name: str):
 
     # 2) Extract page images
     doc = fitz.open(pdf_path)
-    page_images = {
-        i+1: Image.open(io.BytesIO(page.get_pixmap(dpi=300).tobytes("png")))
-        for i, page in enumerate(doc)
-    }
+    page_images = {i + 1: Image.open(io.BytesIO(page.get_pixmap(dpi=300).tobytes("png"))) for i, page in enumerate(doc)}
     doc.close()
 
     # 3) Parse with LlamaParse
@@ -62,22 +73,22 @@ def build_index_and_images(pdf_bytes: bytes, file_name: str):
     result = parser.parse(pdf_path)
     pages = []
     for pg in result.pages:
-        cleaned = [l for l in pg.md.splitlines() if l.strip() and l.lower()!="null"]
+        cleaned = [l for l in pg.md.splitlines() if l.strip() and l.lower() != "null"]
         text = "\n".join(cleaned)
         if text:
-            pages.append(Document(page_content=text, metadata={"page_number":pg.page}))
+            pages.append(Document(page_content=text, metadata={"page_number": pg.page}))
 
     # 4) Chunk
     splitter = RecursiveCharacterTextSplitter(chunk_size=3300, chunk_overlap=0)
     chunks = splitter.split_documents(pages)
     for idx, c in enumerate(chunks):
-        c.metadata["chunk_id"] = idx+1
+        c.metadata["chunk_id"] = idx + 1
 
     # 5) Embed & index
     embedder = CohereEmbeddings(
         model="embed-english-v3.0",
         user_agent="langchain",
-        cohere_api_key=st.secrets["COHERE_API_KEY"]
+        cohere_api_key=COHERE_API_KEY,
     )
     vs = FAISS.from_documents(chunks, embedder)
 
@@ -92,15 +103,12 @@ def build_index_and_images(pdf_bytes: bytes, file_name: str):
     reranker = CohereRerank(
         model="rerank-english-v3.0",
         user_agent="langchain",
-        cohere_api_key=st.secrets["COHERE_API_KEY"],
-        top_n=20
+        cohere_api_key=COHERE_API_KEY,
+        top_n=20,
     )
     retriever = ContextualCompressionRetriever(
-        base_retriever=vs.as_retriever(
-            search_type="mmr",
-            search_kwargs={"k":50,"fetch_k":100,"lambda_mult":0.9}
-        ),
-        base_compressor=reranker
+        base_retriever=vs.as_retriever(search_type="mmr", search_kwargs={"k": 50, "fetch_k": 100, "lambda_mult": 0.9}),
+        base_compressor=reranker,
     )
 
     return retriever, page_images
@@ -111,289 +119,179 @@ def pil_to_base64(img: Image.Image) -> str:
     img.save(buf, format="PNG")
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
-
-# ——————————— Drive sharing helper (critical for page deep-links) ———————————
-def ensure_public_view(service, file_id) -> bool:
-    """
-    Ensure the Drive file is 'Anyone with the link: Reader'.
-    Works on My Drive & Shared Drives. Returns True if public, else False.
-    """
-    try:
-        perms = service.permissions().list(
-            fileId=file_id,
-            fields="permissions(id,type,role,allowFileDiscovery)",
-            supportsAllDrives=True,
-        ).execute().get("permissions", [])
-
-        if any(p.get("type") == "anyone" and p.get("role") == "reader" for p in perms):
-            return True
-
-        service.permissions().create(
-            fileId=file_id,
-            body={"type": "anyone", "role": "reader", "allowFileDiscovery": False},
-            fields="id",
-            supportsAllDrives=True,
-        ).execute()
-        return True
-    except HttpError as e:
-        st.warning(f"Couldn’t set public permission on Drive file. Deep links may 403. Details: {e}")
-        return False
-    except Exception as e:
-        st.warning(f"Drive permission change failed. Deep links may 403. Details: {e}")
-        return False
-
-
-# ————————————— Sidebar: Google Drive loader —————————————————————————
+# ─────────────────────── Sidebar: Google Drive loader ───────────────────────
 service = get_drive_service()
 pdf_files = get_all_pdfs(service)
 if pdf_files:
     names = [f["name"] for f in pdf_files]
-    sel   = st.sidebar.selectbox("📂 Select a PDF from Google Drive", names)
-    chosen = next(f for f in pdf_files if f["name"]==sel)
+    sel = st.sidebar.selectbox("📂 Select a PDF from Google Drive", names)
+    chosen = next(f for f in pdf_files if f["name"] == sel)
     if st.sidebar.button("📥 Load Selected PDF"):
         fid, fname = chosen["id"], chosen["name"]
-
-        is_public = ensure_public_view(service, fid)
-
         if fid == st.session_state.last_synced_file_id:
             st.sidebar.info("✅ Already loaded.")
         else:
             path = download_pdf(service, fid, fname)
             if path:
-                st.session_state.uploaded_file_from_drive = open(path,"rb").read()
+                st.session_state.uploaded_file_from_drive = open(path, "rb").read()
                 st.session_state.uploaded_file_name = fname
                 st.session_state.last_synced_file_id = fid
-
-                # Links (viewer for banner; direct-PDF for deep-linking)
-                st.session_state.report_display_name = os.path.splitext(fname)[0]
-                st.session_state.report_link_view = f"https://drive.google.com/file/d/{fid}/view"
-                st.session_state.report_link_pdf  = (
-                    f"https://drive.usercontent.google.com/download?id={fid}&export=download"
-                    if is_public else None
-                )
-
-                # reset chat
+                # Reset chat for new doc context
                 st.session_state.messages = [
-                    {"role":"assistant","content":"Hi! I am here to answer any questions you may have about your valuation report."},
-                    {"role":"assistant","content":"What can I help you with?"}
+                    {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
+                    {"role": "assistant", "content": "What can I help you with?"},
                 ]
 else:
     st.sidebar.warning("📭 No PDFs found in Drive.")
 
-
-# ————————————— Main UI —————————————————————————————————————————
-st.title("Underwriting Agent")
-
-# Figure out the active file (Drive vs local upload)
-if "uploaded_file_from_drive" in st.session_state:
-    # We have a Drive-loaded file
+# ─────────────────────── Main UI hint for current doc ───────────────────────
+up = None
+if st.session_state.get("uploaded_file_from_drive"):
+    st.markdown(
+        f"<div style='background:#1f2c3a; padding:8px; border-radius:8px; color:#fff;'>✅ <b>Using synced file:</b> {st.session_state.uploaded_file_name}</div>",
+        unsafe_allow_html=True,
+    )
     up = io.BytesIO(st.session_state.uploaded_file_from_drive)
     up.name = st.session_state.uploaded_file_name
 else:
+    st.info("Optionally, upload a valuation PDF to enable RAG (context-augmented answers).")
     up = st.file_uploader("Upload a valuation report PDF", type="pdf")
 
-if not up:
-    st.warning("Please upload or load a PDF to continue.")
-    st.stop()
-
-# Reset greeting if the PDF changed
-if st.session_state.get("last_processed_pdf") != up.name:
+# If a brand-new PDF is selected, reset opening messages to valuation assistant style
+if up is not None and st.session_state.get("last_processed_pdf") != up.name:
     st.session_state.messages = [
-        {"role":"assistant","content":"Hi! I am here to answer any questions you may have about your valuation report."},
-        {"role":"assistant","content":"What can I help you with?"}
+        {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
+        {"role": "assistant", "content": "What can I help you with?"},
     ]
-    st.session_state["last_processed_pdf"] = up.name
+    st.session_state.last_processed_pdf = up.name
 
-# Convert to bytes for caching
-pdf_bytes = up.getvalue()
+# Build retriever (if a PDF is present); otherwise keep RAG disabled
+retriever, page_images = None, {}
+if up is not None:
+    pdf_bytes = up.getvalue()
+    if pdf_bytes:
+        retriever, page_images = build_index_and_images(pdf_bytes, up.name)
 
-# For locally uploaded PDFs, create display name + link (data URL)
-if "uploaded_file_from_drive" not in st.session_state:
-    st.session_state.report_display_name = os.path.splitext(up.name)[0]
-    data_url = "data:application/pdf;base64," + base64.b64encode(pdf_bytes).decode("utf-8")
-    st.session_state.report_link_view = data_url     # for banner
-    st.session_state.report_link_pdf  = None         # no page-deeplink unless you host it
+# ─────────────────────── Chat input (keep same logic) ───────────────────────
+user_input = st.chat_input("Type your question here...")
+if user_input:
+    st.session_state.messages.append({"role": "user", "content": user_input})
+    st.session_state.pending_input = user_input
+    st.session_state.waiting_for_response = True
 
-# — Top banner with hyperlink (no “.pdf”) ————————————————————————
-if "report_link_view" in st.session_state and "report_display_name" in st.session_state:
-    st.markdown(
-        f"""
-        <div style='background:#1f2c3a; padding:8px; border-radius:8px; color:#fff;'>
-          ✅ <b>Using synced file:</b>
-          <a href="{st.session_state.report_link_view}" target="_blank"
-             style="color:#fff; text-decoration:underline;">
-             {st.session_state.report_display_name}
-          </a>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-# — build (or fetch from cache) ————————————————————————————————
-retriever, page_images = build_index_and_images(pdf_bytes, up.name)
-
-# ————————————— Chat bubbles styling —————————————————————————————————
-st.markdown("""
-<style>
-.user-bubble {background:#007bff;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:right;margin:4px;}
-.assistant-bubble {background:#1e1e1e;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:left;margin:4px;}
-.clearfix::after {content:"";display:table;clear:both;}
-</style>
-""", unsafe_allow_html=True)
-
-def format_chat_history(messages):
-    lines = []
-    for m in messages:
-        speaker = "User" if m["role"] == "user" else "Assistant"
-        lines.append(f"{speaker}: {m['content']}")
-    return "\n".join(lines)
-
-prompt = PromptTemplate(
-    template = """
-   You are a financial-data extraction assistant.
-    
-   **IMPORTANT CONDITIONAL FOLLOW-UP**  
-    🛎️ After you answer the user’s question (using steps 1–4), **only if** there is still **unused** relevant report content, **ask**:  
-      “Would you like more detail on [X]?”  
-   Otherwise, **do not** ask any follow-up.
-
-**Use ONLY what appears under “Context”.**
-
-### Special interpretation rules  
-      • If the question is about **"valuation"** in general (e.g., “What is the valuation?”), answer by giving the Fair Market Value   
-      • If the question is about **risk** (e.g., “How risky is the business?”), use the **risk assessment section**, and include the **risk classification** (e.g., secure, controlled, etc.).
-
-### How to answer
-1. **Single value questions**  
-   • Find the row + column that match the user's words.  
-   • Return the answer in a **short, clear sentence** using the exact number from the context.  
-     Example: “The Income (DCF) approach value is $1,150,000.”  
-   • **Do NOT repeat the metric name or company name** unless the user asks.
-
-2. **Table questions**  
-   • Return the full table **with its header row** in GitHub-flavoured markdown.
-    
-3. **Valuation method / theory / reasoning questions**
-    • Combine and synthesize relevant information across all chunks.
-    • Prefer detailed breakdowns (weights + dollar values) when available.
-
-4. **Theory/textual question**  
-   • Try to return an explanation **based on the context**.
-       
-If you still cannot see the answer, reply **“Hmm, I am not sure. Are you able to rephrase your question?”**
-    
----
-Context:
-{context}
-    
----
-Question: {question}
-Answer:""",
-    input_variables=["context", "question"]
-)
-
-base_text = prompt.template
-wrapped_prompt = PromptTemplate(
-    template=base_text + """
-Conversation so far:
-{chat_history}
-
-""", 
-    input_variables=["chat_history", "context", "question"]
-)
-
-# — Render chat so far (add link inside popover if present) ————————————
+# ─────────────────────── Display history (enhanced: show sources if present) ───────────────────────
 for msg in st.session_state.messages:
-    cls = "user-bubble" if msg["role"]=="user" else "assistant-bubble"
-    st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
-    if msg.get("source_img"):
-        with st.popover("📘 Reference:"):
-            data = base64.b64decode(msg["source_img"])
-            st.image(Image.open(io.BytesIO(data)), caption=msg["source"], use_container_width=True)
-            if msg.get("source_link"):
-                st.markdown(f"[Open this page in new tab]({msg['source_link']})")
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+        # Optional source image (from RAG best chunk)
+        if msg.get("source_img"):
+            with st.popover(msg.get("source", "📘 Reference")):
+                data = base64.b64decode(msg["source_img"]) if isinstance(msg["source_img"], str) else msg["source_img"]
+                st.image(Image.open(io.BytesIO(data)), use_container_width=True)
 
-# — user input ——————————————————————————————————————————————
-user_q = st.chat_input("Message")
-if user_q:
-    st.session_state.messages.append({"role":"user","content":user_q})
-    st.rerun()
+# ─────────────────────── While waiting: Thinking… then answer ───────────────────────
+if st.session_state.waiting_for_response:
+    response_placeholder = st.empty()
+    with response_placeholder.container():
+        with st.chat_message("assistant"):
+            st.markdown("🧠 *Thinking...*")
 
-# — answer when last role was user —————————————————————————————————
-if st.session_state.messages and st.session_state.messages[-1]["role"]=="user":
-    q = st.session_state.messages[-1]["content"]
-    with st.spinner("Thinking…"):
-        docs = retriever.get_relevant_documents(q)
-        ctx  = "\n\n".join(d.page_content for d in docs)
-        history_to_use = st.session_state.messages[-10:]
+    # —— Build RAG-aware messages (but keep same send/receive call) ——
+    messages_for_api = list(st.session_state.messages)
 
-        llm = ChatOpenAI(model="gpt-4o", temperature=0)
-        full_input = {
-            "chat_history": format_chat_history(history_to_use),
-            "context":      ctx,
-            "question":     q
-        }
-        ans = llm.invoke(wrapped_prompt.invoke(full_input)).content
-      
-        # — your 3-chunk reranking logic intact ——————————————
-        texts = [d.page_content for d in docs]
-        emb_query = CohereEmbeddings(
-            model="embed-english-v3.0", user_agent="langchain", cohere_api_key=st.secrets["COHERE_API_KEY"]
-        ).embed_query(ans)
-        chunk_embs = CohereEmbeddings(
-            model="embed-english-v3.0", user_agent="langchain", cohere_api_key=st.secrets["COHERE_API_KEY"]
-        ).embed_documents(texts)
-        sims = cosine_similarity([emb_query], chunk_embs)[0]
-        ranked = sorted(list(zip(docs, sims)), key=lambda x: x[1], reverse=True)
-        top3 = [d for d,_ in ranked[:3]]
+    # If we have a retriever and the last turn is a user question, augment with context
+    best_source_entry = {}
+    try:
+        if retriever is not None and st.session_state.messages and st.session_state.messages[-1]["role"] == "user":
+            q = st.session_state.messages[-1]["content"]
+            docs = retriever.get_relevant_documents(q)
+            ctx = "\n\n".join(d.page_content for d in docs)
 
-        ranking_prompt = PromptTemplate(
-            template="""
-Given a user question and 3 candidate context chunks, return the number (1-3) of the chunk that best answers it.
+            # Prepend a system message instructing the model to only use provided context
+            system_rules = (
+                "You are a financial-data extraction assistant.\n\n"
+                "Use ONLY what appears under 'Context'.\n\n"
+                "How to answer:\n"
+                "1) Single value questions: find the exact cell and return a short sentence with the exact number.\n"
+                "2) Table questions: return the full table with header in GitHub-flavored markdown.\n"
+                "3) Valuation method/theory: combine relevant parts, include weights and corresponding dollar values, and break down sub-methods.\n"
+                "4) If the answer isn't in Context, say: 'Hmm, I am not sure. Are you able to rephrase your question?'\n\n"
+                f"Context:\n{ctx}"
+            )
 
-Question:
-{question}
+            messages_for_api = ([{"role": "system", "content": system_rules}] + messages_for_api)
 
-Chunk 1:
-{chunk1}
+            # Lightweight 3-chunk reranking to pick a reference image
+            texts = [d.page_content for d in docs]
+            if texts:
+                emb_query = CohereEmbeddings(
+                    model="embed-english-v3.0", user_agent="langchain", cohere_api_key=COHERE_API_KEY
+                ).embed_query(q)
+                chunk_embs = CohereEmbeddings(
+                    model="embed-english-v3.0", user_agent="langchain", cohere_api_key=COHERE_API_KEY
+                ).embed_documents(texts)
+                sims = cosine_similarity([emb_query], chunk_embs)[0]
+                ranked = sorted(list(zip(docs, sims)), key=lambda x: x[1], reverse=True)
+                top3 = [d for d, _ in ranked[:3]] if ranked else []
 
-Chunk 2:
-{chunk2}
+                # Use LLM to pick best of top3 (keeps UX from earlier app)
+                if len(top3) >= 1:
+                    try:
+                        ranking_prompt = PromptTemplate(
+                            template=(
+                                "Given a user question and 3 candidate context chunks, return the number (1-3) of the chunk that best answers it.\n\n"
+                                "Question:\n{question}\n\nChunk 1:\n{chunk1}\n\nChunk 2:\n{chunk2}\n\nChunk 3:\n{chunk3}\n\nBest Chunk Number:"
+                            ),
+                            input_variables=["question", "chunk1", "chunk2", "chunk3"],
+                        )
+                        llm = ChatOpenAI(model="gpt-4o", temperature=0)
+                        pick = llm.invoke(
+                            ranking_prompt.invoke(
+                                {
+                                    "question": q,
+                                    "chunk1": top3[0].page_content if len(top3) > 0 else "",
+                                    "chunk2": top3[1].page_content if len(top3) > 1 else "",
+                                    "chunk3": top3[2].page_content if len(top3) > 2 else "",
+                                }
+                            )
+                        ).content.strip()
+                        best_doc = top3[int(pick) - 1] if pick.isdigit() and 1 <= int(pick) <= len(top3) else top3[0]
+                    except Exception:
+                        best_doc = top3[0]
 
-Chunk 3:
-{chunk3}
+                    page = best_doc.metadata.get("page_number") if best_doc else None
+                    img = page_images.get(page) if page else None
+                    b64 = pil_to_base64(img) if img else None
+                    if page and b64:
+                        best_source_entry = {"source": f"Page {page}", "source_img": b64}
+    except Exception as rag_e:
+        # Fail open: if RAG fails, continue with vanilla chat
+        st.sidebar.warning(f"RAG pipeline issue: {rag_e}")
 
-Best Chunk Number:
-""",
-            input_variables=["question","chunk1","chunk2","chunk3"]
+    # —— Call the model (unchanged call pattern) ——
+    try:
+        model_name = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
+        response = openai.chat.completions.create(
+            model=model_name,
+            messages=messages_for_api,
         )
-        pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
-            ranking_prompt.invoke({
-                "question": q,
-                "chunk1": top3[0].page_content,
-                "chunk2": top3[1].page_content,
-                "chunk3": top3[2].page_content
-            })
-        ).content.strip()
+        answer = response.choices[0].message.content
+    except Exception as e:
+        answer = f"❌ Error: {e}"
 
-        if pick.isdigit():
-            best_doc = top3[int(pick)-1]
-        else:
-            best_doc = top3[0]
+    # Replace the spinner with actual content
+    with response_placeholder.container():
+        with st.chat_message("assistant"):
+            st.markdown(answer)
+            if best_source_entry.get("source_img"):
+                with st.popover(best_source_entry.get("source", "📘 Reference")):
+                    st.image(Image.open(io.BytesIO(base64.b64decode(best_source_entry["source_img"]))), use_container_width=True)
 
-        page = best_doc.metadata.get("page_number")
-        img = page_images.get(page)
-        b64 = pil_to_base64(img) if img else None
+    # Append the assistant message back into the same chat history structure
+    new_assistant_msg = {"role": "assistant", "content": answer}
+    new_assistant_msg.update(best_source_entry)
+    st.session_state.messages.append(new_assistant_msg)
 
-        entry = {"role":"assistant","content":ans}
-        if page and b64:
-            entry["source"]     = f"Page {page}"
-            entry["source_img"] = b64
-
-            # Deep link only if we have a public direct-PDF URL
-            pdf_base = st.session_state.get("report_link_pdf")
-            if pdf_base:
-                entry["source_link"] = f"{pdf_base}#page={page}"
-
-        st.session_state.messages.append(entry)
-        st.rerun()
+    # Reset pending flags (keep exact UX behavior)
+    st.session_state.pending_input = None
+    st.session_state.waiting_for_response = False
