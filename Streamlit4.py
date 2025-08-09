@@ -22,6 +22,11 @@ from langchain_core.prompts import PromptTemplate
 import openai
 from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
 
+# Optional (for clearer error messages when Drive perms fail)
+try:
+    from googleapiclient.errors import HttpError
+except Exception:
+    class HttpError(Exception): ...
 # ————————————— Setup —————————————————————————————————————
 load_dotenv()
 st.set_page_config(page_title="Valuation RAG Chatbot", layout="wide")
@@ -106,17 +111,37 @@ def pil_to_base64(img: Image.Image) -> str:
     img.save(buf, format="PNG")
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
-def ensure_public_view(service, file_id):
-    """Make the Drive file readable by 'Anyone with the link' (no sign-in)."""
+
+# ——————————— Drive sharing helper (critical for page deep-links) ———————————
+def ensure_public_view(service, file_id) -> bool:
+    """
+    Ensure the Drive file is 'Anyone with the link: Reader'.
+    Works on My Drive & Shared Drives. Returns True if public, else False.
+    """
     try:
+        perms = service.permissions().list(
+            fileId=file_id,
+            fields="permissions(id,type,role,allowFileDiscovery)",
+            supportsAllDrives=True,
+        ).execute().get("permissions", [])
+
+        if any(p.get("type") == "anyone" and p.get("role") == "reader" for p in perms):
+            return True
+
         service.permissions().create(
             fileId=file_id,
-            body={"type": "anyone", "role": "reader"},
+            body={"type": "anyone", "role": "reader", "allowFileDiscovery": False},
             fields="id",
+            supportsAllDrives=True,
         ).execute()
-    except Exception:
-        # If permission already exists or you don't have rights, just ignore
-        pass
+        return True
+    except HttpError as e:
+        st.warning(f"Couldn’t set public permission on Drive file. Deep links may 403. Details: {e}")
+        return False
+    except Exception as e:
+        st.warning(f"Drive permission change failed. Deep links may 403. Details: {e}")
+        return False
+
 
 # ————————————— Sidebar: Google Drive loader —————————————————————————
 service = get_drive_service()
@@ -128,8 +153,8 @@ if pdf_files:
     if st.sidebar.button("📥 Load Selected PDF"):
         fid, fname = chosen["id"], chosen["name"]
 
-        ensure_public_view(service, fid)
-        
+        is_public = ensure_public_view(service, fid)
+
         if fid == st.session_state.last_synced_file_id:
             st.sidebar.info("✅ Already loaded.")
         else:
@@ -139,12 +164,13 @@ if pdf_files:
                 st.session_state.uploaded_file_name = fname
                 st.session_state.last_synced_file_id = fid
 
-                # 🔗 Set display name (no .pdf) and a Drive view link
-                # 🔗 Store display name, pretty viewer link, and direct PDF link
+                # Links (viewer for banner; direct-PDF for deep-linking)
                 st.session_state.report_display_name = os.path.splitext(fname)[0]
-                st.session_state.report_link_view = f"https://drive.google.com/file/d/{fid}/view"           # for banner
-                st.session_state.report_link_pdf  = f"https://drive.google.com/uc?export=download&id={fid}" # for deep links
-
+                st.session_state.report_link_view = f"https://drive.google.com/file/d/{fid}/view"
+                st.session_state.report_link_pdf  = (
+                    f"https://drive.usercontent.google.com/download?id={fid}&export=download"
+                    if is_public else None
+                )
 
                 # reset chat
                 st.session_state.messages = [
@@ -181,10 +207,12 @@ if st.session_state.get("last_processed_pdf") != up.name:
 # Convert to bytes for caching
 pdf_bytes = up.getvalue()
 
-# 🔗 For locally uploaded PDFs, create display name + data URL link
+# For locally uploaded PDFs, create display name + link (data URL)
 if "uploaded_file_from_drive" not in st.session_state:
     st.session_state.report_display_name = os.path.splitext(up.name)[0]
-    st.session_state.report_link = "data:application/pdf;base64," + base64.b64encode(pdf_bytes).decode("utf-8")
+    data_url = "data:application/pdf;base64," + base64.b64encode(pdf_bytes).decode("utf-8")
+    st.session_state.report_link_view = data_url     # for banner
+    st.session_state.report_link_pdf  = None         # no page-deeplink unless you host it
 
 # — Top banner with hyperlink (no “.pdf”) ————————————————————————
 if "report_link_view" in st.session_state and "report_display_name" in st.session_state:
@@ -361,11 +389,11 @@ Best Chunk Number:
         if page and b64:
             entry["source"]     = f"Page {page}"
             entry["source_img"] = b64
-            # Use direct PDF link for page jumping
-            base = st.session_state.get("report_link_pdf") or st.session_state.get("report_link")
-            if base:
-                entry["source_link"] = f"{base}#page={page}"
 
+            # Deep link only if we have a public direct-PDF URL
+            pdf_base = st.session_state.get("report_link_pdf")
+            if pdf_base:
+                entry["source_link"] = f"{pdf_base}#page={page}"
 
         st.session_state.messages.append(entry)
         st.rerun()
