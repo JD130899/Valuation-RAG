@@ -1,21 +1,9 @@
 import os
-import base64
-from io import BytesIO
-
-import streamlit as st
-from dotenv import load_dotenv
-
-# ——— OPTIONAL: your RAG deps ———
-# Assumes you already have these wired up somewhere in your project:
-#   retriever, wrapped_prompt, format_chat_history, page_images, pil_to_base64
-# If not, just import them from your modules, e.g.:
-# from my_rag_setup import retriever, wrapped_prompt, format_chat_history, page_images, pil_to_base64
-
-import os
 import io
 import time
 import pickle
 import base64
+from io import BytesIO
 
 import streamlit as st
 import fitz  # PyMuPDF
@@ -32,14 +20,16 @@ from langchain.retrievers.document_compressors import CohereRerank
 from langchain.retrievers import ContextualCompressionRetriever
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
-import openai
+
+# If you use these utils in your project:
 from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
 
-# ————————————— Setup —————————————————————————————————————
-load_dotenv()
-st.set_page_config(page_title="Valuation RAG Chatbot", layout="wide")
-openai.api_key = os.environ["OPENAI_API_KEY"]
 
+# ============================== Setup ==============================
+load_dotenv()
+st.set_page_config(page_title="Underwriting Agent", layout="wide")
+
+# Init session state
 if "last_synced_file_id" not in st.session_state:
     st.session_state.last_synced_file_id = None
 if "messages" not in st.session_state:
@@ -47,9 +37,28 @@ if "messages" not in st.session_state:
         {"role":"assistant","content":"Hi! I am here to answer any questions you may have about your valuation report."},
         {"role":"assistant","content":"What can I help you with?"}
     ]
+if "pending_input" not in st.session_state:
+    st.session_state.pending_input = None
+if "waiting_for_response" not in st.session_state:
+    st.session_state.waiting_for_response = False
 
 
-# ————————————— CACHING BUILDER —————————————————————————————————
+# ====================== Helpers (images, history) ==================
+def pil_to_base64(img: Image.Image) -> str:
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+def format_chat_history(messages):
+    """Turn st.session_state.messages into a single history string for the prompt."""
+    lines = []
+    for m in messages:
+        speaker = "User" if m["role"] == "user" else "Assistant"
+        lines.append(f"{speaker}: {m['content']}")
+    return "\n".join(lines)
+
+
+# ===================== Build index + page images ====================
 @st.cache_resource(show_spinner="📦 Processing & indexing PDF…")
 def build_index_and_images(pdf_bytes: bytes, file_name: str):
     # 1) Save PDF
@@ -60,10 +69,8 @@ def build_index_and_images(pdf_bytes: bytes, file_name: str):
 
     # 2) Extract page images
     doc = fitz.open(pdf_path)
-    page_images = {
-        i+1: Image.open(io.BytesIO(page.get_pixmap(dpi=300).tobytes("png")))
-        for i, page in enumerate(doc)
-    }
+    page_images = {i+1: Image.open(io.BytesIO(page.get_pixmap(dpi=300).tobytes("png")))
+                   for i, page in enumerate(doc)}
     doc.close()
 
     # 3) Parse with LlamaParse
@@ -71,16 +78,16 @@ def build_index_and_images(pdf_bytes: bytes, file_name: str):
     result = parser.parse(pdf_path)
     pages = []
     for pg in result.pages:
-        cleaned = [l for l in pg.md.splitlines() if l.strip() and l.lower()!="null"]
+        cleaned = [l for l in pg.md.splitlines() if l.strip() and l.lower() != "null"]
         text = "\n".join(cleaned)
         if text:
-            pages.append(Document(page_content=text, metadata={"page_number":pg.page}))
+            pages.append(Document(page_content=text, metadata={"page_number": pg.page}))
 
     # 4) Chunk
     splitter = RecursiveCharacterTextSplitter(chunk_size=3300, chunk_overlap=0)
     chunks = splitter.split_documents(pages)
     for idx, c in enumerate(chunks):
-        c.metadata["chunk_id"] = idx+1
+        c.metadata["chunk_id"] = idx + 1
 
     # 5) Embed & index
     embedder = CohereEmbeddings(
@@ -90,7 +97,7 @@ def build_index_and_images(pdf_bytes: bytes, file_name: str):
     )
     vs = FAISS.from_documents(chunks, embedder)
 
-    # 6) Persist
+    # 6) Persist (optional)
     store = os.path.join("vectorstore", file_name)
     os.makedirs(store, exist_ok=True)
     vs.save_local(store, index_name="faiss")
@@ -107,7 +114,7 @@ def build_index_and_images(pdf_bytes: bytes, file_name: str):
     retriever = ContextualCompressionRetriever(
         base_retriever=vs.as_retriever(
             search_type="mmr",
-            search_kwargs={"k":50,"fetch_k":100,"lambda_mult":0.9}
+            search_kwargs={"k": 50, "fetch_k": 100, "lambda_mult": 0.9}
         ),
         base_compressor=reranker
     )
@@ -115,19 +122,115 @@ def build_index_and_images(pdf_bytes: bytes, file_name: str):
     return retriever, page_images
 
 
-def pil_to_base64(img: Image.Image) -> str:
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    return base64.b64encode(buf.getvalue()).decode("ascii")
+# ============================ Prompt ===============================
+base_prompt = PromptTemplate(
+    template = """
+You are a financial-data extraction assistant.
+
+**IMPORTANT CONDITIONAL FOLLOW-UP**  
+🛎️ After you answer the user’s question (using steps 1–4), **only if** there is still **unused** relevant report content, **ask**:  
+  “Would you like more detail on [X]?”  
+Otherwise, **do not** ask any follow-up.
+
+**Use ONLY what appears under “Context”.**
+
+### How to answer
+1. **Single value questions**  
+   • Find the row + column that match the user's words.  
+   • Return the answer in a **short, clear sentence** using the exact number from the context.  
+   • **Do NOT repeat the metric name or company name** unless asked.
+
+2. **Table questions**  
+   • Return the full table **with its header row** in GitHub-flavoured markdown.
+
+3. **Valuation method / theory / reasoning questions**
+   • Combine and synthesize relevant information across all chunks.  
+   • Pay special attention to how **weights are distributed** (e.g., “50% DCF, 25% EBITDA, 25% SDE”).  
+   • Prefer detailed breakdowns if available and mention corresponding **dollar values**.  
+   • If Market approach has sub-methods (EBITDA/SDE), **explicitly extract their individual weights and values**.
+
+4. **Theory/textual question**  
+   • Try to return an explanation **based on the context**.
+
+If you still cannot see the answer, reply: **“Hmm, I am not sure. Are you able to rephrase your question?”**
+
+---
+Context:
+{context}
+
+---
+Question: {question}
+Answer:""",
+    input_variables=["context", "question"]
+)
+
+wrapped_prompt = PromptTemplate(
+    template=base_prompt.template + """
+Conversation so far:
+{chat_history}
+""",
+    input_variables=["chat_history", "context", "question"]
+)
 
 
-# ————————————— Sidebar: Google Drive loader —————————————————————————
+# ===================== RAG + rerank main logic =====================
+def answer_with_rag_and_rerank(question: str, retriever, page_images):
+    """
+    Returns: (answer_text, refs)
+      - refs: list of {"label": "Page X", "b64": "..."} (may be empty)
+    """
+    # 1) Retrieve
+    docs = retriever.get_relevant_documents(question)
+    ctx = "\n\n".join(d.page_content for d in docs)
+
+    # 2) Build history (last 10)
+    history_to_use = st.session_state.messages[-10:]
+    chat_hist = format_chat_history(history_to_use)
+
+    full_input = {"chat_history": chat_hist, "context": ctx, "question": question}
+
+    # 3) Initial answer
+    llm = ChatOpenAI(model="gpt-4o", temperature=0)
+    ans = llm.invoke(wrapped_prompt.invoke(full_input)).content
+
+    # 4) Rerank top 3 chunks vs the answer text
+    refs = []
+    if docs:
+        texts = [d.page_content for d in docs]
+        try:
+            emb_query = CohereEmbeddings(
+                model="embed-english-v3.0",
+                user_agent="langchain",
+                cohere_api_key=st.secrets["COHERE_API_KEY"]
+            ).embed_query(ans)
+            chunk_embs = CohereEmbeddings(
+                model="embed-english-v3.0",
+                user_agent="langchain",
+                cohere_api_key=st.secrets["COHERE_API_KEY"]
+            ).embed_documents(texts)
+            sims = cosine_similarity([emb_query], chunk_embs)[0]
+            ranked = sorted(list(zip(docs, sims)), key=lambda x: x[1], reverse=True)
+            top3 = [d for d, _ in ranked[:3]]
+        except Exception:
+            top3 = [docs[0]]
+
+        # Build reference list (labels + images) for dropdown
+        for d in top3:
+            p = d.metadata.get("page_number")
+            img = page_images.get(p)
+            if p and img:
+                refs.append({"label": f"Page {p}", "b64": pil_to_base64(img)})
+
+    return ans, refs
+
+
+# ================== Sidebar: Google Drive loader ====================
 service = get_drive_service()
 pdf_files = get_all_pdfs(service)
 if pdf_files:
     names = [f["name"] for f in pdf_files]
-    sel   = st.sidebar.selectbox("📂 Select a PDF from Google Drive", names)
-    chosen = next(f for f in pdf_files if f["name"]==sel)
+    sel = st.sidebar.selectbox("📂 Select a PDF from Google Drive", names)
+    chosen = next(f for f in pdf_files if f["name"] == sel)
     if st.sidebar.button("📥 Load Selected PDF"):
         fid, fname = chosen["id"], chosen["name"]
         if fid == st.session_state.last_synced_file_id:
@@ -135,21 +238,21 @@ if pdf_files:
         else:
             path = download_pdf(service, fid, fname)
             if path:
-                st.session_state.uploaded_file_from_drive = open(path,"rb").read()
+                st.session_state.uploaded_file_from_drive = open(path, "rb").read()
                 st.session_state.uploaded_file_name = fname
                 st.session_state.last_synced_file_id = fid
                 st.session_state.messages = [
                     {"role":"assistant","content":"Hi! I am here to answer any questions you may have about your valuation report."},
                     {"role":"assistant","content":"What can I help you with?"}
                 ]
-              
 else:
     st.sidebar.warning("📭 No PDFs found in Drive.")
 
 
-# ————————————— Main UI —————————————————————————————————————————
+# ============================ Main UI ===============================
 st.title("Underwriting Agent")
 
+# Load file (Drive or uploader)
 if "uploaded_file_from_drive" in st.session_state:
     st.markdown(
         f"<div style='background:#1f2c3a; padding:8px; border-radius:8px; color:#fff;'>"
@@ -165,7 +268,8 @@ else:
 if not up:
     st.warning("Please upload or load a PDF to continue.")
     st.stop()
-#extra    
+
+# Reset chat if a new PDF is selected
 if st.session_state.get("last_processed_pdf") != up.name:
     st.session_state.messages = [
         {"role":"assistant","content":"Hi! I am here to answer any questions you may have about your valuation report."},
@@ -173,248 +277,34 @@ if st.session_state.get("last_processed_pdf") != up.name:
     ]
     st.session_state["last_processed_pdf"] = up.name
 
-
-# — build (or fetch from cache) ————————————————————————————————
-# — build (or fetch from cache) ————————————————————————————————
-# Convert to plain `bytes` so st.cache_resource can hash it
+# Build index/images from cache
 pdf_bytes = up.getvalue()
 retriever, page_images = build_index_and_images(pdf_bytes, up.name)
 
 
+# ===================== Render history + dropdown refs ==============
+for idx, msg in enumerate(st.session_state.messages):
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
 
-# ————————————— Chat bubbles styling —————————————————————————————————
-st.markdown("""
-<style>
-.user-bubble {background:#007bff;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:right;margin:4px;}
-.assistant-bubble {background:#1e1e1e;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:left;margin:4px;}
-.clearfix::after {content:"";display:table;clear:both;}
-</style>
-""", unsafe_allow_html=True)
-
-def format_chat_history(messages):
-    """Turn st.session_state.messages into a single history string."""
-    lines = []
-    for m in messages:
-        speaker = "User" if m["role"] == "user" else "Assistant"
-        lines.append(f"{speaker}: {m['content']}")
-    return "\n".join(lines)
-    
-prompt = PromptTemplate(
-        template = """
-       You are a financial-data extraction assistant.
-    
-       **IMPORTANT CONDITIONAL FOLLOW-UP**  
-        🛎️ After you answer the user’s question (using steps 1–4), **only if** there is still **unused** relevant report content, **ask**:  
-          “Would you like more detail on [X]?”  
-       Otherwise, **do not** ask any follow-up.
-
-    **Use ONLY what appears under “Context”.**
-
-    ### How to answer
-    1. **Single value questions**  
-       • Find the row + column that match the user's words.  
-       • Return the answer in a **short, clear sentence** using the exact number from the context.  
-         Example: “The Income (DCF) approach value is $1,150,000.”  
-       • **Do NOT repeat the metric name or company name** unless the user asks.
-    
-    2. **Table questions**  
-       • Return the full table **with its header row** in GitHub-flavoured markdown.
-    
-    3. **Valuation method / theory / reasoning questions**
-        
-       • If the question involves **valuation methods**, **concluded value**, or topics like **Income Approach**, **Market Approach**, or **Valuation Summary**, do the following:
-         - Combine and synthesize relevant information across all chunks.
-         - Pay special attention to how **weights are distributed** (e.g., “50% DCF, 25% EBITDA, 25% SDE”).
-         - Avoid oversimplifying if more detailed breakdowns (like subcomponents of market approach) are available.
-         - If a table gives a simplified view (e.g., "50% Market Approach"), but other parts break it down (e.g., 25% EBITDA + 25% SDE), **prefer the detailed breakdown with percent value**.   
-         - When describing weights, also mention the **corresponding dollar values** used in the context (e.g., “50% DCF = $3,712,000, 25% EBITDA = $4,087,000...”)
-         - **If Market approach is composed of sub-methods like EBITDA and SDE, then explicitly extract and show their individual weights and values, even if not listed together in a single table.**
-        
- 
-    4. **Theory/textual question**  
-       • Try to return an explanation **based on the context**.
-       
-    If you still cannot see the answer, reply **“Hmm, I am not sure. Are you able to rephrase your question?”**
-    
-    ---
-    Context:
-    {context}
-    
-    ---
-    Question: {question}
-    Answer:""",
-            input_variables=["context", "question"]
-        )
-
-base_text = prompt.template
-
-# 2️⃣ wrap it with chat history
-wrapped_prompt = PromptTemplate(
-    template=base_text + """
-Conversation so far:
-{chat_history}
-
-""", 
-    input_variables=["chat_history", "context", "question"]
-)
-
-for msg in st.session_state.messages:
-    cls = "user-bubble" if msg["role"]=="user" else "assistant-bubble"
-    st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
-    if msg.get("source_img"):
-        with st.popover("📘 Reference:"):
-            data = base64.b64decode(msg["source_img"])
-            st.image(Image.open(io.BytesIO(data)), caption=msg["source"], use_container_width=True)
-  
+        # If this message has references, show them inside a dropdown (expander + selectbox)
+        if msg.get("refs"):
+            with st.expander("📘 Reference (click to open)"):
+                labels = [r["label"] for r in msg["refs"]]
+                choice = st.selectbox("Page", labels, key=f"refsel_hist_{idx}")
+                chosen = next(r for r in msg["refs"] if r["label"] == choice)
+                st.image(BytesIO(base64.b64decode(chosen["b64"])), use_container_width=True, caption=choice)
 
 
-# ──────────────────────────────── Input ─────────────────────────────────
+# =============================== Input =============================
 user_input = st.chat_input("Type your question here...")
 if user_input:
     st.session_state.messages.append({"role": "user", "content": user_input})
     st.session_state.pending_input = user_input
     st.session_state.waiting_for_response = True
 
-# ─────────────────────── Render history (incl. source img) ──────────────
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
-        # If a source page + image were attached by the RAG step, show them:
-        if isinstance(msg, dict) and msg.get("source") and msg.get("source_img"):
-            try:
-                st.caption(msg["source"])
-                img_bytes = base64.b64decode(msg["source_img"])
-                st.image(BytesIO(img_bytes))
-            except Exception:
-                pass
 
-# ────────────────────── RAG + rerank wrapped as a function ─────────────
-def answer_with_rag_and_rerank(question: str):
-    """
-    Returns (answer_text, source_page, source_b64) — source_* may be None.
-    Uses your:
-      - retriever.get_relevant_documents
-      - wrapped_prompt (if available; otherwise a simple fallback prompt)
-      - CohereEmbeddings to rerank top 3 chunks
-      - page_images + pil_to_base64 to attach the page image
-    """
-    # 1) Retrieve
-    try:
-        docs = retriever.get_relevant_documents(question)
-    except NameError:
-        # If retriever not wired, just answer directly
-        docs = []
-    ctx = "\n\n".join(d.page_content for d in docs)
-
-    # 2) Build history (last 10)
-    history_to_use = st.session_state.messages[-10:]
-    try:
-        chat_hist = format_chat_history(history_to_use)
-    except NameError:
-        # Minimal fallback: join role: content
-        chat_hist = "\n".join(f"{m['role']}: {m['content']}" for m in history_to_use)
-
-    full_input = {
-        "chat_history": chat_hist,
-        "context": ctx,
-        "question": question
-    }
-
-    # 3) Call LLM for the initial answer
-    llm = ChatOpenAI(model="gpt-4o", temperature=0)
-    try:
-        prompt_value = wrapped_prompt.invoke(full_input)  # your nice prompt
-        ans = llm.invoke(prompt_value).content
-    except NameError:
-        # Simple fallback if you don't have wrapped_prompt handy
-        fallback = f"""You are a helpful assistant. Use ONLY the provided Context.
-If the answer isn't in Context, say you don't have enough info.
-
-Context:
-{ctx}
-
-Chat History (most recent last):
-{chat_hist}
-
-Question: {question}
-Answer:"""
-        ans = llm.invoke(fallback).content
-
-    # 4) Rerank top 3 chunks against the answer
-    source_page = None
-    source_b64  = None
-    if docs:
-        texts = [d.page_content for d in docs]
-        try:
-            emb_query  = CohereEmbeddings(
-                model="embed-english-v3.0",
-                user_agent="langchain",
-                cohere_api_key=st.secrets["COHERE_API_KEY"]
-            ).embed_query(ans)
-            chunk_embs = CohereEmbeddings(
-                model="embed-english-v3.0",
-                user_agent="langchain",
-                cohere_api_key=st.secrets["COHERE_API_KEY"]
-            ).embed_documents(texts)
-            sims   = cosine_similarity([emb_query], chunk_embs)[0]
-            ranked = sorted(list(zip(docs, sims)), key=lambda x: x[1], reverse=True)
-            top3   = [d for d, _ in ranked[:3]]
-        except Exception:
-            # If embeddings/rerank fails, just pick doc[0]
-            top3 = [docs[0]]
-
-        # If we have at least one chunk, optionally ask LLM to pick best of 3
-        best_doc = top3[0]
-        if len(top3) >= 2:
-            # Build a tiny ranking prompt (pads missing chunks with "")
-            def _pc(i): return top3[i].page_content if i < len(top3) else ""
-            rank_prompt = PromptTemplate(
-                template="""Given a user question and 3 candidate context chunks, return the number (1-3) of the chunk that best answers it.
-
-Question:
-{question}
-
-Chunk 1:
-{chunk1}
-
-Chunk 2:
-{chunk2}
-
-Chunk 3:
-{chunk3}
-
-Best Chunk Number:
-""",
-                input_variables=["question", "chunk1", "chunk2", "chunk3"]
-            )
-            try:
-                pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
-                    rank_prompt.invoke({
-                        "question": question,
-                        "chunk1": _pc(0),
-                        "chunk2": _pc(1),
-                        "chunk3": _pc(2),
-                    })
-                ).content.strip()
-                if pick.isdigit():
-                    idx = max(1, min(3, int(pick))) - 1
-                    best_doc = top3[idx]
-            except Exception:
-                pass
-
-        # 5) Attach page image if available
-        try:
-            page_no = best_doc.metadata.get("page_number")
-            img     = page_images.get(page_no)  # PIL image
-            if page_no and img:
-                source_page = f"Page {page_no}"
-                source_b64  = pil_to_base64(img)
-        except Exception:
-            pass
-
-    return ans, source_page, source_b64
-
-# ─────────────── While waiting: show spinner, then replace with answer ─────────
+# ============ While waiting: spinner → then answer + dropdown ======
 if st.session_state.waiting_for_response:
     response_placeholder = st.empty()
     with response_placeholder.container():
@@ -423,23 +313,26 @@ if st.session_state.waiting_for_response:
 
     q = st.session_state.pending_input
     try:
-        answer, src_page, src_b64 = answer_with_rag_and_rerank(q)
+        answer, refs = answer_with_rag_and_rerank(q, retriever, page_images)
     except Exception as e:
-        answer, src_page, src_b64 = f"❌ Error: {e}", None, None
+        answer, refs = f"❌ Error: {e}", []
 
-    # Replace the spinner with the actual content
+    # Replace spinner with actual content + dropdown
     with response_placeholder.container():
         with st.chat_message("assistant"):
             st.markdown(answer)
-            if src_page and src_b64:
-                st.caption(src_page)
-                st.image(BytesIO(base64.b64decode(src_b64)))
+            if refs:
+                with st.expander("📘 Reference (click to open)"):
+                    labels = [r["label"] for r in refs]
+                    choice = st.selectbox("Page", labels, key="refsel_newmsg")
+                    chosen = next(r for r in refs if r["label"] == choice)
+                    st.image(BytesIO(base64.b64decode(chosen["b64"])),
+                             use_container_width=True, caption=choice)
 
     # Persist to history (so it renders on next refresh without the placeholder)
     entry = {"role": "assistant", "content": answer}
-    if src_page and src_b64:
-        entry["source"] = src_page
-        entry["source_img"] = src_b64
+    if refs:
+        entry["refs"] = refs
     st.session_state.messages.append(entry)
 
     # Reset waiting flags
