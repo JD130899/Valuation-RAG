@@ -259,4 +259,4 @@ Best Chunk Number:
     st.session_state.messages.append(entry)
     st.session_state.pending_input = None
     st.session_state.waiting_for_response = False
-
+    st.rerun()
