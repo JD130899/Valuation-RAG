@@ -55,39 +55,75 @@ def _new_id():
     st.session_state.next_msg_id += 1
     return f"m{n}"
 
-def single_page_pdf_html_url(pdf_bytes: bytes, page_number: int) -> str:
-    # Build a 1-page PDF
+def single_page_pdf_b64(pdf_bytes: bytes, page_number: int) -> str:
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     one = fitz.open()
     one.insert_pdf(doc, from_page=page_number - 1, to_page=page_number - 1)
-    pdf_b64 = base64.b64encode(one.tobytes()).decode("ascii")
+    b64 = base64.b64encode(one.tobytes()).decode("ascii")
     one.close(); doc.close()
+    return b64
+import streamlit.components.v1 as components
 
-    # HTML that decodes base64 -> Blob, then NAVIGATES to the blob URL.
-    # Fallback: if navigation is blocked, it embeds an iframe.
-    html = """<!doctype html><meta charset="utf-8">
+def render_reference_panel(label: str, img_b64: str, pdf_b64: str | None, key: str):
+    btn_html = (f"""
+<div style="text-align:right;margin-top:8px;">
+  <a id="btn-{key}" href="#" style="text-decoration:none;">Open this page ↗</a>
+</div>
+""" if pdf_b64 else "")
+
+    html = f"""
+<div id="root">
+  <details class="ref" id="ref-{key}">
+    <summary>📘 {label}</summary>
+    <div class="panel">
+      <img id="ref-img-{key}" src="data:image/png;base64,{img_b64}" alt="reference" loading="lazy"/>
+      {btn_html}
+    </div>
+  </details>
+</div>
+
+<style>
+.ref summary {{
+  display:inline-flex;align-items:center;gap:8px;cursor:pointer;list-style:none;outline:none;
+  background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:10px;padding:6px 10px;
+}}
+.ref .panel {{
+  background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:0 10px 10px 10px;
+  padding:10px;margin-top:6px;box-shadow:0 6px 20px rgba(0,0,0,.25);
+}}
+.ref .panel img {{width:100%;height:auto;border-radius:8px;display:block;}}
+#root{{ margin: 4px 0 8px 0; }}
+</style>
+
 <script>
-(function(){
-  const b64="__B64__";
-  const raw=atob(b64);
-  const bytes=new Uint8Array(raw.length);
-  for(let i=0;i<raw.length;i++) bytes[i]=raw.charCodeAt(i);
-  const url=URL.createObjectURL(new Blob([bytes], {type:"application/pdf"}));
-  // Navigate so Chrome's PDF viewer renders immediately
-  location.replace(url);
-  // Fallback to iframe if navigation is blocked
-  setTimeout(()=>{
-    if(!document.body.children.length){
-      const ifr=document.createElement('iframe');
-      ifr.src=url;
-      ifr.style="position:fixed;inset:0;border:0;width:100%;height:100%";
-      document.body.appendChild(ifr);
-    }
-  }, 30);
-})();
-</script>"""
-    html = html.replace("__B64__", pdf_b64)
-    return "data:text/html;base64," + base64.b64encode(html.encode("utf-8")).decode("ascii")
+(function(){{
+  var b64 = {json_b64};
+  var btn = document.getElementById("btn-{key}");
+  if (btn && b64){{
+    btn.addEventListener("click", function(ev){{
+      ev.preventDefault();
+      var bin = atob(b64), bytes = new Uint8Array(bin.length);
+      for (var i=0;i<bin.length;i++) bytes[i] = bin.charCodeAt(i);
+      var url = URL.createObjectURL(new Blob([bytes], {{type:"application/pdf"}}));
+      window.open(url, "_blank", "noopener"); // no brown screen, loads immediately
+    }});
+  }}
+
+  // auto-resize the iframe so it doesn't overlap the chat input
+  function resize(){{
+    var h = document.documentElement.scrollHeight + 4;
+    if (window.frameElement) window.frameElement.style.height = h + "px";
+  }}
+  resize();
+  var det = document.getElementById("ref-{key}");
+  if (det) det.addEventListener("toggle", function(){{ setTimeout(resize, 0); }});
+  var img = document.getElementById("ref-img-{key}");
+  if (img) img.addEventListener("load", resize);
+}})();
+</script>
+""".replace("{json_b64}", f'"{pdf_b64}"' if pdf_b64 else "null")
+
+    components.html(html, height=80)
 
 
 
@@ -344,25 +380,14 @@ for msg in st.session_state.messages:
     st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
 
     if msg.get("source_img"):
-        title = msg.get("source")
-        label = f"Reference: {title}" if title else "Reference"
-        link_html = ""
-        if msg.get("source_url"):
-            link_html = f"<div style='margin-top:8px;text-align:right;'><a href='{msg['source_url']}' target='_blank' rel='noopener'>Open this page ↗</a></div>"
-    
-        st.markdown(
-            f"""
-            <details class="ref">
-              <summary>📘 {label}</summary>
-              <div class="panel">
-                <img src="data:image/png;base64,{msg['source_img']}" alt="reference" loading="lazy"/>
-                {link_html}
-              </div>
-            </details>
-            <div class="clearfix"></div>
-            """,
-            unsafe_allow_html=True
+        label = f"Reference: {msg.get('source')}" if msg.get("source") else "Reference"
+        render_reference_panel(
+            label=label,
+            img_b64=msg["source_img"],
+            pdf_b64=msg.get("source_pdf_b64"),
+            key=msg["id"],
         )
+
 
 
 
