@@ -163,19 +163,24 @@ if user_input:
 for msg in st.session_state.messages:
     cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
     st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
+
     if msg.get("source_img"):
-      st.markdown(
-          f"""
-          <div class="ref-card">
-            <details>
-              <summary>📘 {msg.get("source","Reference")}</summary>
-              <img src="data:image/png;base64,{msg['source_img']}" alt="reference"/>
-            </details>
-          </div>
-          <div class="clearfix"></div>
-          """,
-          unsafe_allow_html=True
-      )
+        # always show "Reference: Page X" even if source is stored as "Page X"
+        title = msg.get("source")
+        label = f"Reference: {title}" if title else "Reference"
+        st.markdown(
+            f"""
+            <div class="ref-card">
+              <details>
+                <summary>📘 {label}</summary>
+                <img src="data:image/png;base64,{msg['source_img']}" alt="reference"/>
+              </details>
+            </div>
+            <div class="clearfix"></div>
+            """,
+            unsafe_allow_html=True
+        )
+
 
 # ======== Answer (with ONLY RAG flow) — single-pass render, no rerun ========
 if st.session_state.waiting_for_response:
