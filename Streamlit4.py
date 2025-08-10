@@ -45,22 +45,6 @@ if "retriever" not in st.session_state:
 if "page_images" not in st.session_state:
     st.session_state.page_images = {}
 
-# --- Stable IDs for messages (used to key popovers) ---
-if "next_msg_id" not in st.session_state:
-    st.session_state.next_msg_id = 0
-
-def _new_id():
-    i = st.session_state.next_msg_id
-    st.session_state.next_msg_id += 1
-    return f"m{i}"
-
-# Give IDs to any existing messages (the two greetings, or if you reset later)
-for m in st.session_state.messages:
-    if "id" not in m:
-        m["id"] = _new_id()
-
-
-
 # ================= Builder =================
 @st.cache_resource(show_spinner="📦 Processing & indexing PDF…")
 def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
@@ -248,26 +232,30 @@ wrapped_prompt = PromptTemplate(
 # ================= Input =================
 user_q = st.chat_input("Type your question here…")
 if user_q:
-    st.session_state.messages.append({"id": _new_id(), "role": "user", "content": user_q})
+    st.session_state.messages.append({"role": "user", "content": user_q})
     st.session_state.pending_input = user_q
     st.session_state.waiting_for_response = True
+
 # ================= History (render AFTER input so latest message shows) =================
 for msg in st.session_state.messages:
     cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
     st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
 
     if msg.get("source_img"):
-        with st.popover("📘 Reference:"):   # ← no key
-            data = base64.b64decode(msg["source_img"])
-            label = msg.get("source") or ""
-            if label and not label.lower().startswith("reference"):
-                label = f"Reference: {label}"
-            st.image(Image.open(io.BytesIO(data)),
-                     caption=label or "Reference",
-                     use_container_width=True)
-
-
-
+        title = msg.get("source")
+        label = f"Reference: {title}" if title else "Reference"
+        st.markdown(
+            f"""
+            <details class="ref">
+              <summary>📘 {label}</summary>
+              <div class="panel">
+                <img src="data:image/png;base64,{msg['source_img']}" alt="reference" loading="lazy"/>
+              </div>
+            </details>
+            <div class="clearfix"></div>
+            """,
+            unsafe_allow_html=True
+        )
 
 
 # ================= Answer (single-pass, no rerun) =================
@@ -300,7 +288,7 @@ if st.session_state.waiting_for_response:
         answer = f"❌ Error: {e}"
 
     # Reference selection
-    entry = {"id": _new_id(), "role": "assistant", "content": answer}
+    entry = {"role": "assistant", "content": answer}
     ref_page, ref_img_b64 = None, None
     try:
         if docs:
@@ -350,19 +338,19 @@ if st.session_state.waiting_for_response:
     # Final render (no rerun)
     with block.container():
         st.markdown(f"<div class='assistant-bubble clearfix'>{answer}</div>", unsafe_allow_html=True)
-    
-        if entry.get("source_img"):
-            cap = entry.get("source", f"Page {ref_page}") or ""
-            if cap and not cap.lower().startswith("reference"):
-                cap = f"Reference: {cap}"
-        
-            with st.popover("📘 Reference:"):   # ← no key
-                img_bytes = base64.b64decode(entry["source_img"])
-                st.image(Image.open(io.BytesIO(img_bytes)),
-                         caption=cap or "Reference",
-                         use_container_width=True)
-
-
+        if ref_page and ref_img_b64:
+            st.markdown(
+                f"""
+                <details class="ref">
+                  <summary>📘 Reference: Page {ref_page}</summary>
+                  <div class="panel">
+                    <img src="data:image/png;base64,{ref_img_b64}" alt="reference" loading="lazy"/>
+                  </div>
+                </details>
+                <div class="clearfix"></div>
+                """,
+                unsafe_allow_html=True
+            )
 
     # Persist
     st.session_state.messages.append(entry)
