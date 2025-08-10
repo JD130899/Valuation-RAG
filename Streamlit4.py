@@ -22,6 +22,7 @@ from langchain_core.prompts import PromptTemplate
 
 import openai
 from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
+import streamlit.components.v1 as components
 
 # ================= Setup =================
 load_dotenv()
@@ -207,6 +208,43 @@ st.markdown("""
 .ref .panel img{ width:100%; height:auto; border-radius:8px; display:block; }
 </style>
 """, unsafe_allow_html=True)
+
+# Click-away to close <details class="ref"> (run once)
+if "ref_js_injected" not in st.session_state:
+    components.html("""
+    <script>
+    (function () {
+      // Close any open reference when clicking outside it
+      document.addEventListener('click', function (e) {
+        document.querySelectorAll('details.ref[open]').forEach(function (el) {
+          if (!el.contains(e.target)) el.removeAttribute('open');
+        });
+      });
+
+      // Close all on Esc
+      document.addEventListener('keydown', function (e) {
+        if (e.key === 'Escape') {
+          document.querySelectorAll('details.ref[open]').forEach(function (el) {
+            el.removeAttribute('open');
+          });
+        }
+      });
+
+      // Keep only one open at a time (optional but nice)
+      document.addEventListener('toggle', function (ev) {
+        var t = ev.target;
+        if (t.tagName === 'DETAILS' && t.classList.contains('ref') && t.open) {
+          document.querySelectorAll('details.ref[open]').forEach(function (el) {
+            if (el !== t) el.removeAttribute('open');
+          });
+        }
+      }, true);
+    })();
+    </script>
+    """, height=0)
+    st.session_state.ref_js_injected = True
+
+
 
 # ================= Prompt helpers =================
 def format_chat_history(messages):
