@@ -206,43 +206,39 @@ st.markdown("""
   border-radius:0 10px 10px 10px; padding:10px; margin-top:0; box-shadow:0 6px 20px rgba(0,0,0,.25);
 }
 .ref .panel img{ width:100%; height:auto; border-radius:8px; display:block; }
+/* Click-away close for <details class="ref"> (no JS needed) */
+.ref[open] > summary{
+  position: fixed;         /* make summary cover the whole viewport */
+  inset: 0;
+  background: transparent;
+  z-index: 998;            /* below the panel, above page */
+  color: transparent;      /* hide the label while open */
+  border: none;
+  padding: 0;
+  cursor: default;
+}
+
+/* hide the caret when open (optional) */
+.ref[open] > summary::before { display: none; }
+
+/* float the reference panel above the overlay */
+.ref[open] > .panel{
+  position: fixed;
+  z-index: 999;
+  top: 12vh;               /* center-ish modal placement */
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(900px, 90vw);
+  max-height: 75vh;
+  overflow: auto;
+  box-shadow: 0 20px 60px rgba(0,0,0,.45);
+}
+
+
 </style>
 """, unsafe_allow_html=True)
 
-# Click-away to close <details class="ref"> (run once)
-if "ref_js_injected" not in st.session_state:
-    components.html("""
-    <script>
-    (function () {
-      // Close any open reference when clicking outside it
-      document.addEventListener('click', function (e) {
-        document.querySelectorAll('details.ref[open]').forEach(function (el) {
-          if (!el.contains(e.target)) el.removeAttribute('open');
-        });
-      });
 
-      // Close all on Esc
-      document.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape') {
-          document.querySelectorAll('details.ref[open]').forEach(function (el) {
-            el.removeAttribute('open');
-          });
-        }
-      });
-
-      // Keep only one open at a time (optional but nice)
-      document.addEventListener('toggle', function (ev) {
-        var t = ev.target;
-        if (t.tagName === 'DETAILS' && t.classList.contains('ref') && t.open) {
-          document.querySelectorAll('details.ref[open]').forEach(function (el) {
-            if (el !== t) el.removeAttribute('open');
-          });
-        }
-      }, true);
-    })();
-    </script>
-    """, height=0)
-    st.session_state.ref_js_injected = True
 
 
 
