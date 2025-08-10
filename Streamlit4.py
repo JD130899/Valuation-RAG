@@ -419,7 +419,7 @@ for msg in st.session_state.messages:
             pdf_b64=msg.get("source_pdf_b64"),
             key=msg["id"],
         )
-st.markdown("<div style='height:120px'></div>", unsafe_allow_html=True)        
+       
 
 
 
