@@ -175,14 +175,30 @@ if not up:
     st.stop()
 
 # Rebuild retriever when file changes
+
 if st.session_state.get("last_processed_pdf") != up.name:
     pdf_bytes = up.getvalue()
     st.session_state.retriever, st.session_state.page_images = build_retriever_from_pdf(pdf_bytes, up.name)
+
+    # 🔗 Build a base URL for this PDF (used later as base#page=N)
+    if "uploaded_file_from_drive" in st.session_state:
+        # Drive file — make sure sharing is set to "Anyone with the link – Viewer"
+        fid = st.session_state.last_synced_file_id
+        st.session_state.pdf_link_base = f"https://drive.google.com/file/d/{fid}/preview"
+        # (If page jump doesn't work, try '/view' instead of '/preview')
+    else:
+        # Local upload fallback: data URL so it can still open in a new tab
+        st.session_state.pdf_link_base = (
+            "data:application/pdf;base64," + base64.b64encode(pdf_bytes).decode("ascii")
+        )
+
+    # reset convo for new doc (keep your existing messages)
     st.session_state.messages = [
         {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
         {"role": "assistant", "content": "What can I help you with?"}
     ]
     st.session_state.last_processed_pdf = up.name
+
 
 
 st.markdown("""
@@ -292,18 +308,24 @@ for msg in st.session_state.messages:
     if msg.get("source_img"):
         title = msg.get("source")
         label = f"Reference: {title}" if title else "Reference"
+        link_html = ""
+        if msg.get("source_url"):
+            link_html = f"<div style='margin-top:8px;text-align:right;'><a href='{msg['source_url']}' target='_blank' rel='noopener'>Open this page ↗</a></div>"
+    
         st.markdown(
             f"""
             <details class="ref">
               <summary>📘 {label}</summary>
               <div class="panel">
                 <img src="data:image/png;base64,{msg['source_img']}" alt="reference" loading="lazy"/>
+                {link_html}
               </div>
             </details>
             <div class="clearfix"></div>
             """,
             unsafe_allow_html=True
         )
+
 
 
 # ================= Answer (single-pass, no rerun) =================
@@ -381,6 +403,9 @@ if st.session_state.waiting_for_response:
                         if ref_img_b64:
                             entry["source"] = f"Page {ref_page}"
                             entry["source_img"] = ref_img_b64
+                            base = st.session_state.get("pdf_link_base")
+                            if base and ref_page:
+                                entry["source_url"] = f"{base}#page={ref_page}"
             except Exception as e:
                 st.info(f"ℹ️ Reference selection skipped: {e}")
 
@@ -391,18 +416,24 @@ if st.session_state.waiting_for_response:
     
         if entry.get("source_img"):
             label = entry.get("source", f"Page {ref_page}")
+            link_html = ""
+            if entry.get("source_url"):
+                link_html = f"<div style='margin-top:8px;text-align:right;'><a href='{entry['source_url']}' target='_blank' rel='noopener'>Open this page ↗</a></div>"
+        
             st.markdown(
                 f"""
                 <details class="ref">
                   <summary>📘 Reference: {label}</summary>
                   <div class="panel">
                     <img src="data:image/png;base64,{entry['source_img']}" alt="reference" loading="lazy"/>
+                    {link_html}
                   </div>
                 </details>
                 <div class="clearfix"></div>
                 """,
                 unsafe_allow_html=True
             )
+
 
 
     # Persist
