@@ -48,16 +48,20 @@ st.markdown("""
 st.markdown("""
 <style>
 .ref-card{
-  display:inline-block; max-width:380px; margin:6px 0 12px 8px;
+  display:inline-block; 
+  width:60%;              /* match .assistant-bubble max-width */
+  max-width:820px;        /* safety cap on big screens */
+  margin:6px 0 12px 8px;
 }
 .ref-card details{
   background:#0f172a; color:#e2e8f0; border:1px solid #334155;
-  border-radius:10px; padding:8px 10px; display:inline-block;
+  border-radius:10px; padding:8px 10px; display:inline-block; width:100%;
 }
 .ref-card summary{ cursor:pointer; outline:none; }
 .ref-card img{ width:100%; height:auto; border-radius:8px; margin-top:8px; }
 </style>
 """, unsafe_allow_html=True)
+
 
 
 # ======== Helpers ========
