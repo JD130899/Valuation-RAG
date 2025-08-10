@@ -252,7 +252,7 @@ if st.session_state.waiting_for_response:
                     entry["source_img"] = b64
     except Exception as e:
     # don't break chat if reference selection fails
-    st.info(f"ℹ️ Reference selection skipped: {e}")              
+      st.info(f"ℹ️ Reference selection skipped: {e}")              
 
     # persist to history
     st.session_state.messages.append({"role": "assistant", "content": answer})
