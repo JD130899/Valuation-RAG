@@ -64,6 +64,29 @@ def single_page_pdf_data_url(pdf_bytes: bytes, page_number: int) -> str:
     one.close(); doc.close()
     return "data:application/pdf;base64," + base64.b64encode(data).decode("ascii")
 
+def single_page_pdf_html_url(pdf_bytes: bytes, page_number: int) -> str:
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    one = fitz.open(); one.insert_pdf(doc, from_page=page_number-1, to_page=page_number-1)
+    pdf_b64 = base64.b64encode(one.tobytes()).decode("ascii")
+    one.close(); doc.close()
+
+    html = """<!doctype html><html><head><meta charset="utf-8">
+<meta name="color-scheme" content="light dark">
+<title>Reference page __PAGE__</title>
+<style>html,body,iframe{height:100%;width:100%;margin:0;border:0;background:#0b0b0b}</style>
+</head><body>
+<script>
+const b64="__B64__";
+const bin=atob(b64); const len=bin.length; const bytes=new Uint8Array(len);
+for (let i=0;i<len;i++) bytes[i]=bin.charCodeAt(i);
+const blob=new Blob([bytes], {type:"application/pdf"});
+const url=URL.createObjectURL(blob);
+const iframe=document.createElement('iframe');
+iframe.src=url; document.body.appendChild(iframe);
+</script></body></html>""".replace("__PAGE__", str(page_number)).replace("__B64__", pdf_b64)
+
+    return "data:text/html;base64," + base64.b64encode(html.encode("utf-8")).decode("ascii")
+
 
 # give IDs to any preloaded messages (greetings)
 for m in st.session_state.messages:
@@ -417,7 +440,7 @@ if st.session_state.waiting_for_response:
                             entry["source_img"] = ref_img_b64
                             # 🔗 make a one-page PDF and link to it
                             try:
-                                page_url = single_page_pdf_data_url(st.session_state.pdf_bytes, ref_page)
+                                page_url = single_page_pdf_html_url(st.session_state.pdf_bytes, ref_page)
                                 entry["source_url"] = page_url
                             except Exception as _e:
                                 pass
