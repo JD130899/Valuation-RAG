@@ -244,22 +244,18 @@ for msg in st.session_state.messages:
     if msg.get("source_img"):
         with st.popover("📘 Reference:"):
             data = base64.b64decode(msg["source_img"])
-            # Keep caption consistent as "Reference: Page X"
             label = msg.get("source") or ""
             if label and not label.lower().startswith("reference"):
                 label = f"Reference: {label}"
-            st.image(
-                Image.open(io.BytesIO(data)),
-                caption=label or "Reference",
-                use_container_width=True
-            )
+            st.image(Image.open(io.BytesIO(data)),
+                     caption=label or "Reference",
+                     use_container_width=True)
 
 
-# ================= Answer (single-pass, no rerun) =================
+
 # ================= Answer (single-pass, no rerun) =================
 if st.session_state.waiting_for_response:
     block = st.empty()
-    # 1) show the placeholder
     with block.container():
         st.markdown("<div class='assistant-bubble clearfix'>🧠 <em>Thinking...</em></div>", unsafe_allow_html=True)
 
@@ -286,11 +282,9 @@ if st.session_state.waiting_for_response:
     except Exception as e:
         answer = f"❌ Error: {e}"
 
-    # 2) build the reference entry
+    # Reference selection
     entry = {"role": "assistant", "content": answer}
     ref_page, ref_img_b64 = None, None
-    best_doc = None
-
     try:
         if docs:
             texts = [d.page_content for d in docs]
@@ -308,9 +302,11 @@ if st.session_state.waiting_for_response:
             best_doc = top3[0] if top3 else (ranked[0][0] if ranked else None)
             if len(top3) >= 3:
                 ranking_prompt = PromptTemplate(
-                    template=("Given a user question and 3 candidate context chunks, return the number (1-3) "
-                              "of the chunk that best answers it.\n\n"
-                              "Question:\n{question}\n\nChunk 1:\n{chunk1}\n\nChunk 2:\n{chunk2}\n\nChunk 3:\n{chunk3}\n\nBest Chunk Number:\n"),
+                    template=(
+                        "Given a user question and 3 candidate context chunks, return the number (1-3) "
+                        "of the chunk that best answers it.\n\n"
+                        "Question:\n{question}\n\nChunk 1:\n{chunk1}\n\nChunk 2:\n{chunk2}\n\nChunk 3:\n{chunk3}\n\nBest Chunk Number:\n"
+                    ),
                     input_variables=["question", "chunk1", "chunk2", "chunk3"]
                 )
                 pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
@@ -324,17 +320,17 @@ if st.session_state.waiting_for_response:
                 if pick.isdigit() and 1 <= int(pick) <= 3:
                     best_doc = top3[int(pick) - 1]
 
-        if best_doc is not None:
-            ref_page = best_doc.metadata.get("page_number")
-            img = st.session_state.page_images.get(ref_page)
-            ref_img_b64 = pil_to_base64(img) if img else None
-            if ref_page and ref_img_b64:
-                entry["source"] = f"Page {ref_page}"
-                entry["source_img"] = ref_img_b64
+            if best_doc is not None:
+                ref_page = best_doc.metadata.get("page_number")
+                img = st.session_state.page_images.get(ref_page)
+                ref_img_b64 = pil_to_base64(img) if img else None
+                if ref_page and ref_img_b64:
+                    entry["source"] = f"Page {ref_page}"
+                    entry["source_img"] = ref_img_b64
     except Exception as e:
         st.info(f"ℹ️ Reference selection skipped: {e}")
 
-    # 3) FINAL RENDER in the SAME placeholder (replaces 'Thinking...')
+    # Final render (no rerun)
     with block.container():
     # answer bubble
         st.markdown(
@@ -358,8 +354,7 @@ if st.session_state.waiting_for_response:
                 )
 
 
-    # 4) Persist to history (no st.rerun needed)
+    # Persist
     st.session_state.messages.append(entry)
     st.session_state.pending_input = None
     st.session_state.waiting_for_response = False
-
