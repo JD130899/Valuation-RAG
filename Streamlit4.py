@@ -88,7 +88,8 @@ def render_open_button(pdf_b64: str, key: str):
     components.html(html.replace("{KEY}", key).replace("{B64}", pdf_b64), height=36)
 
 
-def render_reference_panel(label: str, img_b64: str, pdf_b64: str | None, key: str):
+def render_reference_panel(label: str, img_b64: str, pdf_b64: str | None, key: str, height: int = 520):
+    # Button HTML only if we have a one-page PDF
     btn = ("""
 <div style="text-align:right;margin-top:8px;">
   <a id="btn-__KEY__" href="#" style="text-decoration:none;">Open this page ↗</a>
@@ -96,17 +97,18 @@ def render_reference_panel(label: str, img_b64: str, pdf_b64: str | None, key: s
 """.replace("__KEY__", key)) if pdf_b64 else ""
 
     html = """
-<div id="root">
-  <details class="ref" id="ref-__KEY__">
+<div>
+  <details class="ref">
     <summary>📘 __LABEL__</summary>
     <div class="panel">
-      <img id="ref-img-__KEY__" src="data:image/png;base64,__IMG__" alt="reference" loading="lazy"/>
+      <img src="data:image/png;base64,__IMG__" alt="reference" loading="lazy"/>
       __BTN__
     </div>
   </details>
 </div>
 
 <style>
+/* simple styling to match your look */
 .ref summary{
   display:inline-flex;align-items:center;gap:8px;cursor:pointer;list-style:none;outline:none;
   background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:10px;padding:6px 10px;
@@ -116,36 +118,22 @@ def render_reference_panel(label: str, img_b64: str, pdf_b64: str | None, key: s
   padding:10px;margin-top:6px;box-shadow:0 6px 20px rgba(0,0,0,.25);
 }
 .ref .panel img{width:100%;height:auto;border-radius:8px;display:block;}
-/* keep outer margins tiny so no extra gap */
-#root{ margin: 4px 0 8px 0; }
 </style>
 
 <script>
 (function(){
-  var key="__KEY__", b64="__B64__";
-  var btn = document.getElementById("btn-"+key);
-  if (btn && b64){
-    btn.addEventListener("click", function(ev){
-      ev.preventDefault();
-      var bin=atob(b64), bytes=new Uint8Array(bin.length);
-      for (var i=0;i<bin.length;i++) bytes[i]=bin.charCodeAt(i);
-      var url=URL.createObjectURL(new Blob([bytes], {type:"application/pdf"}));
-      window.open(url,"_blank","noopener");
-    });
-  }
-
-  // --- autosize the Streamlit iframe ---
-  function resize(){
-    // add a few px for safety
-    var h = document.documentElement.scrollHeight + 4;
-    if (window.frameElement) window.frameElement.style.height = h + "px";
-  }
-  // initial + when toggled + when image finishes loading
-  resize();
-  var det = document.getElementById("ref-"+key);
-  if (det) det.addEventListener("toggle", function(){ setTimeout(resize, 0); });
-  var img = document.getElementById("ref-img-"+key);
-  if (img) img.addEventListener("load", resize);
+  var b64 = "__B64__";
+  var key = "__KEY__";
+  if (!b64) return;
+  var btn = document.getElementById("btn-" + key);
+  if (!btn) return;
+  btn.addEventListener("click", function(ev){
+    ev.preventDefault();
+    var bin = atob(b64), len = bin.length, bytes = new Uint8Array(len);
+    for (var i=0;i<len;i++) bytes[i] = bin.charCodeAt(i);
+    var url = URL.createObjectURL(new Blob([bytes], {type:"application/pdf"}));
+    window.open(url, "_blank", "noopener");
+  });
 })();
 </script>
 """.replace("__LABEL__", label)\
@@ -154,9 +142,7 @@ def render_reference_panel(label: str, img_b64: str, pdf_b64: str | None, key: s
    .replace("__B64__", pdf_b64 or "")\
    .replace("__KEY__", key)
 
-    # start tiny; JS will expand/collapse as needed
-    components.html(html, height=80)
-
+    components.html(html, height=height)
 
 
 # give IDs to any preloaded messages (greetings)
@@ -418,8 +404,8 @@ for msg in st.session_state.messages:
             img_b64=msg["source_img"],
             pdf_b64=msg.get("source_pdf_b64"),
             key=msg["id"],
+            height=520,  # adjust if you want a taller/shorter panel
         )
-       
 
 
 
@@ -522,6 +508,7 @@ if st.session_state.waiting_for_response:
                 img_b64=entry["source_img"],
                 pdf_b64=entry.get("source_pdf_b64"),
                 key=entry["id"],
+                height=520,
             )
 
 
