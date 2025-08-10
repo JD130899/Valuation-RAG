@@ -88,6 +88,61 @@ def render_open_button(pdf_b64: str, key: str):
     components.html(html.replace("{KEY}", key).replace("{B64}", pdf_b64), height=36)
 
 
+def render_reference_panel(label: str, img_b64: str, pdf_b64: str | None, key: str, height: int = 520):
+    # Button HTML only if we have a one-page PDF
+    btn = ("""
+<div style="text-align:right;margin-top:8px;">
+  <a id="btn-__KEY__" href="#" style="text-decoration:none;">Open this page ↗</a>
+</div>
+""".replace("__KEY__", key)) if pdf_b64 else ""
+
+    html = """
+<div>
+  <details class="ref">
+    <summary>📘 __LABEL__</summary>
+    <div class="panel">
+      <img src="data:image/png;base64,__IMG__" alt="reference" loading="lazy"/>
+      __BTN__
+    </div>
+  </details>
+</div>
+
+<style>
+/* simple styling to match your look */
+.ref summary{
+  display:inline-flex;align-items:center;gap:8px;cursor:pointer;list-style:none;outline:none;
+  background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:10px;padding:6px 10px;
+}
+.ref .panel{
+  background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:0 10px 10px 10px;
+  padding:10px;margin-top:6px;box-shadow:0 6px 20px rgba(0,0,0,.25);
+}
+.ref .panel img{width:100%;height:auto;border-radius:8px;display:block;}
+</style>
+
+<script>
+(function(){
+  var b64 = "__B64__";
+  var key = "__KEY__";
+  if (!b64) return;
+  var btn = document.getElementById("btn-" + key);
+  if (!btn) return;
+  btn.addEventListener("click", function(ev){
+    ev.preventDefault();
+    var bin = atob(b64), len = bin.length, bytes = new Uint8Array(len);
+    for (var i=0;i<len;i++) bytes[i] = bin.charCodeAt(i);
+    var url = URL.createObjectURL(new Blob([bytes], {type:"application/pdf"}));
+    window.open(url, "_blank", "noopener");
+  });
+})();
+</script>
+""".replace("__LABEL__", label)\
+   .replace("__IMG__", img_b64)\
+   .replace("__BTN__", btn)\
+   .replace("__B64__", pdf_b64 or "")\
+   .replace("__KEY__", key)
+
+    components.html(html, height=height)
 
 
 # give IDs to any preloaded messages (greetings)
@@ -343,26 +398,15 @@ for msg in st.session_state.messages:
     st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
 
     if msg.get("source_img"):
-        title = msg.get("source")
-        label = f"Reference: {title}" if title else "Reference"
-    
-        # 1) render the image panel (no <a> link here)
-        st.markdown(
-            f"""
-            <details class="ref">
-              <summary>📘 {label}</summary>
-              <div class="panel">
-                <img src="data:image/png;base64,{msg['source_img']}" alt="reference" loading="lazy"/>
-              </div>
-            </details>
-            <div class="clearfix"></div>
-            """,
-            unsafe_allow_html=True
+        label = f"Reference: {msg.get('source')}" if msg.get("source") else "Reference"
+        render_reference_panel(
+            label=label,
+            img_b64=msg["source_img"],
+            pdf_b64=msg.get("source_pdf_b64"),
+            key=msg["id"],
+            height=520,  # adjust if you want a taller/shorter panel
         )
-    
-        # 2) render the JS button that opens a Blob tab (👇 helper below)
-        if msg.get("source_pdf_b64"):
-            render_open_button(msg["source_pdf_b64"], key=msg["id"])
+
 
 
 
@@ -459,26 +503,14 @@ if st.session_state.waiting_for_response:
     
         if entry.get("source_img"):
             label = entry.get("source", f"Page {ref_page}")
-            link_html = ""
-            if entry.get("source_url"):
-                link_html = f"<div style='margin-top:8px;text-align:right;'><a href='{entry['source_url']}' target='_blank' rel='noopener'>Open this page ↗</a></div>"
-        
-            st.markdown(
-                f"""
-                <details class="ref">
-                  <summary>📘 Reference: {label}</summary>
-                  <div class="panel">
-                    <img src="data:image/png;base64,{entry['source_img']}" alt="reference" loading="lazy"/>
-                    {link_html}
-                  </div>
-                </details>
-                <div class="clearfix"></div>
-                """,
-                unsafe_allow_html=True
+            render_reference_panel(
+                label=label,
+                img_b64=entry["source_img"],
+                pdf_b64=entry.get("source_pdf_b64"),
+                key=entry["id"],
+                height=520,
             )
 
-            if entry.get("source_pdf_b64"):
-                render_open_button(entry["source_pdf_b64"], key=entry["id"])
 
 
 
