@@ -47,18 +47,23 @@ st.markdown("""
 
 st.markdown("""
 <style>
-.ref-card{
-  display:inline-block; 
-  width:60%;              /* match .assistant-bubble max-width */
-  max-width:820px;        /* safety cap on big screens */
-  margin:6px 0 12px 8px;
+/* container is wide, but the summary chip stays small */
+.ref-card{ display:block; width:60%; max-width:900px; margin:6px 0 12px 8px; }
+
+/* small chip */
+.ref-card summary{ display:inline-block; cursor:pointer; outline:none; list-style:none; }
+.ref-tag{
+  display:inline-block; background:#0f172a; color:#e2e8f0;
+  border:1px solid #334155; border-radius:10px; padding:6px 10px;
 }
-.ref-card details{
-  background:#0f172a; color:#e2e8f0; border:1px solid #334155;
-  border-radius:10px; padding:8px 10px; display:inline-block; width:100%;
+
+/* opened panel becomes a wide card under the chip */
+.ref-card[open] .ref-tag{ border-bottom-left-radius:0; border-bottom-right-radius:0; }
+.ref-content{
+  background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-top:none;
+  border-radius:0 10px 10px 10px; padding:8px 10px; margin-top:0;
 }
-.ref-card summary{ cursor:pointer; outline:none; }
-.ref-card img{ width:100%; height:auto; border-radius:8px; margin-top:8px; }
+.ref-content img{ width:100%; height:auto; border-radius:8px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -169,21 +174,20 @@ for msg in st.session_state.messages:
     st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
 
     if msg.get("source_img"):
-        # always show "Reference: Page X" even if source is stored as "Page X"
-        title = msg.get("source")
-        label = f"Reference: {title}" if title else "Reference"
-        st.markdown(
-            f"""
-            <div class="ref-card">
-              <details>
-                <summary>📘 {label}</summary>
-                <img src="data:image/png;base64,{msg['source_img']}" alt="reference"/>
-              </details>
+      title = msg.get("source")
+      label = f"Reference: {title}" if title else "Reference"
+      st.markdown(
+          f"""
+          <details class="ref-card">
+            <summary><span class="ref-tag">📘 {label}</span></summary>
+            <div class="ref-content">
+              <img src="data:image/png;base64,{msg['source_img']}" alt="reference"/>
             </div>
-            <div class="clearfix"></div>
-            """,
-            unsafe_allow_html=True
-        )
+          </details>
+          <div class="clearfix"></div>
+          """,
+          unsafe_allow_html=True
+      )
 
 
 # ======== Answer (with ONLY RAG flow) — single-pass render, no rerun ========
@@ -284,16 +288,17 @@ Best Chunk Number:
         if ref_page and ref_img_b64:
           st.markdown(
               f"""
-              <div class="ref-card">
-                <details>
-                  <summary>📘 Reference: Page {ref_page}</summary>
+              <details class="ref-card">
+                <summary><span class="ref-tag">📘 Reference: Page {ref_page}</span></summary>
+                <div class="ref-content">
                   <img src="data:image/png;base64,{ref_img_b64}" alt="reference"/>
-                </details>
-              </div>
+                </div>
+              </details>
               <div class="clearfix"></div>
               """,
               unsafe_allow_html=True
           )
+
 
 
     # Persist to history
