@@ -55,94 +55,40 @@ def _new_id():
     st.session_state.next_msg_id += 1
     return f"m{n}"
 
-def single_page_pdf_b64(pdf_bytes: bytes, page_number: int) -> str:
+def single_page_pdf_html_url(pdf_bytes: bytes, page_number: int) -> str:
+    # Build a 1-page PDF
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     one = fitz.open()
     one.insert_pdf(doc, from_page=page_number - 1, to_page=page_number - 1)
-    b64 = base64.b64encode(one.tobytes()).decode("ascii")
+    pdf_b64 = base64.b64encode(one.tobytes()).decode("ascii")
     one.close(); doc.close()
-    return b64
-    
-def render_open_button(pdf_b64: str, key: str):
-    html = """
-<div style="text-align:right;margin-top:8px;">
-  <a id="btn-{KEY}" href="#" style="text-decoration:none;">Open this page ↗</a>
-</div>
+
+    # HTML that decodes base64 -> Blob, then NAVIGATES to the blob URL.
+    # Fallback: if navigation is blocked, it embeds an iframe.
+    html = """<!doctype html><meta charset="utf-8">
 <script>
 (function(){
-  const b64 = "{B64}";
-  const btn = document.getElementById("btn-{KEY}");
-  btn.addEventListener("click", function(ev){
-    ev.preventDefault();
-    const bin = atob(b64);
-    const len = bin.length;
-    const bytes = new Uint8Array(len);
-    for (let i=0;i<len;i++) bytes[i] = bin.charCodeAt(i);
-    const blob = new Blob([bytes], {type:"application/pdf"});
-    const url = URL.createObjectURL(blob);
-    window.open(url, "_blank", "noopener");   // opens immediately, no brown screen
-  });
+  const b64="__B64__";
+  const raw=atob(b64);
+  const bytes=new Uint8Array(raw.length);
+  for(let i=0;i<raw.length;i++) bytes[i]=raw.charCodeAt(i);
+  const url=URL.createObjectURL(new Blob([bytes], {type:"application/pdf"}));
+  // Navigate so Chrome's PDF viewer renders immediately
+  location.replace(url);
+  // Fallback to iframe if navigation is blocked
+  setTimeout(()=>{
+    if(!document.body.children.length){
+      const ifr=document.createElement('iframe');
+      ifr.src=url;
+      ifr.style="position:fixed;inset:0;border:0;width:100%;height:100%";
+      document.body.appendChild(ifr);
+    }
+  }, 30);
 })();
-</script>
-"""
-    components.html(html.replace("{KEY}", key).replace("{B64}", pdf_b64), height=36)
+</script>"""
+    html = html.replace("__B64__", pdf_b64)
+    return "data:text/html;base64," + base64.b64encode(html.encode("utf-8")).decode("ascii")
 
-
-def render_reference_panel(label: str, img_b64: str, pdf_b64: str | None, key: str, height: int = 520):
-    # Button HTML only if we have a one-page PDF
-    btn = ("""
-<div style="text-align:right;margin-top:8px;">
-  <a id="btn-__KEY__" href="#" style="text-decoration:none;">Open this page ↗</a>
-</div>
-""".replace("__KEY__", key)) if pdf_b64 else ""
-
-    html = """
-<div>
-  <details class="ref">
-    <summary>📘 __LABEL__</summary>
-    <div class="panel">
-      <img src="data:image/png;base64,__IMG__" alt="reference" loading="lazy"/>
-      __BTN__
-    </div>
-  </details>
-</div>
-
-<style>
-/* simple styling to match your look */
-.ref summary{
-  display:inline-flex;align-items:center;gap:8px;cursor:pointer;list-style:none;outline:none;
-  background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:10px;padding:6px 10px;
-}
-.ref .panel{
-  background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:0 10px 10px 10px;
-  padding:10px;margin-top:6px;box-shadow:0 6px 20px rgba(0,0,0,.25);
-}
-.ref .panel img{width:100%;height:auto;border-radius:8px;display:block;}
-</style>
-
-<script>
-(function(){
-  var b64 = "__B64__";
-  var key = "__KEY__";
-  if (!b64) return;
-  var btn = document.getElementById("btn-" + key);
-  if (!btn) return;
-  btn.addEventListener("click", function(ev){
-    ev.preventDefault();
-    var bin = atob(b64), len = bin.length, bytes = new Uint8Array(len);
-    for (var i=0;i<len;i++) bytes[i] = bin.charCodeAt(i);
-    var url = URL.createObjectURL(new Blob([bytes], {type:"application/pdf"}));
-    window.open(url, "_blank", "noopener");
-  });
-})();
-</script>
-""".replace("__LABEL__", label)\
-   .replace("__IMG__", img_b64)\
-   .replace("__BTN__", btn)\
-   .replace("__B64__", pdf_b64 or "")\
-   .replace("__KEY__", key)
-
-    components.html(html, height=height)
 
 
 # give IDs to any preloaded messages (greetings)
@@ -398,16 +344,25 @@ for msg in st.session_state.messages:
     st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
 
     if msg.get("source_img"):
-        label = f"Reference: {msg.get('source')}" if msg.get("source") else "Reference"
-        render_reference_panel(
-            label=label,
-            img_b64=msg["source_img"],
-            pdf_b64=msg.get("source_pdf_b64"),
-            key=msg["id"],
-            height=520,  # adjust if you want a taller/shorter panel
+        title = msg.get("source")
+        label = f"Reference: {title}" if title else "Reference"
+        link_html = ""
+        if msg.get("source_url"):
+            link_html = f"<div style='margin-top:8px;text-align:right;'><a href='{msg['source_url']}' target='_blank' rel='noopener'>Open this page ↗</a></div>"
+    
+        st.markdown(
+            f"""
+            <details class="ref">
+              <summary>📘 {label}</summary>
+              <div class="panel">
+                <img src="data:image/png;base64,{msg['source_img']}" alt="reference" loading="lazy"/>
+                {link_html}
+              </div>
+            </details>
+            <div class="clearfix"></div>
+            """,
+            unsafe_allow_html=True
         )
-
-
 
 
 
@@ -486,12 +441,12 @@ if st.session_state.waiting_for_response:
                         if ref_img_b64:
                             entry["source"] = f"Page {ref_page}"
                             entry["source_img"] = ref_img_b64
-                            # store one-page PDF as b64 for the button
+                            # 🔗 make a one-page PDF and link to it
                             try:
-                                entry["source_pdf_b64"] = single_page_pdf_b64(st.session_state.pdf_bytes, ref_page)
-                            except Exception:
+                                page_url = single_page_pdf_html_url(st.session_state.pdf_bytes, ref_page)
+                                entry["source_url"] = page_url
+                            except Exception as _e:
                                 pass
-
 
             except Exception as e:
                 st.info(f"ℹ️ Reference selection skipped: {e}")
@@ -503,14 +458,23 @@ if st.session_state.waiting_for_response:
     
         if entry.get("source_img"):
             label = entry.get("source", f"Page {ref_page}")
-            render_reference_panel(
-                label=label,
-                img_b64=entry["source_img"],
-                pdf_b64=entry.get("source_pdf_b64"),
-                key=entry["id"],
-                height=520,
+            link_html = ""
+            if entry.get("source_url"):
+                link_html = f"<div style='margin-top:8px;text-align:right;'><a href='{entry['source_url']}' target='_blank' rel='noopener'>Open this page ↗</a></div>"
+        
+            st.markdown(
+                f"""
+                <details class="ref">
+                  <summary>📘 Reference: {label}</summary>
+                  <div class="panel">
+                    <img src="data:image/png;base64,{entry['source_img']}" alt="reference" loading="lazy"/>
+                    {link_html}
+                  </div>
+                </details>
+                <div class="clearfix"></div>
+                """,
+                unsafe_allow_html=True
             )
-
 
 
 
