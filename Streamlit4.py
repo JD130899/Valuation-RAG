@@ -55,6 +55,16 @@ def _new_id():
     st.session_state.next_msg_id += 1
     return f"m{n}"
 
+def single_page_pdf_data_url(pdf_bytes: bytes, page_number: int) -> str:
+    # Build a 1-page PDF containing only page_number
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    one = fitz.open()
+    one.insert_pdf(doc, from_page=page_number - 1, to_page=page_number - 1)
+    data = one.tobytes()
+    one.close(); doc.close()
+    return "data:application/pdf;base64," + base64.b64encode(data).decode("ascii")
+
+
 # give IDs to any preloaded messages (greetings)
 for m in st.session_state.messages:
     if "id" not in m:
@@ -178,6 +188,7 @@ if not up:
 
 if st.session_state.get("last_processed_pdf") != up.name:
     pdf_bytes = up.getvalue()
+    st.session_state.pdf_bytes = pdf_bytes 
     st.session_state.retriever, st.session_state.page_images = build_retriever_from_pdf(pdf_bytes, up.name)
 
     # 🔗 Build a base URL for this PDF (used later as base#page=N)
@@ -404,9 +415,13 @@ if st.session_state.waiting_for_response:
                         if ref_img_b64:
                             entry["source"] = f"Page {ref_page}"
                             entry["source_img"] = ref_img_b64
-                            base = st.session_state.get("pdf_link_base")
-                            if base and ref_page:
-                                entry["source_url"] = f"{st.session_state.pdf_link_base}#page={ref_page}"
+                            # 🔗 make a one-page PDF and link to it
+                            try:
+                                page_url = single_page_pdf_data_url(st.session_state.pdf_bytes, ref_page)
+                                entry["source_url"] = page_url
+                            except Exception as _e:
+                                pass
+
             except Exception as e:
                 st.info(f"ℹ️ Reference selection skipped: {e}")
 
