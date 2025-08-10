@@ -521,7 +521,6 @@ if st.session_state.waiting_for_response:
                 img_b64=entry["source_img"],
                 pdf_b64=entry.get("source_pdf_b64"),
                 key=entry["id"],
-                height=520,
             )
 
 
