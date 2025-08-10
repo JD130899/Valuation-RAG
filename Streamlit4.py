@@ -45,6 +45,21 @@ if "retriever" not in st.session_state:
 if "page_images" not in st.session_state:
     st.session_state.page_images = {}
 
+# --- Stable IDs for messages (used to key popovers etc.) ---
+if "next_msg_id" not in st.session_state:
+    st.session_state.next_msg_id = 0
+
+def _new_id():
+    n = st.session_state.next_msg_id
+    st.session_state.next_msg_id += 1
+    return f"m{n}"
+
+# give IDs to any preloaded messages (greetings)
+for m in st.session_state.messages:
+    if "id" not in m:
+        m["id"] = _new_id()
+
+
 # ================= Builder =================
 @st.cache_resource(show_spinner="📦 Processing & indexing PDF…")
 def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
@@ -232,9 +247,10 @@ wrapped_prompt = PromptTemplate(
 # ================= Input =================
 user_q = st.chat_input("Type your question here…")
 if user_q:
-    st.session_state.messages.append({"role": "user", "content": user_q})
+    st.session_state.messages.append({"id": _new_id(), "role": "user", "content": user_q})
     st.session_state.pending_input = user_q
     st.session_state.waiting_for_response = True
+
 
 # ================= History (render AFTER input so latest message shows) =================
 for msg in st.session_state.messages:
@@ -288,67 +304,71 @@ if st.session_state.waiting_for_response:
                 answer = f"❌ Error: {e}"
 
             # prepare reference
-            entry = {"id": _new_id(), "role": "assistant", "content": answer}
-            ref_page = None
-            try:
-                if docs:
-                    texts = [d.page_content for d in docs]
-                    embedder = CohereEmbeddings(
-                        model="embed-english-v3.0",
-                        user_agent="langchain",
-                        cohere_api_key=st.secrets["COHERE_API_KEY"]
+           entry = {"id": _new_id(), "role": "assistant", "content": answer}
+           ref_page, ref_img_b64 = None, None
+        
+           try:
+               if docs:
+               texts = [d.page_content for d in docs]
+               embedder = CohereEmbeddings(
+                model="embed-english-v3.0",
+                user_agent="langchain",
+                cohere_api_key=st.secrets["COHERE_API_KEY"]
+                )
+                emb_answer = embedder.embed_query(answer)
+                chunk_embs = embedder.embed_documents(texts)
+                sims = cosine_similarity([emb_answer], chunk_embs)[0]
+                ranked = sorted(list(zip(docs, sims)), key=lambda x: x[1], reverse=True)
+                top3 = [d for d, _ in ranked[:3]]
+    
+                best_doc = top3[0] if top3 else (ranked[0][0] if ranked else None)
+                if len(top3) >= 3:
+                    ranking_prompt = PromptTemplate(
+                        template=("Given a user question and 3 candidate context chunks, return the number (1-3) "
+                                  "of the chunk that best answers it.\n\n"
+                                  "Question:\n{question}\n\nChunk 1:\n{chunk1}\n\nChunk 2:\n{chunk2}\n\nChunk 3:\n{chunk3}\n\nBest Chunk Number:\n"),
+                        input_variables=["question", "chunk1", "chunk2", "chunk3"]
                     )
-                    emb_answer = embedder.embed_query(answer)
-                    chunk_embs = embedder.embed_documents(texts)
-                    sims = cosine_similarity([emb_answer], chunk_embs)[0]
-                    ranked = sorted(list(zip(docs, sims)), key=lambda x: x[1], reverse=True)
-                    top3 = [d for d, _ in ranked[:3]]
+                    pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
+                        ranking_prompt.invoke({
+                            "question": q,
+                            "chunk1": top3[0].page_content,
+                            "chunk2": top3[1].page_content,
+                            "chunk3": top3[2].page_content
+                        })
+                    ).content.strip()
+                    if pick.isdigit() and 1 <= int(pick) <= 3:
+                        best_doc = top3[int(pick) - 1]
+        
+                if best_doc is not None:
+                    ref_page = best_doc.metadata.get("page_number")
+                    img = st.session_state.page_images.get(ref_page)
+                    ref_img_b64 = pil_to_base64(img) if img else None
+                    if ref_img_b64:
+                        entry["source"] = f"Page {ref_page}"
+                        entry["source_img"] = ref_img_b64
+           except Exception as e:
+               st.info(f"ℹ️ Reference selection skipped: {e}")
 
-                    best_doc = top3[0] if top3 else (ranked[0][0] if ranked else None)
-                    if len(top3) >= 3:
-                        ranking_prompt = PromptTemplate(
-                            template=("Given a user question and 3 candidate context chunks, return the number (1-3) "
-                                      "of the chunk that best answers it.\n\n"
-                                      "Question:\n{question}\n\nChunk 1:\n{chunk1}\n\nChunk 2:\n{chunk2}\n\nChunk 3:\n{chunk3}\n\nBest Chunk Number:\n"),
-                            input_variables=["question", "chunk1", "chunk2", "chunk3"]
-                        )
-                        pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
-                            ranking_prompt.invoke({
-                                "question": q,
-                                "chunk1": top3[0].page_content,
-                                "chunk2": top3[1].page_content,
-                                "chunk3": top3[2].page_content
-                            })
-                        ).content.strip()
-                        if pick.isdigit() and 1 <= int(pick) <= 3:
-                            best_doc = top3[int(pick) - 1]
-
-                    if best_doc is not None:
-                        ref_page = best_doc.metadata.get("page_number")
-                        img = st.session_state.page_images.get(ref_page)
-                        if img:
-                            entry["source"] = f"Page {ref_page}"
-                            entry["source_img"] = base64.b64encode(
-                                io.BytesIO(img_to_bytes := io.BytesIO()).getvalue()
-                            )  # we’ll replace this 2 lines below (see NOTE)
-            except Exception as e:
-                st.info(f"ℹ️ Reference selection skipped: {e}")
     # Final render (no rerun)
     with block.container():
         st.markdown(f"<div class='assistant-bubble clearfix'>{answer}</div>", unsafe_allow_html=True)
-        if ref_page and ref_img_b64:
+    
+        if entry.get("source_img"):
+            label = entry.get("source", f"Page {ref_page}")
             st.markdown(
                 f"""
                 <details class="ref">
-                  <summary>📘 Reference: Page {ref_page}</summary>
+                  <summary>📘 Reference: {label}</summary>
                   <div class="panel">
-                    <img src="data:image/png;base64,{ref_img_b64}" alt="reference" loading="lazy"/>
+                    <img src="data:image/png;base64,{entry['source_img']}" alt="reference" loading="lazy"/>
                   </div>
                 </details>
                 <div class="clearfix"></div>
                 """,
                 unsafe_allow_html=True
             )
+
 
     # Persist
     st.session_state.messages.append(entry)
