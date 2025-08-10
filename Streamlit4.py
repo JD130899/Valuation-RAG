@@ -55,39 +55,38 @@ def _new_id():
     st.session_state.next_msg_id += 1
     return f"m{n}"
 
-def single_page_pdf_html_url(pdf_bytes: bytes, page_number: int) -> str:
-    # Build a 1-page PDF
+def single_page_pdf_b64(pdf_bytes: bytes, page_number: int) -> str:
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     one = fitz.open()
     one.insert_pdf(doc, from_page=page_number - 1, to_page=page_number - 1)
-    pdf_b64 = base64.b64encode(one.tobytes()).decode("ascii")
+    b64 = base64.b64encode(one.tobytes()).decode("ascii")
     one.close(); doc.close()
-
-    # HTML that decodes base64 -> Blob, then NAVIGATES to the blob URL.
-    # Fallback: if navigation is blocked, it embeds an iframe.
-    html = """<!doctype html><meta charset="utf-8">
+    return b64
+    
+def render_open_button(pdf_b64: str, key: str):
+    html = """
+<div style="text-align:right;margin-top:8px;">
+  <a id="btn-{KEY}" href="#" style="text-decoration:none;">Open this page ↗</a>
+</div>
 <script>
 (function(){
-  const b64="__B64__";
-  const raw=atob(b64);
-  const bytes=new Uint8Array(raw.length);
-  for(let i=0;i<raw.length;i++) bytes[i]=raw.charCodeAt(i);
-  const url=URL.createObjectURL(new Blob([bytes], {type:"application/pdf"}));
-  // Navigate so Chrome's PDF viewer renders immediately
-  location.replace(url);
-  // Fallback to iframe if navigation is blocked
-  setTimeout(()=>{
-    if(!document.body.children.length){
-      const ifr=document.createElement('iframe');
-      ifr.src=url;
-      ifr.style="position:fixed;inset:0;border:0;width:100%;height:100%";
-      document.body.appendChild(ifr);
-    }
-  }, 30);
+  const b64 = "{B64}";
+  const btn = document.getElementById("btn-{KEY}");
+  btn.addEventListener("click", function(ev){
+    ev.preventDefault();
+    const bin = atob(b64);
+    const len = bin.length;
+    const bytes = new Uint8Array(len);
+    for (let i=0;i<len;i++) bytes[i] = bin.charCodeAt(i);
+    const blob = new Blob([bytes], {type:"application/pdf"});
+    const url = URL.createObjectURL(blob);
+    window.open(url, "_blank", "noopener");   // opens immediately, no brown screen
+  });
 })();
-</script>"""
-    html = html.replace("__B64__", pdf_b64)
-    return "data:text/html;base64," + base64.b64encode(html.encode("utf-8")).decode("ascii")
+</script>
+"""
+    components.html(html.replace("{KEY}", key).replace("{B64}", pdf_b64), height=36)
+
 
 
 
@@ -346,23 +345,25 @@ for msg in st.session_state.messages:
     if msg.get("source_img"):
         title = msg.get("source")
         label = f"Reference: {title}" if title else "Reference"
-        link_html = ""
-        if msg.get("source_url"):
-            link_html = f"<div style='margin-top:8px;text-align:right;'><a href='{msg['source_url']}' target='_blank' rel='noopener'>Open this page ↗</a></div>"
     
+        # 1) render the image panel (no <a> link here)
         st.markdown(
             f"""
             <details class="ref">
               <summary>📘 {label}</summary>
               <div class="panel">
                 <img src="data:image/png;base64,{msg['source_img']}" alt="reference" loading="lazy"/>
-                {link_html}
               </div>
             </details>
             <div class="clearfix"></div>
             """,
             unsafe_allow_html=True
         )
+    
+        # 2) render the JS button that opens a Blob tab (👇 helper below)
+        if msg.get("source_pdf_b64"):
+            render_open_button(msg["source_pdf_b64"], key=msg["id"])
+
 
 
 
@@ -441,12 +442,12 @@ if st.session_state.waiting_for_response:
                         if ref_img_b64:
                             entry["source"] = f"Page {ref_page}"
                             entry["source_img"] = ref_img_b64
-                            # 🔗 make a one-page PDF and link to it
+                            # store one-page PDF as b64 for the button
                             try:
-                                page_url = single_page_pdf_html_url(st.session_state.pdf_bytes, ref_page)
-                                entry["source_url"] = page_url
-                            except Exception as _e:
+                                entry["source_pdf_b64"] = single_page_pdf_b64(st.session_state.pdf_bytes, ref_page)
+                            except Exception:
                                 pass
+
 
             except Exception as e:
                 st.info(f"ℹ️ Reference selection skipped: {e}")
@@ -475,6 +476,9 @@ if st.session_state.waiting_for_response:
                 """,
                 unsafe_allow_html=True
             )
+
+            if entry.get("source_pdf_b64"):
+                render_open_button(entry["source_pdf_b64"], key=entry["id"])
 
 
 
