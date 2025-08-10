@@ -257,8 +257,7 @@ for msg in st.session_state.messages:
     st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
 
     if msg.get("source_img"):
-        pop_key = f"ref_{msg.get('id')}"  # falls back safely if id missing
-        with st.popover("📘 Reference:", key=pop_key):
+        with st.popover("📘 Reference:"):   # ← no key
             data = base64.b64decode(msg["source_img"])
             label = msg.get("source") or ""
             if label and not label.lower().startswith("reference"):
@@ -266,6 +265,7 @@ for msg in st.session_state.messages:
             st.image(Image.open(io.BytesIO(data)),
                      caption=label or "Reference",
                      use_container_width=True)
+
 
 
 
@@ -355,14 +355,13 @@ if st.session_state.waiting_for_response:
             cap = entry.get("source", f"Page {ref_page}") or ""
             if cap and not cap.lower().startswith("reference"):
                 cap = f"Reference: {cap}"
-    
-            with st.popover("📘 Reference:", key=f"ref_final_{entry['id']}"):
+        
+            with st.popover("📘 Reference:"):   # ← no key
                 img_bytes = base64.b64decode(entry["source_img"])
-                st.image(
-                    Image.open(io.BytesIO(img_bytes)),
-                    caption=cap or "Reference",
-                    use_container_width=True
-                )
+                st.image(Image.open(io.BytesIO(img_bytes)),
+                         caption=cap or "Reference",
+                         use_container_width=True)
+
 
 
     # Persist
