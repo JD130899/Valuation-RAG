@@ -45,6 +45,22 @@ if "retriever" not in st.session_state:
 if "page_images" not in st.session_state:
     st.session_state.page_images = {}
 
+# --- Stable IDs for messages (used to key popovers) ---
+if "next_msg_id" not in st.session_state:
+    st.session_state.next_msg_id = 0
+
+def _new_id():
+    i = st.session_state.next_msg_id
+    st.session_state.next_msg_id += 1
+    return f"m{i}"
+
+# Give IDs to any existing messages (the two greetings, or if you reset later)
+for m in st.session_state.messages:
+    if "id" not in m:
+        m["id"] = _new_id()
+
+
+
 # ================= Builder =================
 @st.cache_resource(show_spinner="📦 Processing & indexing PDF…")
 def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
@@ -232,17 +248,17 @@ wrapped_prompt = PromptTemplate(
 # ================= Input =================
 user_q = st.chat_input("Type your question here…")
 if user_q:
-    st.session_state.messages.append({"role": "user", "content": user_q})
+    st.session_state.messages.append({"id": _new_id(), "role": "user", "content": user_q})
     st.session_state.pending_input = user_q
     st.session_state.waiting_for_response = True
-
 # ================= History (render AFTER input so latest message shows) =================
 for msg in st.session_state.messages:
     cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
     st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
 
     if msg.get("source_img"):
-        with st.popover("📘 Reference:"):
+        pop_key = f"ref_{msg.get('id')}"  # falls back safely if id missing
+        with st.popover("📘 Reference:", key=pop_key):
             data = base64.b64decode(msg["source_img"])
             label = msg.get("source") or ""
             if label and not label.lower().startswith("reference"):
@@ -250,6 +266,7 @@ for msg in st.session_state.messages:
             st.image(Image.open(io.BytesIO(data)),
                      caption=label or "Reference",
                      use_container_width=True)
+
 
 
 
@@ -283,7 +300,7 @@ if st.session_state.waiting_for_response:
         answer = f"❌ Error: {e}"
 
     # Reference selection
-    entry = {"role": "assistant", "content": answer}
+    entry = {"id": _new_id(), "role": "assistant", "content": answer}
     ref_page, ref_img_b64 = None, None
     try:
         if docs:
@@ -332,20 +349,14 @@ if st.session_state.waiting_for_response:
 
     # Final render (no rerun)
     with block.container():
-    # answer bubble
-        st.markdown(
-            f"<div class='assistant-bubble clearfix'>{answer}</div>",
-            unsafe_allow_html=True
-        )
+        st.markdown(f"<div class='assistant-bubble clearfix'>{answer}</div>", unsafe_allow_html=True)
     
-        # popover reference (same behavior as history)
         if entry.get("source_img"):
             cap = entry.get("source", f"Page {ref_page}") or ""
-            # keep caption consistent: "Reference: Page X"
             if cap and not cap.lower().startswith("reference"):
                 cap = f"Reference: {cap}"
     
-            with st.popover("📘 Reference:"):
+            with st.popover("📘 Reference:", key=f"ref_final_{entry['id']}"):
                 img_bytes = base64.b64decode(entry["source_img"])
                 st.image(
                     Image.open(io.BytesIO(img_bytes)),
