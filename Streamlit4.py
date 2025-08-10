@@ -184,86 +184,61 @@ if st.session_state.get("last_processed_pdf") != up.name:
     ]
     st.session_state.last_processed_pdf = up.name
 
+
 st.markdown("""
 <style>
-.ref{
-  position:relative;
-  display:block; width:60%; max-width:900px; margin:6px 0 12px 8px;
-}
+.user-bubble {background:#007bff;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:right;margin:4px;}
+.assistant-bubble {background:#1e1e1e;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:left;margin:4px;}
+.clearfix::after {content:"";display:table;clear:both;}
+/* Reference chip + panel */
+.ref{ display:block; width:60%; max-width:900px; margin:6px 0 12px 8px; }
 .ref summary{
   display:inline-flex; align-items:center; gap:8px; cursor:pointer; list-style:none; outline:none;
   background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:10px; padding:6px 10px;
 }
 .ref summary::before{ content:"▶"; font-size:12px; line-height:1; }
 .ref[open] summary::before{ content:"▼"; }
-
-/* when open, keep the chip fixed exactly where it was */
-.ref.is-open summary{
-  position: fixed;
-  left: var(--chip-left, 0px);
-  top:  var(--chip-top,  0px);
-  z-index: 1002;
-}
-
-/* overlay panel */
+.ref[open] summary{ border-bottom-left-radius:0; border-bottom-right-radius:0; }
 .ref .panel{
-  background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:10px;
-  padding:10px; box-shadow:0 12px 32px rgba(0,0,0,.45);
+  background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-top:none;
+  border-radius:0 10px 10px 10px; padding:10px; margin-top:0; box-shadow:0 6px 20px rgba(0,0,0,.25);
 }
-.ref[open] .panel{
-  position: fixed; top:50%; left:50%; transform:translate(-50%,-50%);
-  max-width:min(900px,92vw); max-height:85vh; overflow:auto; z-index:1001;
+.ref .panel img{ width:100%; height:auto; border-radius:8px; display:block; }
+/* Click-away close for <details class="ref"> (no JS needed) */
+.ref[open] > summary{
+  position: fixed;         /* make summary cover the whole viewport */
+  inset: 0;
+  background: transparent;
+  z-index: 998;            /* below the panel, above page */
+  color: transparent;      /* hide the label while open */
+  border: none;
+  padding: 0;
+  cursor: default;
 }
 
-/* backdrop */
-.ref[open]::before{
-  content:""; position:fixed; inset:0; background:rgba(0,0,0,.55); z-index:1000;
+/* hide the caret when open (optional) */
+.ref[open] > summary::before { display: none; }
+
+/* float the reference panel above the overlay */
+.ref[open] > .panel{
+  position: fixed;
+  z-index: 999;
+  top: 12vh;               /* center-ish modal placement */
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(900px, 90vw);
+  max-height: 75vh;
+  overflow: auto;
+  box-shadow: 0 20px 60px rgba(0,0,0,.45);
 }
+
 </style>
 """, unsafe_allow_html=True)
 
-if "ref_js_injected" not in st.session_state:
-    components.html("""
-    <script>
-    (function(){
-      // Close on outside click
-      document.addEventListener('click', function(e){
-        document.querySelectorAll('details.ref[open]').forEach(function(el){
-          if(!el.contains(e.target)) el.removeAttribute('open');
-        });
-      });
-      // Close on Esc
-      document.addEventListener('keydown', function(e){
-        if(e.key==='Escape'){
-          document.querySelectorAll('details.ref[open]').forEach(function(el){
-            el.removeAttribute('open');
-          });
-        }
-      });
-      // Keep chip fixed at its original screen position; only one open at a time
-      document.addEventListener('toggle', function(ev){
-        var t = ev.target;
-        if(t.tagName==='DETAILS' && t.classList.contains('ref')){
-          var sum = t.querySelector('summary');
-          if(t.open){
-            document.querySelectorAll('details.ref[open]').forEach(function(el){
-              if(el!==t) el.removeAttribute('open');
-            });
-            var r = sum.getBoundingClientRect();
-            t.style.setProperty('--chip-left', r.left+'px');
-            t.style.setProperty('--chip-top',  r.top +'px');
-            t.classList.add('is-open');
-          }else{
-            t.classList.remove('is-open');
-            t.style.removeProperty('--chip-left');
-            t.style.removeProperty('--chip-top');
-          }
-        }
-      }, true);
-    })();
-    </script>
-    """, height=0)
-    st.session_state.ref_js_injected = True
+
+
+
+
 
 # ================= Prompt helpers =================
 def format_chat_history(messages):
