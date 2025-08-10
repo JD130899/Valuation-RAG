@@ -1,13 +1,13 @@
 import os
 import io
 import pickle
-import base64  # ✅ needed for pil_to_base64
+import base64
 import streamlit as st
 from PIL import Image
 import fitz  # PyMuPDF
 from dotenv import load_dotenv
 
-from sklearn.metrics.pairwise import cosine_similarity  # ✅ needed
+from sklearn.metrics.pairwise import cosine_similarity
 
 # --- LangChain / RAG deps ---
 from langchain_core.documents import Document
@@ -17,8 +17,8 @@ from langchain_community.embeddings import CohereEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain.retrievers.document_compressors import CohereRerank
 from langchain.retrievers import ContextualCompressionRetriever
-from langchain_openai import ChatOpenAI              # ✅ needed
-from langchain_core.prompts import PromptTemplate    # ✅ needed
+from langchain_openai import ChatOpenAI
+from langchain_core.prompts import PromptTemplate
 
 import openai
 
@@ -45,7 +45,22 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ======== Helpers (from reference) ========
+st.markdown("""
+<style>
+.ref-card{
+  display:inline-block; max-width:380px; margin:6px 0 12px 8px;
+}
+.ref-card details{
+  background:#0f172a; color:#e2e8f0; border:1px solid #334155;
+  border-radius:10px; padding:8px 10px; display:inline-block;
+}
+.ref-card summary{ cursor:pointer; outline:none; }
+.ref-card img{ width:100%; height:auto; border-radius:8px; margin-top:8px; }
+</style>
+""", unsafe_allow_html=True)
+
+
+# ======== Helpers ========
 def pil_to_base64(img: Image.Image) -> str:
     buf = io.BytesIO()
     img.save(buf, format="PNG")
@@ -54,16 +69,16 @@ def pil_to_base64(img: Image.Image) -> str:
 # ======== Minimal RAG builder (returns retriever + page images) ========
 @st.cache_resource(show_spinner="📦 Processing & indexing PDF…")
 def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
-    # 1) write pdf to disk (for parser & page images if needed)
+    # 1) write pdf to disk
     os.makedirs("uploaded", exist_ok=True)
     pdf_path = os.path.join("uploaded", file_name)
     with open(pdf_path, "wb") as f:
         f.write(pdf_bytes)
 
-    # 1b) Extract page images (reference feature)
+    # 1b) Extract page images (use lighter DPI to reduce UI churn)
     doc = fitz.open(pdf_path)
     page_images = {
-        i + 1: Image.open(io.BytesIO(page.get_pixmap(dpi=300).tobytes("png")))
+        i + 1: Image.open(io.BytesIO(page.get_pixmap(dpi=180).tobytes("png")))  # 180dpi to keep it snappy
         for i, page in enumerate(doc)
     }
     doc.close()
@@ -92,14 +107,14 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
     )
     vs = FAISS.from_documents(chunks, embedder)
 
-    # (optional) persist
+    # 5) Persist (optional)
     store = os.path.join("vectorstore", file_name)
     os.makedirs(store, exist_ok=True)
     vs.save_local(store, index_name="faiss")
     with open(os.path.join(store, "metadata.pkl"), "wb") as mf:
         pickle.dump([c.metadata for c in chunks], mf)
 
-    # 5) Retriever (+ reranker)
+    # 6) Retriever + reranker
     reranker = CohereRerank(
         model="rerank-english-v3.0",
         user_agent="langchain",
@@ -111,7 +126,7 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
                                        search_kwargs={"k": 50, "fetch_k": 100, "lambda_mult": 0.9}),
         base_compressor=reranker
     )
-    return retriever, page_images  # ✅ return images too
+    return retriever, page_images
 
 # ======== State =========
 if "messages" not in st.session_state:
@@ -128,7 +143,7 @@ if "page_images" not in st.session_state:
 # ======== Upload PDF once to build retriever ========
 uploaded = st.file_uploader("Upload a valuation report PDF (required for RAG)", type="pdf")
 if uploaded and st.session_state.retriever is None:
-    st.session_state.retriever, st.session_state.page_images = build_retriever_from_pdf(  # ✅ capture images
+    st.session_state.retriever, st.session_state.page_images = build_retriever_from_pdf(
         uploaded.getvalue(), uploaded.name
     )
 
@@ -144,27 +159,32 @@ if user_input:
     st.session_state.pending_input = user_input
     st.session_state.waiting_for_response = True
 
-# ======== History (right/left bubbles) + optional Reference popover ========
+# ======== History (right/left bubbles) + Reference expander (no popover) ========
 for msg in st.session_state.messages:
     cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
     st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
     if msg.get("source_img"):
-        with st.popover("📘 Reference:"):
-            data = base64.b64decode(msg["source_img"])
-            st.image(Image.open(io.BytesIO(data)), caption=msg.get("source"), use_container_width=True)
+      st.markdown(
+          f"""
+          <div class="ref-card">
+            <details>
+              <summary>📘 {msg.get("source","Reference")}</summary>
+              <img src="data:image/png;base64,{msg['source_img']}" alt="reference"/>
+            </details>
+          </div>
+          <div class="clearfix"></div>
+          """,
+          unsafe_allow_html=True
+      )
 
-# ======== Answer (with ONLY RAG flow) ========
+# ======== Answer (with ONLY RAG flow) — single-pass render, no rerun ========
 if st.session_state.waiting_for_response:
-    # show a left-aligned assistant "Thinking..." bubble immediately
-    response_placeholder = st.empty()
-    response_placeholder.markdown(
-        "<div class='assistant-bubble clearfix'>🧠 <em>Thinking...</em></div>",
-        unsafe_allow_html=True
-    )
+    block = st.empty()
+    with block.container():
+        st.markdown("<div class='assistant-bubble clearfix'>🧠 <em>Thinking...</em></div>", unsafe_allow_html=True)
 
     q = st.session_state.pending_input or ""
-    ctx = ""
-    docs = []  # ✅ safe default
+    ctx, docs = "", []
     if st.session_state.retriever:
         try:
             docs = st.session_state.retriever.get_relevant_documents(q)
@@ -187,14 +207,9 @@ if st.session_state.waiting_for_response:
     except Exception as e:
         answer = f"❌ Error: {e}"
 
-    # replace the thinking bubble with the final assistant bubble (left)
-    response_placeholder.markdown(
-        f"<div class='assistant-bubble clearfix'>{answer}</div>",
-        unsafe_allow_html=True
-    )
-
-    # ------- Reference selection (from reference code) -------
+    # --- Reference selection BEFORE final render (same pass, no rerun) ---
     entry = {"role": "assistant", "content": answer}
+    ref_page, ref_img_b64 = None, None
     try:
         if docs:
             texts = [d.page_content for d in docs]
@@ -205,7 +220,7 @@ if st.session_state.waiting_for_response:
             )
             emb_answer = embedder.embed_query(answer)
             chunk_embs = embedder.embed_documents(texts)
-            sims = cosine_similarity([emb_answer], chunk_embs)[0]  # ✅ now imported
+            sims = cosine_similarity([emb_answer], chunk_embs)[0]
             ranked = sorted(list(zip(docs, sims)), key=lambda x: x[1], reverse=True)
             top3 = [d for d, _ in ranked[:3]]
 
@@ -245,18 +260,34 @@ Best Chunk Number:
                 best_doc = top3[0] if top3 else (ranked[0][0] if ranked else None)
 
             if best_doc is not None:
-                page = best_doc.metadata.get("page_number")
-                img = st.session_state.page_images.get(page)
-                b64 = pil_to_base64(img) if img else None
-                if page and b64:
-                    entry["source"] = f"Page {page}"
-                    entry["source_img"] = b64
+                ref_page = best_doc.metadata.get("page_number")
+                img = st.session_state.page_images.get(ref_page)
+                ref_img_b64 = pil_to_base64(img) if img else None
+                if ref_page and ref_img_b64:
+                    entry["source"] = f"Page {ref_page}"
+                    entry["source_img"] = ref_img_b64
     except Exception as e:
-        # don't break chat if reference selection fails
         st.info(f"ℹ️ Reference selection skipped: {e}")
 
-    # persist to history (use entry so reference is kept) ✅
+    # --- Final render in the SAME placeholder (no rerun, no fade) ---
+    with block.container():
+        st.markdown(f"<div class='assistant-bubble clearfix'>{answer}</div>", unsafe_allow_html=True)
+        if ref_page and ref_img_b64:
+          st.markdown(
+              f"""
+              <div class="ref-card">
+                <details>
+                  <summary>📘 Reference: Page {ref_page}</summary>
+                  <img src="data:image/png;base64,{ref_img_b64}" alt="reference"/>
+                </details>
+              </div>
+              <div class="clearfix"></div>
+              """,
+              unsafe_allow_html=True
+          )
+
+
+    # Persist to history
     st.session_state.messages.append(entry)
     st.session_state.pending_input = None
     st.session_state.waiting_for_response = False
-    st.rerun()
