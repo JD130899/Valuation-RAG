@@ -336,21 +336,27 @@ if st.session_state.waiting_for_response:
 
     # 3) FINAL RENDER in the SAME placeholder (replaces 'Thinking...')
     with block.container():
-        st.markdown(f"<div class='assistant-bubble clearfix'>{answer}</div>", unsafe_allow_html=True)
+    # answer bubble
+        st.markdown(
+            f"<div class='assistant-bubble clearfix'>{answer}</div>",
+            unsafe_allow_html=True
+        )
+    
+        # popover reference (same behavior as history)
         if entry.get("source_img"):
-            label = entry.get("source", f"Page {ref_page}")
-            st.markdown(
-                f"""
-                <details class="ref">
-                  <summary>📘 Reference: {label}</summary>
-                  <div class="panel">
-                    <img src="data:image/png;base64,{entry['source_img']}" alt="reference" loading="lazy"/>
-                  </div>
-                </details>
-                <div class="clearfix"></div>
-                """,
-                unsafe_allow_html=True
-            )
+            cap = entry.get("source", f"Page {ref_page}") or ""
+            # keep caption consistent: "Reference: Page X"
+            if cap and not cap.lower().startswith("reference"):
+                cap = f"Reference: {cap}"
+    
+            with st.popover("📘 Reference:"):
+                img_bytes = base64.b64decode(entry["source_img"])
+                st.image(
+                    Image.open(io.BytesIO(img_bytes)),
+                    caption=cap or "Reference",
+                    use_container_width=True
+                )
+
 
     # 4) Persist to history (no st.rerun needed)
     st.session_state.messages.append(entry)
