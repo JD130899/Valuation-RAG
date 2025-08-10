@@ -168,7 +168,7 @@ if st.session_state.get("last_processed_pdf") != up.name:
     ]
     st.session_state.last_processed_pdf = up.name
 
-st.success("✅ RAG index ready.")
+
 
 # ================= Chat UI CSS =================
 st.markdown("""
