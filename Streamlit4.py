@@ -233,6 +233,35 @@ st.markdown("""
   overflow: auto;
   box-shadow: 0 20px 60px rgba(0,0,0,.45);
 }
+/* Keep the Reference chip visible while open */
+.ref { position: relative; }
+
+.ref[open] summary{
+  position: relative;       /* stays in its spot */
+  z-index: 1002;            /* above everything below */
+}
+
+/* Show the image as a centered overlay that doesn't push layout */
+.ref[open] .panel{
+  position: fixed;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  max-width: min(900px, 92vw);
+  max-height: 85vh;
+  overflow: auto;
+  z-index: 1001;            /* below the chip, above the page */
+  box-shadow: 0 12px 32px rgba(0,0,0,.45);
+}
+
+/* Optional: dim the page behind */
+.ref[open]::before{
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,.55);
+  z-index: 1000;            /* below panel & chip */
+}
+
 
 
 </style>
