@@ -184,7 +184,8 @@ if st.session_state.get("last_processed_pdf") != up.name:
     if "uploaded_file_from_drive" in st.session_state:
         # Drive file — make sure sharing is set to "Anyone with the link – Viewer"
         fid = st.session_state.last_synced_file_id
-        st.session_state.pdf_link_base = f"https://drive.google.com/file/d/{fid}/preview"
+        st.session_state.pdf_link_base = f"https://drive.google.com/uc?export=download&id={fid}"
+
         # (If page jump doesn't work, try '/view' instead of '/preview')
     else:
         # Local upload fallback: data URL so it can still open in a new tab
@@ -405,7 +406,7 @@ if st.session_state.waiting_for_response:
                             entry["source_img"] = ref_img_b64
                             base = st.session_state.get("pdf_link_base")
                             if base and ref_page:
-                                entry["source_url"] = f"{base}#page={ref_page}"
+                                entry["source_url"] = f"{st.session_state.pdf_link_base}#page={ref_page}"
             except Exception as e:
                 st.info(f"ℹ️ Reference selection skipped: {e}")
 
