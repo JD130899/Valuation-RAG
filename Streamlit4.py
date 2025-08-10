@@ -43,6 +43,13 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# Extra 
+# ======== Helpers (from reference) ========
+def pil_to_base64(img: Image.Image) -> str:
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+  
 
 # ======== Minimal RAG builder (your actual retriever) ========
 @st.cache_resource(show_spinner="📦 Processing & indexing PDF…")
@@ -53,6 +60,14 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
     with open(pdf_path, "wb") as f:
         f.write(pdf_bytes)
 
+     # 1b) Extract page images (reference feature)
+    doc = fitz.open(pdf_path)
+    page_images = {
+        i + 1: Image.open(io.BytesIO(page.get_pixmap(dpi=300).tobytes("png")))
+        for i, page in enumerate(doc)
+    }
+    doc.close()
+  
     # 2) Parse with LlamaParse (same as your other file)
     parser = LlamaParse(api_key=os.environ["LLAMA_CLOUD_API_KEY"], num_workers=4)
     result = parser.parse(pdf_path)
@@ -107,6 +122,9 @@ if "waiting_for_response" not in st.session_state:
     st.session_state.waiting_for_response = False
 if "retriever" not in st.session_state:
     st.session_state.retriever = None
+if "page_images" not in st.session_state:
+    st.session_state.page_images = {}
+
 
 # ======== Upload PDF once to build retriever (same data source as your other app) ========
 uploaded = st.file_uploader("Upload a valuation report PDF (required for RAG)", type="pdf")
@@ -171,8 +189,74 @@ if st.session_state.waiting_for_response:
         unsafe_allow_html=True
     )
 
+     # ------- Reference selection (mirrors your reference code) -------
+    entry = {"role": "assistant", "content": answer}
+
+    try:
+        if docs:
+            texts = [d.page_content for d in docs]
+            # embed answer vs chunks
+            embedder = CohereEmbeddings(
+                model="embed-english-v3.0",
+                user_agent="langchain",
+                cohere_api_key=st.secrets["COHERE_API_KEY"]
+            )
+            emb_answer = embedder.embed_query(answer)
+            chunk_embs = embedder.embed_documents(texts)
+            sims = cosine_similarity([emb_answer], chunk_embs)[0]
+            ranked = sorted(list(zip(docs, sims)), key=lambda x: x[1], reverse=True)
+            top3 = [d for d, _ in ranked[:3]]
+
+            best_doc = None
+            if len(top3) >= 3:
+                ranking_prompt = PromptTemplate(
+                    template="""
+                    Given a user question and 3 candidate context chunks, return the number (1-3) of the chunk that best answers it.
+                    
+                    Question:
+                    {question}
+                    
+                    Chunk 1:
+                    {chunk1}
+                    
+                    Chunk 2:
+                    {chunk2}
+                    
+                    Chunk 3:
+                    {chunk3}
+                    
+                    Best Chunk Number:
+                    """,
+                    input_variables=["question", "chunk1", "chunk2", "chunk3"]
+                )
+                pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
+                    ranking_prompt.invoke({
+                        "question": q,
+                        "chunk1": top3[0].page_content,
+                        "chunk2": top3[1].page_content,
+                        "chunk3": top3[2].page_content
+                    })
+                ).content.strip()
+                if pick.isdigit() and 1 <= int(pick) <= 3:
+                    best_doc = top3[int(pick) - 1]
+            if best_doc is None:
+                # fallback to the most similar chunk
+                best_doc = top3[0] if top3 else (ranked[0][0] if ranked else None)
+
+            if best_doc is not None:
+                page = best_doc.metadata.get("page_number")
+                img = st.session_state.page_images.get(page)
+                b64 = pil_to_base64(img) if img else None
+                if page and b64:
+                    entry["source"] = f"Page {page}"
+                    entry["source_img"] = b64
+    except Exception as e:
+    # don't break chat if reference selection fails
+    st.info(f"ℹ️ Reference selection skipped: {e}")              
+
     # persist to history
     st.session_state.messages.append({"role": "assistant", "content": answer})
     st.session_state.pending_input = None
     st.session_state.waiting_for_response = False
+    
 
