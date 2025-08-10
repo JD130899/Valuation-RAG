@@ -47,25 +47,34 @@ st.markdown("""
 
 st.markdown("""
 <style>
-/* container is wide, but the summary chip stays small */
-.ref-card{ display:block; width:60%; max-width:900px; margin:6px 0 12px 8px; }
+/* Collapsed chip stays compact; opened panel is wide */
+.ref{ display:block; width:60%; max-width:900px; margin:6px 0 12px 8px; }
 
-/* small chip */
-.ref-card summary{ display:inline-block; cursor:pointer; outline:none; list-style:none; }
-.ref-tag{
-  display:inline-block; background:#0f172a; color:#e2e8f0;
-  border:1px solid #334155; border-radius:10px; padding:6px 10px;
+/* summary chip */
+.ref summary{
+  display:inline-flex; align-items:center; gap:8px;
+  background:#0f172a; color:#e2e8f0;
+  border:1px solid #334155; border-radius:10px;
+  padding:6px 10px; cursor:pointer; list-style:none; outline:none;
 }
 
-/* opened panel becomes a wide card under the chip */
-.ref-card[open] .ref-tag{ border-bottom-left-radius:0; border-bottom-right-radius:0; }
-.ref-content{
+/* caret icon swap */
+.ref summary::before{ content:"▶"; font-size:12px; line-height:1; }
+.ref[open] summary::before{ content:"▼"; }
+
+/* opened panel */
+.ref[open] summary{ border-bottom-left-radius:0; border-bottom-right-radius:0; }
+.ref .panel{
   background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-top:none;
-  border-radius:0 10px 10px 10px; padding:8px 10px; margin-top:0;
+  border-radius:0 10px 10px 10px; padding:10px; margin-top:0;
+  box-shadow:0 6px 20px rgba(0,0,0,.25);
 }
-.ref-content img{ width:60%; height:auto; border-radius:8px; }
+
+/* image fills the panel nicely */
+.ref .panel img{ width:100%; height:auto; border-radius:8px; display:block; }
 </style>
 """, unsafe_allow_html=True)
+
 
 
 
@@ -178,16 +187,17 @@ for msg in st.session_state.messages:
       label = f"Reference: {title}" if title else "Reference"
       st.markdown(
           f"""
-          <details class="ref-card">
-            <summary><span class="ref-tag">📘 {label}</span></summary>
-            <div class="ref-content">
-              <img src="data:image/png;base64,{msg['source_img']}" alt="reference"/>
+          <details class="ref">
+            <summary>📘 {label}</summary>
+            <div class="panel">
+              <img src="data:image/png;base64,{msg['source_img']}" alt="reference" loading="lazy"/>
             </div>
           </details>
           <div class="clearfix"></div>
           """,
           unsafe_allow_html=True
       )
+
 
 
 # ======== Answer (with ONLY RAG flow) — single-pass render, no rerun ========
@@ -288,16 +298,17 @@ Best Chunk Number:
         if ref_page and ref_img_b64:
           st.markdown(
               f"""
-              <details class="ref-card">
-                <summary><span class="ref-tag">📘 Reference: Page {ref_page}</span></summary>
-                <div class="ref-content">
-                  <img src="data:image/png;base64,{ref_img_b64}" alt="reference"/>
+              <details class="ref">
+                <summary>📘 Reference: Page {ref_page}</summary>
+                <div class="panel">
+                  <img src="data:image/png;base64,{ref_img_b64}" alt="reference" loading="lazy"/>
                 </div>
               </details>
               <div class="clearfix"></div>
               """,
               unsafe_allow_html=True
           )
+
 
 
 
