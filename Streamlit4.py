@@ -262,7 +262,8 @@ for msg in st.session_state.messages:
 if st.session_state.waiting_for_response:
     block = st.empty()
     with block.container():
-        st.markdown("<div class='assistant-bubble clearfix'>🧠 <em>Thinking...</em></div>", unsafe_allow_html=True)
+        #st.markdown("<div class='assistant-bubble clearfix'>🧠 <em>Thinking...</em></div>", unsafe_allow_html=True)
+        with st.spinner("Thinking…"):
 
     q = st.session_state.pending_input or ""
     ctx, docs = "", []
