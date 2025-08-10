@@ -22,7 +22,27 @@ load_dotenv()
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 st.set_page_config(page_title="Chat QA", layout="wide")
+
+
 st.title("🧠 Ask Me Anything (Chat Style)")
+
+
+st.markdown("""
+<style>
+.user-bubble {
+  background:#007bff; color:#fff; padding:10px 12px; border-radius:12px;
+  max-width:60%; float:right; margin:6px 0; line-height:1.4;
+  box-shadow:0 2px 8px rgba(0,0,0,.15);
+}
+.assistant-bubble {
+  background:#1e1e1e; color:#fff; padding:10px 12px; border-radius:12px;
+  max-width:60%; float:left; margin:6px 0; line-height:1.4;
+  box-shadow:0 2px 8px rgba(0,0,0,.15);
+}
+.clearfix::after { content:""; display:table; clear:both; }
+</style>
+""", unsafe_allow_html=True)
+
 
 # ======== Minimal RAG builder (your actual retriever) ========
 @st.cache_resource(show_spinner="📦 Processing & indexing PDF…")
@@ -106,16 +126,20 @@ if user_input:
     st.session_state.waiting_for_response = True
 
 # ======== History ========
+# ======== History (right/left bubbles) ========
 for msg in st.session_state.messages:
-    with st.chat_message(msg["role"]):
-        st.markdown(msg["content"])
+    cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
+    st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
 
 # ======== Answer (with ONLY RAG flow) ========
+# ======== Answer (with ONLY RAG flow) ========
 if st.session_state.waiting_for_response:
+    # show a left-aligned assistant "Thinking..." bubble immediately
     response_placeholder = st.empty()
-    with response_placeholder.container():
-        with st.chat_message("assistant"):
-            st.markdown("🧠 *Thinking...*")
+    response_placeholder.markdown(
+        "<div class='assistant-bubble clearfix'>🧠 <em>Thinking...</em></div>",
+        unsafe_allow_html=True
+    )
 
     q = st.session_state.pending_input or ""
     ctx = ""
@@ -126,14 +150,12 @@ if st.session_state.waiting_for_response:
         except Exception as e:
             st.warning(f"RAG retrieval error: {e}")
 
-    # System message that enforces context-only answers (your “ONLY RAG PIPELINE”)
     system_prompt = (
         "You are a helpful assistant. Use ONLY the content under 'Context' to answer. "
         "If the answer is not in the context, say you don't have enough information.\n\n"
         f"Context:\n{ctx}"
     )
 
-    # Call OpenAI with the context + existing chat
     try:
         response = openai.chat.completions.create(
             model="gpt-3.5-turbo",
@@ -143,10 +165,14 @@ if st.session_state.waiting_for_response:
     except Exception as e:
         answer = f"❌ Error: {e}"
 
-    with response_placeholder.container():
-        with st.chat_message("assistant"):
-            st.markdown(answer)
+    # replace the thinking bubble with the final assistant bubble (left)
+    response_placeholder.markdown(
+        f"<div class='assistant-bubble clearfix'>{answer}</div>",
+        unsafe_allow_html=True
+    )
 
+    # persist to history
     st.session_state.messages.append({"role": "assistant", "content": answer})
     st.session_state.pending_input = None
     st.session_state.waiting_for_response = False
+
