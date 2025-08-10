@@ -285,8 +285,11 @@ if st.session_state.waiting_for_response:
         answer = f"❌ Error: {e}"
 
     # Reference selection
+   # Reference selection
     entry = {"role": "assistant", "content": answer}
     ref_page, ref_img_b64 = None, None
+    best_doc = None  # <-- ensure it's defined
+    
     try:
         if docs:
             texts = [d.page_content for d in docs]
@@ -300,8 +303,10 @@ if st.session_state.waiting_for_response:
             sims = cosine_similarity([emb_answer], chunk_embs)[0]
             ranked = sorted(list(zip(docs, sims)), key=lambda x: x[1], reverse=True)
             top3 = [d for d, _ in ranked[:3]]
-
+    
+            # default pick
             best_doc = top3[0] if top3 else (ranked[0][0] if ranked else None)
+    
             if len(top3) >= 3:
                 ranking_prompt = PromptTemplate(
                     template=(
@@ -321,20 +326,20 @@ if st.session_state.waiting_for_response:
                 ).content.strip()
                 if pick.isdigit() and 1 <= int(pick) <= 3:
                     best_doc = top3[int(pick) - 1]
-
-           if best_doc is not None:
-               ref_page = best_doc.metadata.get("page_number")
-               img = st.session_state.page_images.get(ref_page)   # <- use the images you cached
-               ref_img_b64 = pil_to_base64(img) if img else None
-        
-               entry = {"role": "assistant", "content": answer}
-               if ref_page and ref_img_b64:
-                   entry["source"]     = f"Page {ref_page}"       # store label (keep as "Page X")
-                   entry["source_img"] = ref_img_b64              # store base64 image
-        
-               
-
-    # Persist
+    
+        # <-- align this with the `if len(top3) >= 3:` block (same level)
+        if best_doc is not None:
+            ref_page = best_doc.metadata.get("page_number")
+            img = st.session_state.page_images.get(ref_page)
+            ref_img_b64 = pil_to_base64(img) if img else None
+            if ref_page and ref_img_b64:
+                entry["source"] = f"Page {ref_page}"
+                entry["source_img"] = ref_img_b64
+    
+    except Exception as e:
+        st.info(f"ℹ️ Reference selection skipped: {e}")
+    
+    # Persist (append once, then reset)
     st.session_state.messages.append(entry)
     st.session_state.pending_input = None
     st.session_state.waiting_for_response = False
