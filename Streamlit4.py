@@ -227,7 +227,16 @@ wrapped_prompt = PromptTemplate(
     input_variables=["chat_history", "context", "question"]
 )
 
-# ================= History =================
+
+
+# ================= Input =================
+user_q = st.chat_input("Type your question here…")
+if user_q:
+    st.session_state.messages.append({"role": "user", "content": user_q})
+    st.session_state.pending_input = user_q
+    st.session_state.waiting_for_response = True
+
+# ================= History (render AFTER input so latest message shows) =================
 for msg in st.session_state.messages:
     cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
     st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
@@ -248,12 +257,6 @@ for msg in st.session_state.messages:
             unsafe_allow_html=True
         )
 
-# ================= Input =================
-user_q = st.chat_input("Type your question here…")
-if user_q:
-    st.session_state.messages.append({"role": "user", "content": user_q})
-    st.session_state.pending_input = user_q
-    st.session_state.waiting_for_response = True
 
 # ================= Answer (single-pass, no rerun) =================
 if st.session_state.waiting_for_response:
