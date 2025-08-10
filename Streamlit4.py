@@ -63,7 +63,7 @@ st.markdown("""
   background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-top:none;
   border-radius:0 10px 10px 10px; padding:8px 10px; margin-top:0;
 }
-.ref-content img{ width:100%; height:auto; border-radius:8px; }
+.ref-content img{ width:60%; height:auto; border-radius:8px; }
 </style>
 """, unsafe_allow_html=True)
 
