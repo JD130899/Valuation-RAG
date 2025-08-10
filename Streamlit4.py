@@ -192,56 +192,40 @@ st.markdown("""
 .user-bubble {background:#007bff;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:right;margin:4px;}
 .assistant-bubble {background:#1e1e1e;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:left;margin:4px;}
 .clearfix::after {content:"";display:table;clear:both;}
+
 /* Reference chip + panel */
-.ref{ display:block; width:60%; max-width:900px; margin:6px 0 12px 8px; }
+.ref{
+  position: relative;                /* new: create a stacking context for child elements */
+  display:block; width:60%; max-width:900px;
+  margin:6px 0 12px 8px;
+}
 .ref summary{
-  display:inline-flex; align-items:center; gap:8px; cursor:pointer; list-style:none; outline:none;
-  background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:10px; padding:6px 10px;
+  display:inline-flex; align-items:center; gap:8px;
+  cursor:pointer; list-style:none; outline:none;
+  background:#0f172a; color:#e2e8f0;
+  border:1px solid #334155; border-radius:10px;
+  padding:6px 10px;
 }
 .ref summary::before{ content:"▶"; font-size:12px; line-height:1; }
 .ref[open] summary::before{ content:"▼"; }
-.ref[open] summary{ border-bottom-left-radius:0; border-bottom-right-radius:0; }
+.ref[open] summary{
+  /* keep chip in place and above the overlay */
+  border-bottom-left-radius:0; border-bottom-right-radius:0;
+  position: relative;
+  z-index: 1002;                     /* above panel and backdrop */
+}
+
+/* Base panel look (will be overridden when open) */
 .ref .panel{
-  background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-top:none;
-  border-radius:0 10px 10px 10px; padding:10px; margin-top:0; box-shadow:0 6px 20px rgba(0,0,0,.25);
+  background:#0f172a; color:#e2e8f0;
+  border:1px solid #334155; border-top:none;
+  border-radius:0 10px 10px 10px;
+  padding:10px; margin-top:0;
+  box-shadow:0 6px 20px rgba(0,0,0,.25);
 }
 .ref .panel img{ width:100%; height:auto; border-radius:8px; display:block; }
-/* Click-away close for <details class="ref"> (no JS needed) */
-.ref[open] > summary{
-  position: fixed;         /* make summary cover the whole viewport */
-  inset: 0;
-  background: transparent;
-  z-index: 998;            /* below the panel, above page */
-  color: transparent;      /* hide the label while open */
-  border: none;
-  padding: 0;
-  cursor: default;
-}
 
-/* hide the caret when open (optional) */
-.ref[open] > summary::before { display: none; }
-
-/* float the reference panel above the overlay */
-.ref[open] > .panel{
-  position: fixed;
-  z-index: 999;
-  top: 12vh;               /* center-ish modal placement */
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(900px, 90vw);
-  max-height: 75vh;
-  overflow: auto;
-  box-shadow: 0 20px 60px rgba(0,0,0,.45);
-}
-/* Keep the Reference chip visible while open */
-.ref { position: relative; }
-
-.ref[open] summary{
-  position: relative;       /* stays in its spot */
-  z-index: 1002;            /* above everything below */
-}
-
-/* Show the image as a centered overlay that doesn't push layout */
+/* When open: show the panel as a centered overlay */
 .ref[open] .panel{
   position: fixed;
   top: 50%; left: 50%;
@@ -249,23 +233,21 @@ st.markdown("""
   max-width: min(900px, 92vw);
   max-height: 85vh;
   overflow: auto;
-  z-index: 1001;            /* below the chip, above the page */
+  z-index: 1001;                     /* below chip, above backdrop */
   box-shadow: 0 12px 32px rgba(0,0,0,.45);
 }
 
-/* Optional: dim the page behind */
+/* Dim the page behind while open */
 .ref[open]::before{
   content: "";
   position: fixed;
   inset: 0;
   background: rgba(0,0,0,.55);
-  z-index: 1000;            /* below panel & chip */
+  z-index: 1000;                     /* backdrop behind panel */
 }
-
-
-
 </style>
 """, unsafe_allow_html=True)
+
 
 
 
