@@ -46,8 +46,7 @@ if "page_images" not in st.session_state:
 if "next_msg_id" not in st.session_state:
     st.session_state.next_msg_id = 0
 
-if "loading_new_pdf" not in st.session_state:
-    st.session_state.loading_new_pdf = False
+
 
 
 
@@ -55,39 +54,6 @@ def _new_id():
     n = st.session_state.next_msg_id
     st.session_state.next_msg_id += 1
     return f"m{n}"
-
-def render_pdf_banner(file_name: str, pdf_bytes: bytes, key: str = "hdr"):
-    # Visible banner
-    st.markdown(
-        f'''
-        <div style="background:#1f2c3a; padding:8px; border-radius:8px; color:#fff;">
-           <b>Using Uploaded File:</b> {file_name}
-          &nbsp;·&nbsp;<a id="hdr-open-{key}" href="#" target="_blank" rel="noopener" style="color:#93c5fd;">Open PDF ↗</a>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    # Hidden script: make a Blob URL from the PDF bytes and attach it to the link
-    b64 = base64.b64encode(pdf_bytes).decode("ascii")
-    components.html(
-        f"""<!doctype html><meta charset='utf-8'>
-<style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
-<script>(function(){{
-  function b64ToU8(s){{var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}}
-  var url = URL.createObjectURL(new Blob([b64ToU8("{b64}")], {{type:"application/pdf"}}));
-  function attach(){{
-    var d = window.parent && window.parent.document;
-    var a = d && d.getElementById("hdr-open-{key}");
-    if(!a) return setTimeout(attach, 100);
-    a.setAttribute("href", url);
-  }}
-  attach();
-  var me = window.frameElement; if(me){{me.style.display="none";me.style.height="0";me.style.border="0";}}
-}})();</script>''',
-        height=0,
-    )
-
 
 
 # Make a ONE-PAGE PDF (base64) from a given page
@@ -246,15 +212,11 @@ if pdf_files:
                 st.session_state.uploaded_file_from_drive = open(path, "rb").read()
                 st.session_state.uploaded_file_name = fname
                 st.session_state.last_synced_file_id = fid
-    
-                # <<< wipe chat immediately and mark that we’re building >>>
-                st.session_state.messages = []
-                st.session_state.loading_new_pdf = True
-                # make sure the next block rebuilds
-                st.session_state.last_processed_pdf = None
-    
-                st.rerun()
-
+                # reset convo for new doc
+                st.session_state.messages = [
+                    {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
+                    {"role": "assistant", "content": "What can I help you with?"}
+                ]
 else:
     st.sidebar.warning("📭 No PDFs found in Drive.")
 
@@ -262,116 +224,34 @@ else:
 st.title("Underwriting Agent")
 
 # Source selector (Drive or local upload)
-# ================= Source selector (Drive or local upload) =================
 if "uploaded_file_from_drive" in st.session_state:
-    file_name = st.session_state.uploaded_file_name
-    display_name = os.path.splitext(file_name)[0]  # no ".pdf"
-    pdf_bytes_for_banner = st.session_state.uploaded_file_from_drive
-
-    # Banner: file name is the clickable link
     st.markdown(
-        f"""
-        <div style="background:#1f2c3a; padding:8px; border-radius:8px; color:#fff;">
-          <b>Using Uploaded File:</b>
-          <a id="hdr-open-drive" href="#" target="_blank" rel="noopener"
-             style="color:#93c5fd; text-decoration:underline;">{display_name}</a>
-        </div>
-        """,
-        unsafe_allow_html=True,
+        f"<div style='background:#1f2c3a; padding:8px; border-radius:8px; color:#fff;'>"
+        f"✅ <b>Using synced file:</b> {st.session_state.uploaded_file_name}"
+        "</div>",
+        unsafe_allow_html=True
     )
-
-    # Attach a Blob URL to that link
-    _b64 = base64.b64encode(pdf_bytes_for_banner).decode("ascii")
-    components.html(
-        f'''<!doctype html><meta charset='utf-8'>
-<style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
-<script>(function(){{
-  function b64ToU8(s){{var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}}
-  var url = URL.createObjectURL(new Blob([b64ToU8("{_b64}")], {{type:"application/pdf"}}));
-  function attach(){{
-    var d = window.parent && window.parent.document;
-    var a = d && d.getElementById("hdr-open-drive");
-    if(!a) return setTimeout(attach, 100);
-    a.setAttribute("href", url);
-  }}
-  attach();
-  var me = window.frameElement; if(me){{me.style.display="none";me.style.height="0";me.style.border="0";}}
-}})();</script>''',
-        height=0,
-    )
-
-    up = io.BytesIO(pdf_bytes_for_banner)
-    up.name = file_name
-
+    up = io.BytesIO(st.session_state.uploaded_file_from_drive)
+    up.name = st.session_state.uploaded_file_name
 else:
     up = st.file_uploader("Upload a valuation report PDF", type="pdf")
 
-    if up is not None:
-        file_name = up.name
-        display_name = os.path.splitext(file_name)[0]  # no ".pdf"
-        pdf_bytes_for_banner = up.getvalue()
-
-        st.markdown(
-            f'''
-            <div style="background:#1f2c3a; padding:8px; border-radius:8px; color:#fff;">
-              <b>Using Uploaded File:</b>
-              <a id="hdr-open-local" href="#" target="_blank" rel="noopener"
-                 style="color:#93c5fd; text-decoration:underline;">{display_name}</a>
-            </div>
-            ''',
-            unsafe_allow_html=True,
-        )
-
-        _b64_local = base64.b64encode(pdf_bytes_for_banner).decode("ascii")
-        components.html(
-            f'''<!doctype html><meta charset='utf-8'>
-<style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
-<script>(function(){{
-  function b64ToU8(s){{var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}}
-  var url = URL.createObjectURL(new Blob([b64ToU8("{_b64_local}")], {{type:"application/pdf"}}));
-  function attach(){{
-    var d = window.parent && window.parent.document;
-    var a = d && d.getElementById("hdr-open-local");
-    if(!a) return setTimeout(attach, 100);
-    a.setAttribute("href", url);
-  }}
-  attach();
-  var me = window.frameElement; if(me){{me.style.display="none";me.style.height="0";me.style.border="0";}}
-}})();</script>''',
-            height=0,
-        )
-
-# Guard if nothing selected yet
 if not up:
     st.warning("Please upload or load a PDF to continue.")
     st.stop()
 
-
 # Rebuild retriever when file changes
-
 if st.session_state.get("last_processed_pdf") != up.name:
-    # First pass after a new selection: clear UI and rerun quickly
-    if not st.session_state.loading_new_pdf:
-        st.session_state.messages = []
-        st.session_state.loading_new_pdf = True
-        st.rerun()
-
-    # Second pass: actually build
     pdf_bytes = up.getvalue()
     st.session_state.pdf_bytes = pdf_bytes
     st.session_state.retriever, st.session_state.page_images = build_retriever_from_pdf(pdf_bytes, up.name)
 
-    # Re-seed greetings only after build completes
+    # reset convo for new doc
     st.session_state.messages = [
         {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
         {"role": "assistant", "content": "What can I help you with?"}
     ]
     st.session_state.last_processed_pdf = up.name
-    st.session_state.loading_new_pdf = False
-
-    # Optional: quick refresh so the new greetings appear instantly
-    st.rerun()
-
 
 # ================= Styles =================
 st.markdown("""
@@ -438,56 +318,24 @@ def format_chat_history(messages):
     return "\n".join(lines)
 
 prompt = PromptTemplate(
-        template = """
-       You are a financial-data extraction assistant.
-    
-       **IMPORTANT CONDITIONAL FOLLOW-UP**  
-        🛎️ After you answer the user’s question (using steps 1–4), **only if** there is still **unused** relevant report content, **ask**:  
-          “Would you like more detail on [X]?”  
-       Otherwise, **do not** ask any follow-up.
+    template="""
+You are a financial-data extraction assistant.
 
-    **Use ONLY what appears under “Context”.**
+**Use ONLY what appears under “Context”.**
+1) Single value → short sentence with the exact number.
+2) Table questions → return the full table in GitHub-flavoured markdown.
+3) Valuation methods → synthesize across chunks, show weights and corresponding $ values; prefer detailed breakdowns.
+4) Theory/text → explain using context.
 
-    ### Special interpretation rules  
-          • If the question is about **"valuation"** in general (e.g., “What is the valuation?”), answer by giving the Fair Market Value   
-          • If the question is about **risk** (e.g., “How risky is the business?”), use the **risk assessment section**, and include the **risk classification** (e.g., secure, controlled, etc.).
-
-    ### How to answer
-    1. **Single value questions**  
-       • Find the row + column that match the user's words.  
-       • Return the answer in a **short, clear sentence** using the exact number from the context.  
-         Example: “The Income (DCF) approach value is $1,150,000.”  
-       • **Do NOT repeat the metric name or company name** unless the user asks.
-    
-    2. **Table questions**  
-       • Return the full table **with its header row** in GitHub-flavoured markdown.
-    
-    3. **Valuation method / theory / reasoning questions**
-        
-       • If the question involves **valuation methods**, **concluded value**, or topics like **Income Approach**, **Market Approach**, or **Valuation Summary**, do the following:
-         - Combine and synthesize relevant information across all chunks.
-         - Pay special attention to how **weights are distributed** (e.g., “50% DCF, 25% EBITDA, 25% SDE”).
-         - Avoid oversimplifying if more detailed breakdowns (like subcomponents of market approach) are available.
-         - If a table gives a simplified view (e.g., "50% Market Approach"), but other parts break it down (e.g., 25% EBITDA + 25% SDE), **prefer the detailed breakdown with percent value**.   
-         - When describing weights, also mention the **corresponding dollar values** used in the context (e.g., “50% DCF = $3,712,000, 25% EBITDA = $4,087,000...”)
-         - **If Market approach is composed of sub-methods like EBITDA and SDE, then explicitly extract and show their individual weights and values, even if not listed together in a single table.**
-        
- 
-    4. **Theory/textual question**  
-       • Try to return an explanation **based on the context**.
-       
-    If you still cannot see the answer, reply **“Hmm, I am not sure. Are you able to rephrase your question?”**
-    
-    ---
-    Context:
-    {context}
-    
-    ---
-    Question: {question}
-    Answer:""",
-            input_variables=["context", "question"]
-        )
-
+If not enough info: “Hmm, I am not sure. Are you able to rephrase your question?”
+---
+Context:
+{context}
+---
+Question: {question}
+Answer:""",
+    input_variables=["context", "question"]
+)
 
 base_text = prompt.template
 wrapped_prompt = PromptTemplate(
@@ -565,21 +413,11 @@ if st.session_state.waiting_for_response:
                     best_doc = top3[0] if top3 else (ranked[0][0] if ranked else None)
                     if len(top3) >= 3:
                         ranking_prompt = PromptTemplate(
-                           template="""
-                            Given a user question and 3 candidate context chunks, return the number (1-3) of the chunk that best answers it.
-                            Question:
-                            {question}
-                            
-                            Chunk 1:
-                            {chunk1}
-                            
-                            Chunk 2:
-                            {chunk2}
-                            
-                            Chunk 3:
-                            {chunk3}
-                       Best Chunk Number:
-                       """,input_variables=["question","chunk1","chunk2","chunk3"])
+                            template=("Given a user question and 3 candidate context chunks, return the number (1-3) "
+                                      "of the chunk that best answers it.\n\n"
+                                      "Question:\n{question}\n\nChunk 1:\n{chunk1}\n\nChunk 2:\n{chunk2}\n\nChunk 3:\n{chunk3}\n\nBest Chunk Number:\n"),
+                            input_variables=["question", "chunk1", "chunk2", "chunk3"]
+                        )
                         pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
                             ranking_prompt.invoke({
                                 "question": q,
