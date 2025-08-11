@@ -83,34 +83,23 @@ def render_reference_card(label: str, img_b64: str, page_b64: str, key: str):
     )
 
     # Invisible helper: create a Blob URL from base64 and attach it to the anchor once it exists
-    helper_html = f"""
-<!doctype html><meta charset="utf-8">
-<style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
-<script>
-(function() {{
-  function b64ToUint8Array(s) {{
-    var b = atob(s), u = new Uint8Array(b.length);
-    for (var i = 0; i < b.length; i++) u[i] = b.charCodeAt(i);
-    return u;
-  }}
-  var blob = new Blob([b64ToUint8Array("{page_b64}")], {{ type: "application/pdf" }});
-  var url  = URL.createObjectURL(blob);
+    helper_html = (
+        "<!doctype html><meta charset='utf-8'>"
+        "<style>html,body{background:transparent;margin:0;height:0;overflow:hidden}</style>"
+        "<script>(function(){"
+        "function b64ToUint8Array(s){var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}"
+        f"var blob=new Blob([b64ToUint8Array('{page_b64}')],{{type:'application/pdf'}});"
+        "var url=URL.createObjectURL(blob);"
+        "function attach(){var d=window.parent&&window.parent.document;if(!d)return setTimeout(attach,120);"
+        f"var a=d.getElementById('open-{key}');"
+        "if(!a)return setTimeout(attach,120);"
+        "a.setAttribute('href',url);}"
+        "attach();"
+        "var me=window.frameElement;if(me){me.style.display='none';me.style.height='0';me.style.border='0';}"
+        "})();</script>"
+    )
+    components.html(helper_html, height=0)
 
-  function attach() {{
-    var doc = window.parent && window.parent.document;
-    if (!doc) return setTimeout(attach, 120);
-    // ✅ one hyphen here — must match id="open-{key}"
-    var a = doc.getElementById("open-{key}");
-    if (!a) return setTimeout(attach, 120);
-    a.setAttribute("href", url);
-  }}
-  attach();
-
-  // Hide this iframe completely
-  var me = window.frameElement;
-  if (me) {{ me.style.display = "none"; me.style.height = "0"; me.style.border = "0"; }}
-}})();
-</script>
 
 
 
