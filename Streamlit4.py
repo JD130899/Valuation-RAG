@@ -22,7 +22,6 @@ from langchain_core.prompts import PromptTemplate
 
 import openai
 from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
-import streamlit.components.v1 as components
 
 # ================= Setup =================
 load_dotenv()
@@ -122,42 +121,12 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
         ),
         base_compressor=reranker
     )
-    return retriever, page_images, pdf_path 
+    return retriever, page_images
 
 def pil_to_base64(img: Image.Image) -> str:
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return base64.b64encode(buf.getvalue()).decode("ascii")
-
-def build_pdf_page_link(page_num: int) -> str | None:
-    fid = st.session_state.get("last_synced_file_id")
-    if st.session_state.get("source_type") == "drive" and fid:
-        # Try preview (sometimes honored), fall back to direct file endpoint.
-        return f"https://drive.google.com/file/d/{fid}/preview#page={page_num}"
-        # Or: return f"https://drive.google.com/uc?id={fid}&export=download#page={page_num}"
-    return None
-
-
-
-def make_blob_open_anchor(page_num: int, label: str = "Open PDF to this page ⧉") -> str:
-    pdf_bytes = st.session_state.get("current_pdf_bytes")
-    if not pdf_bytes:
-        return ""
-    b64 = base64.b64encode(pdf_bytes).decode("ascii")
-    # Double braces {{ }} keep JS braces literal
-    return """
-    <a href="#" onclick='(function(){{
-        const b64="{b64}";
-        const byteChars=atob(b64);
-        const byteNumbers=new Array(byteChars.length);
-        for (let i=0;i<byteChars.length;i++) byteNumbers[i]=byteChars.charCodeAt(i);
-        const byteArray=new Uint8Array(byteNumbers);
-        const blob=new Blob([byteArray],{{type:"application/pdf"}});
-        const url=URL.createObjectURL(blob);
-        window.open(url+"#page={page}", "_blank", "noopener");
-    }})()'>{label}</a>
-    """.format(b64=b64, page=page_num, label=label)
-
 
 # ================= Sidebar: Google Drive loader =================
 service = get_drive_service()
@@ -176,8 +145,6 @@ if pdf_files:
                 st.session_state.uploaded_file_from_drive = open(path, "rb").read()
                 st.session_state.uploaded_file_name = fname
                 st.session_state.last_synced_file_id = fid
-                st.session_state.source_type = "drive"            
-                st.session_state.source_drive_id = fid     
                 # reset convo for new doc
                 st.session_state.messages = [
                     {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
@@ -209,17 +176,16 @@ if not up:
 # Rebuild retriever when file changes
 if st.session_state.get("last_processed_pdf") != up.name:
     pdf_bytes = up.getvalue()
-    st.session_state.retriever, st.session_state.page_images, st.session_state.current_pdf_path = build_retriever_from_pdf(pdf_bytes, up.name)  # <- NEW: pdf_path
-    st.session_state.current_pdf_bytes = pdf_bytes  # NEW: keep bytes for local "blob" link
-    st.session_state.source_type = "drive" if "uploaded_file_from_drive" in st.session_state else "upload"  # NEW
-   
+    st.session_state.retriever, st.session_state.page_images = build_retriever_from_pdf(pdf_bytes, up.name)
     st.session_state.messages = [
         {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
         {"role": "assistant", "content": "What can I help you with?"}
     ]
-    st.session_state.current_pdf_name = up.name  # NEW (optional)
+    st.session_state.last_processed_pdf = up.name
 
 
+
+# ================= Chat UI CSS =================
 st.markdown("""
 <style>
 .user-bubble {background:#007bff;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:right;margin:4px;}
@@ -239,41 +205,8 @@ st.markdown("""
   border-radius:0 10px 10px 10px; padding:10px; margin-top:0; box-shadow:0 6px 20px rgba(0,0,0,.25);
 }
 .ref .panel img{ width:100%; height:auto; border-radius:8px; display:block; }
-/* Click-away close for <details class="ref"> (no JS needed) */
-.ref[open] > summary{
-  position: fixed;         /* make summary cover the whole viewport */
-  inset: 0;
-  background: transparent;
-  z-index: 998;            /* below the panel, above page */
-  color: transparent;      /* hide the label while open */
-  border: none;
-  padding: 0;
-  cursor: default;
-}
-
-/* hide the caret when open (optional) */
-.ref[open] > summary::before { display: none; }
-
-/* float the reference panel above the overlay */
-.ref[open] > .panel{
-  position: fixed;
-  z-index: 999;
-  top: 12vh;               /* center-ish modal placement */
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(900px, 90vw);
-  max-height: 75vh;
-  overflow: auto;
-  box-shadow: 0 20px 60px rgba(0,0,0,.45);
-}
-
 </style>
 """, unsafe_allow_html=True)
-
-
-
-
-
 
 # ================= Prompt helpers =================
 def format_chat_history(messages):
@@ -325,22 +258,13 @@ for msg in st.session_state.messages:
     st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
 
     if msg.get("source_img"):
-        page_num = msg.get("source_page")
-        label = f"Reference: {msg.get('source') or f'Page {page_num}'}"
-    
-        links_html = ""
-        if page_num:
-            links_html += make_blob_open_anchor(page_num, f"Open PDF to page {page_num} ⧉")
-            drive_url = build_pdf_page_link(page_num)
-            if drive_url:
-                links_html += f' &nbsp;|&nbsp; <a href="{drive_url}" target="_blank" rel="noopener">Open in Drive ⧉</a>'
-    
+        title = msg.get("source")
+        label = f"Reference: {title}" if title else "Reference"
         st.markdown(
             f"""
             <details class="ref">
               <summary>📘 {label}</summary>
               <div class="panel">
-                <div style="margin:0 0 8px 0;">{links_html}</div>
                 <img src="data:image/png;base64,{msg['source_img']}" alt="reference" loading="lazy"/>
               </div>
             </details>
@@ -348,9 +272,6 @@ for msg in st.session_state.messages:
             """,
             unsafe_allow_html=True
         )
-
-
-
 
 
 # ================= Answer (single-pass, no rerun) =================
@@ -428,7 +349,6 @@ if st.session_state.waiting_for_response:
                         if ref_img_b64:
                             entry["source"] = f"Page {ref_page}"
                             entry["source_img"] = ref_img_b64
-                            entry["source_page"] = ref_page  
             except Exception as e:
                 st.info(f"ℹ️ Reference selection skipped: {e}")
 
@@ -438,22 +358,12 @@ if st.session_state.waiting_for_response:
         st.markdown(f"<div class='assistant-bubble clearfix'>{answer}</div>", unsafe_allow_html=True)
     
         if entry.get("source_img"):
-            page_num = entry.get("source_page")
-            label = entry.get("source", f"Page {page_num}")
-        
-            links_html = ""
-            if page_num:
-                links_html += make_blob_open_anchor(page_num, f"Open PDF to page {page_num} ⧉")
-                drive_url = build_pdf_page_link(page_num)
-                if drive_url:
-                    links_html += f' &nbsp;|&nbsp; <a href="{drive_url}" target="_blank" rel="noopener">Open in Drive ⧉</a>'
-        
+            label = entry.get("source", f"Page {ref_page}")
             st.markdown(
                 f"""
                 <details class="ref">
                   <summary>📘 Reference: {label}</summary>
                   <div class="panel">
-                    <div style="margin:0 0 8px 0;">{links_html}</div>
                     <img src="data:image/png;base64,{entry['source_img']}" alt="reference" loading="lazy"/>
                   </div>
                 </details>
@@ -461,8 +371,6 @@ if st.session_state.waiting_for_response:
                 """,
                 unsafe_allow_html=True
             )
-
-
 
 
     # Persist
