@@ -219,16 +219,16 @@ if st.session_state.get("last_processed_pdf") != up.name:
 
     # 🔗 Build a base URL for this PDF (used later as base#page=N)
     if "uploaded_file_from_drive" in st.session_state:
-        # Drive file — make sure sharing is set to "Anyone with the link – Viewer"
         fid = st.session_state.last_synced_file_id
-        st.session_state.pdf_link_base = f"https://drive.google.com/uc?export=download&id={fid}"
-
-        # (If page jump doesn't work, try '/view' instead of '/preview')
+        # Use Drive viewer so #page=N works and it won’t auto-download
+        st.session_state.pdf_link_base = f"https://drive.google.com/uc?export=view&id={fid}"
     else:
-        # Local upload fallback: data URL so it can still open in a new tab
         st.session_state.pdf_link_base = (
             "data:application/pdf;base64," + base64.b64encode(pdf_bytes).decode("ascii")
         )
+
+
+   
 
     # reset convo for new doc (keep your existing messages)
     st.session_state.messages = [
@@ -443,7 +443,10 @@ if st.session_state.waiting_for_response:
                             entry["source_img"] = ref_img_b64
                             # 🔗 make a one-page PDF and link to it
                             try:
-                                page_url = single_page_pdf_html_url(st.session_state.pdf_bytes, ref_page)
+                                if "uploaded_file_from_drive" in st.session_state:
+                                    page_url = f"{st.session_state.pdf_link_base}#page={ref_page}"
+                                else:
+                                    page_url = single_page_pdf_html_url(st.session_state.pdf_bytes, ref_page)
                                 entry["source_url"] = page_url
                             except Exception as _e:
                                 pass
