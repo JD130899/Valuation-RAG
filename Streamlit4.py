@@ -265,19 +265,22 @@ st.title("Underwriting Agent")
 # ================= Source selector (Drive or local upload) =================
 if "uploaded_file_from_drive" in st.session_state:
     file_name = st.session_state.uploaded_file_name
+    display_name = os.path.splitext(file_name)[0]  # no ".pdf"
     pdf_bytes_for_banner = st.session_state.uploaded_file_from_drive
 
-    # Banner with hyperlink placeholder
+    # Banner: file name is the clickable link
     st.markdown(
-        f'''
+        f"""
         <div style="background:#1f2c3a; padding:8px; border-radius:8px; color:#fff;">
-          ✅ <b>Using synced file:</b> {file_name}
-          &nbsp;·&nbsp;<a id="hdr-open-drive" href="#" target="_blank" rel="noopener" style="color:#93c5fd;">Open PDF ↗</a>
+          ✅ <b>Using synced file:</b>
+          <a id="hdr-open-drive" href="#" target="_blank" rel="noopener"
+             style="color:#93c5fd; text-decoration:underline;">{display_name}</a>
         </div>
-        ''',
+        """,
         unsafe_allow_html=True,
     )
-    # Attach a Blob URL to the link (no huge data: URL)
+
+    # Attach a Blob URL to that link
     _b64 = base64.b64encode(pdf_bytes_for_banner).decode("ascii")
     components.html(
         f'''<!doctype html><meta charset='utf-8'>
@@ -303,20 +306,22 @@ if "uploaded_file_from_drive" in st.session_state:
 else:
     up = st.file_uploader("Upload a valuation report PDF", type="pdf")
 
-    # If a local file is provided, show the same banner + link
     if up is not None:
         file_name = up.name
+        display_name = os.path.splitext(file_name)[0]  # no ".pdf"
         pdf_bytes_for_banner = up.getvalue()
 
         st.markdown(
-            f"""
+            f'''
             <div style="background:#1f2c3a; padding:8px; border-radius:8px; color:#fff;">
-              ✅ <b>Using synced file:</b> {file_name}
-              &nbsp;·&nbsp;<a id="hdr-open-local" href="#" target="_blank" rel="noopener" style="color:#93c5fd;">Open PDF ↗</a>
+              ✅ <b>Using synced file:</b>
+              <a id="hdr-open-local" href="#" target="_blank" rel="noopener"
+                 style="color:#93c5fd; text-decoration:underline;">{display_name}</a>
             </div>
-            """,
+            ''',
             unsafe_allow_html=True,
         )
+
         _b64_local = base64.b64encode(pdf_bytes_for_banner).decode("ascii")
         components.html(
             f'''<!doctype html><meta charset='utf-8'>
@@ -336,7 +341,7 @@ else:
             height=0,
         )
 
-# Guard if nothing is selected yet
+# Guard if nothing selected yet
 if not up:
     st.warning("Please upload or load a PDF to continue.")
     st.stop()
