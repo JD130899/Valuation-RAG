@@ -55,47 +55,48 @@ def _new_id():
     st.session_state.next_msg_id += 1
     return f"m{n}"
 
-def single_page_pdf_html_url(pdf_bytes: bytes, page_number: int) -> str:
-    # Build a 1-page PDF
+# Build a ONE-PAGE PDF (base64) for local uploads
+def single_page_pdf_b64(pdf_bytes: bytes, page_number: int) -> str:
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     one = fitz.open()
-    one.insert_pdf(doc, from_page=page_number - 1, to_page=page_number - 1)
-    pdf_b64 = base64.b64encode(one.tobytes()).decode("ascii")
+    one.insert_pdf(doc, from_page=page_number-1, to_page=page_number-1)
+    b64 = base64.b64encode(one.tobytes()).decode("ascii")
     one.close(); doc.close()
+    return b64
 
-    # HTML that decodes base64 -> Blob, then NAVIGATES to the blob URL.
-    # Fallback: if navigation is blocked, it embeds an iframe.
-    html = """<!doctype html><meta charset="utf-8">
+# Invisible helper to open either a URL or a base64 one-page blob in a new tab.
+components.html("""
+<!doctype html><meta charset='utf-8'>
+<style>html,body{background:transparent;margin:0;height:0;overflow:hidden}</style>
 <script>
 (function(){
-  const b64="__B64__";
-  const raw=atob(b64);
-  const bytes=new Uint8Array(raw.length);
-  for(let i=0;i<raw.length;i++) bytes[i]=raw.charCodeAt(i);
-  const url=URL.createObjectURL(new Blob([bytes], {type:"application/pdf"}));
-  // Navigate so Chrome's PDF viewer renders immediately
-  location.replace(url);
-  // Fallback to iframe if navigation is blocked
-  setTimeout(()=>{
-    if(!document.body.children.length){
-      const ifr=document.createElement('iframe');
-      ifr.src=url;
-      ifr.style="position:fixed;inset:0;border:0;width:100%;height:100%";
-      document.body.appendChild(ifr);
+  function b64ToUint8Array(s){const b=atob(s);const u=new Uint8Array(b.length);for(let i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}
+  function openFrom(el, ev){
+    ev && ev.preventDefault && ev.preventDefault();
+    const urlAttr = el.getAttribute('data-url') || "";
+    const b64 = el.getAttribute('data-b64') || "";
+    let url = urlAttr;
+    if(!url && b64){
+      const blob = new Blob([b64ToUint8Array(b64)], {type:'application/pdf'});
+      url = URL.createObjectURL(blob);
     }
-  }, 30);
+    if(!url) return;
+    const w = window.open(url, '_blank', 'noopener'); if(!w) window.location.href = url;
+  }
+  const doc = window.parent && window.parent.document;
+  if(doc){ doc.addEventListener('click', function(e){
+    const a = e.target && e.target.closest ? e.target.closest('a.ref-open') : null;
+    if(a) openFrom(a, e);
+  }, true); }
+  const me = window.frameElement; if(me){ me.style.display='none'; me.style.height='0'; me.style.border='0'; }
 })();
-</script>"""
-    html = html.replace("__B64__", pdf_b64)
-    return "data:text/html;base64," + base64.b64encode(html.encode("utf-8")).decode("ascii")
-
-
+</script>
+""", height=0)
 
 # give IDs to any preloaded messages (greetings)
 for m in st.session_state.messages:
     if "id" not in m:
         m["id"] = _new_id()
-
 
 # ================= Builder =================
 @st.cache_resource(show_spinner="📦 Processing & indexing PDF…")
@@ -211,34 +212,26 @@ if not up:
     st.stop()
 
 # Rebuild retriever when file changes
-
 if st.session_state.get("last_processed_pdf") != up.name:
     pdf_bytes = up.getvalue()
-    st.session_state.pdf_bytes = pdf_bytes 
+    st.session_state.pdf_bytes = pdf_bytes
     st.session_state.retriever, st.session_state.page_images = build_retriever_from_pdf(pdf_bytes, up.name)
 
-    # 🔗 Build a base URL for this PDF (used later as base#page=N)
+    # 🔗 Base link for this PDF (Drive uses viewer so #page=N works; local not needed)
     if "uploaded_file_from_drive" in st.session_state:
         fid = st.session_state.last_synced_file_id
-        # Use Drive viewer so #page=N works and it won’t auto-download
         st.session_state.pdf_link_base = f"https://drive.google.com/uc?export=view&id={fid}"
     else:
-        st.session_state.pdf_link_base = (
-            "data:application/pdf;base64," + base64.b64encode(pdf_bytes).decode("ascii")
-        )
+        st.session_state.pdf_link_base = ""  # not used for local uploads
 
-
-   
-
-    # reset convo for new doc (keep your existing messages)
+    # reset convo for new doc
     st.session_state.messages = [
         {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
         {"role": "assistant", "content": "What can I help you with?"}
     ]
     st.session_state.last_processed_pdf = up.name
 
-
-
+# ================= Styles =================
 st.markdown("""
 <style>
 .user-bubble {background:#007bff;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:right;margin:4px;}
@@ -258,41 +251,18 @@ st.markdown("""
   border-radius:0 10px 10px 10px; padding:10px; margin-top:0; box-shadow:0 6px 20px rgba(0,0,0,.25);
 }
 .ref .panel img{ width:100%; height:auto; border-radius:8px; display:block; }
-/* Click-away close for <details class="ref"> (no JS needed) */
+/* click-away overlay */
 .ref[open] > summary{
-  position: fixed;         /* make summary cover the whole viewport */
-  inset: 0;
-  background: transparent;
-  z-index: 998;            /* below the panel, above page */
-  color: transparent;      /* hide the label while open */
-  border: none;
-  padding: 0;
-  cursor: default;
+  position: fixed; inset: 0; background: transparent; z-index: 998;
+  color: transparent; border: none; padding: 0; cursor: default;
 }
-
-/* hide the caret when open (optional) */
 .ref[open] > summary::before { display: none; }
-
-/* float the reference panel above the overlay */
 .ref[open] > .panel{
-  position: fixed;
-  z-index: 999;
-  top: 12vh;               /* center-ish modal placement */
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(900px, 90vw);
-  max-height: 75vh;
-  overflow: auto;
-  box-shadow: 0 20px 60px rgba(0,0,0,.45);
+  position: fixed; z-index: 999; top: 12vh; left: 50%; transform: translateX(-50%);
+  width: min(900px, 90vw); max-height: 75vh; overflow: auto; box-shadow:0 20px 60px rgba(0,0,0,.45);
 }
-
 </style>
 """, unsafe_allow_html=True)
-
-
-
-
-
 
 # ================= Prompt helpers =================
 def format_chat_history(messages):
@@ -328,15 +298,12 @@ wrapped_prompt = PromptTemplate(
     input_variables=["chat_history", "context", "question"]
 )
 
-
-
 # ================= Input =================
 user_q = st.chat_input("Type your question here…")
 if user_q:
     st.session_state.messages.append({"id": _new_id(), "role": "user", "content": user_q})
     st.session_state.pending_input = user_q
     st.session_state.waiting_for_response = True
-
 
 # ================= History (render AFTER input so latest message shows) =================
 for msg in st.session_state.messages:
@@ -346,10 +313,16 @@ for msg in st.session_state.messages:
     if msg.get("source_img"):
         title = msg.get("source")
         label = f"Reference: {title}" if title else "Reference"
-        link_html = ""
-        if msg.get("source_url"):
-            link_html = f"<div style='margin-top:8px;text-align:right;'><a href='{msg['source_url']}' target='_blank' rel='noopener'>Open this page ↗</a></div>"
-    
+
+        # Build link using data attributes (works for Drive or local)
+        data_url = (msg.get("source_url") or "")
+        data_b64 = (msg.get("source_b64") or "")
+        link_html = (
+            "<div style='margin-top:8px;text-align:right;'>"
+            f"<a class='ref-open' href='#' data-url='{data_url}' data-b64='{data_b64}'>Open this page ↗</a>"
+            "</div>"
+        )
+
         st.markdown(
             f"""
             <details class="ref">
@@ -364,13 +337,10 @@ for msg in st.session_state.messages:
             unsafe_allow_html=True
         )
 
-
-
 # ================= Answer (single-pass, no rerun) =================
 if st.session_state.waiting_for_response:
     block = st.empty()
     with block.container():
-        # show spinner while ALL heavy work happens
         with st.spinner("Thinking…"):
             q = st.session_state.pending_input or ""
             ctx, docs = "", []
@@ -395,15 +365,12 @@ if st.session_state.waiting_for_response:
             except Exception as e:
                 answer = f"❌ Error: {e}"
 
-            # prepare reference
-            # prepare reference
             entry = {"id": _new_id(), "role": "assistant", "content": answer}
             ref_page, ref_img_b64 = None, None
-            
+
             try:
                 if docs:
                     texts = [d.page_content for d in docs]
-            
                     embedder = CohereEmbeddings(
                         model="embed-english-v3.0",
                         user_agent="langchain",
@@ -414,7 +381,7 @@ if st.session_state.waiting_for_response:
                     sims = cosine_similarity([emb_answer], chunk_embs)[0]
                     ranked = sorted(list(zip(docs, sims)), key=lambda x: x[1], reverse=True)
                     top3 = [d for d, _ in ranked[:3]]
-            
+
                     best_doc = top3[0] if top3 else (ranked[0][0] if ranked else None)
                     if len(top3) >= 3:
                         ranking_prompt = PromptTemplate(
@@ -433,7 +400,7 @@ if st.session_state.waiting_for_response:
                         ).content.strip()
                         if pick.isdigit() and 1 <= int(pick) <= 3:
                             best_doc = top3[int(pick) - 1]
-            
+
                     if best_doc is not None:
                         ref_page = best_doc.metadata.get("page_number")
                         img = st.session_state.page_images.get(ref_page)
@@ -441,30 +408,32 @@ if st.session_state.waiting_for_response:
                         if ref_img_b64:
                             entry["source"] = f"Page {ref_page}"
                             entry["source_img"] = ref_img_b64
-                            # 🔗 make a one-page PDF and link to it
-                            try:
-                                if "uploaded_file_from_drive" in st.session_state:
-                                    page_url = f"{st.session_state.pdf_link_base}#page={ref_page}"
-                                else:
-                                    page_url = single_page_pdf_html_url(st.session_state.pdf_bytes, ref_page)
-                                entry["source_url"] = page_url
-                            except Exception as _e:
-                                pass
+
+                            # Drive → open viewer at #page=N; Local → one-page blob
+                            if "uploaded_file_from_drive" in st.session_state:
+                                entry["source_url"] = f"{st.session_state.pdf_link_base}#page={ref_page}"
+                                entry["source_b64"] = ""
+                            else:
+                                entry["source_url"] = ""
+                                entry["source_b64"] = single_page_pdf_b64(st.session_state.pdf_bytes, ref_page)
 
             except Exception as e:
                 st.info(f"ℹ️ Reference selection skipped: {e}")
 
-
     # Final render (no rerun)
     with block.container():
         st.markdown(f"<div class='assistant-bubble clearfix'>{answer}</div>", unsafe_allow_html=True)
-    
+
         if entry.get("source_img"):
             label = entry.get("source", f"Page {ref_page}")
-            link_html = ""
-            if entry.get("source_url"):
-                link_html = f"<div style='margin-top:8px;text-align:right;'><a href='{entry['source_url']}' target='_blank' rel='noopener'>Open this page ↗</a></div>"
-        
+            data_url = (entry.get("source_url") or "")
+            data_b64 = (entry.get("source_b64") or "")
+            link_html = (
+                "<div style='margin-top:8px;text-align:right;'>"
+                f"<a class='ref-open' href='#' data-url='{data_url}' data-b64='{data_b64}'>Open this page ↗</a>"
+                "</div>"
+            )
+
             st.markdown(
                 f"""
                 <details class="ref">
@@ -478,8 +447,6 @@ if st.session_state.waiting_for_response:
                 """,
                 unsafe_allow_html=True
             )
-
-
 
     # Persist
     st.session_state.messages.append(entry)
