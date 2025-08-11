@@ -47,21 +47,17 @@ if "next_msg_id" not in st.session_state:
     st.session_state.next_msg_id = 0
 
 
+
+
+
 def _new_id():
     n = st.session_state.next_msg_id
     st.session_state.next_msg_id += 1
     return f"m{n}"
 
-def render_reference_card(label: str, img_b64: str, page_b64: str, key: str):
-    data_url = "data:application/pdf;base64," + page_b64
-    html = (
-        '<span class="chip">'
-        '  📘 __LABEL__ · '
-        '  <a href="__URL__" target="_blank" rel="noopener">Open this page ↗</a>'
-        '</span>'
-    )
-    html = html.replace('__LABEL__', label or '').replace('__URL__', data_url)
-    st.markdown(html, unsafe_allow_html=True)
+
+
+
 
 
 # Make a ONE-PAGE PDF (base64) from a given page
@@ -72,6 +68,49 @@ def single_page_pdf_b64(pdf_bytes: bytes, page_number: int) -> str:
     b64 = base64.b64encode(one.tobytes()).decode("ascii")
     one.close(); doc.close()
     return b64
+
+
+def render_reference_card(label: str, img_b64: str, page_b64: str, key: str):
+    # The small chip
+    st.markdown(
+        f'''
+<span class="chip">
+  📘 {label or "Reference"} ·
+  <a id="open-{key}" href="#" target="_blank" rel="noopener">Open this page ↗</a>
+</span>
+''',
+        unsafe_allow_html=True,
+    )
+
+    # Invisible helper: create a Blob URL from base64 and attach it to the anchor once it exists
+    helper_html = f"""
+<!doctype html><meta charset="utf-8">
+<style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
+<script>
+(function() {{
+  function b64ToUint8Array(s) {{
+    var b = atob(s), u = new Uint8Array(b.length);
+    for (var i = 0; i < b.length; i++) u[i] = b.charCodeAt(i);
+    return u;
+  }}
+  var blob = new Blob([b64ToUint8Array("{page_b64}")], {{ type: "application/pdf" }});
+  var url  = URL.createObjectURL(blob);
+
+  function attach() {{
+    var doc = window.parent && window.parent.document;
+    if (!doc) return setTimeout(attach, 120);
+    // ✅ one hyphen here — must match id="open-{key}"
+    var a = doc.getElementById("open-{key}");
+    if (!a) return setTimeout(attach, 120);
+    a.setAttribute("href", url);
+  }}
+  attach();
+
+  // Hide this iframe completely
+  var me = window.frameElement;
+  if (me) {{ me.style.display = "none"; me.style.height = "0"; me.style.border = "0"; }}
+}})();
+</script>
 
 
 
