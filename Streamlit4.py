@@ -56,10 +56,6 @@ def _new_id():
     return f"m{n}"
 
 
-
-
-
-
 # Make a ONE-PAGE PDF (base64) from a given page
 def single_page_pdf_b64(pdf_bytes: bytes, page_number: int) -> str:
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
@@ -70,15 +66,14 @@ def single_page_pdf_b64(pdf_bytes: bytes, page_number: int) -> str:
     return b64
 
 def render_reference_card(label: str, img_b64: str, page_b64: str, key: str):
+    # Markup: chip + overlay + modal panel
     st.markdown(
         f"""
-        <details class="ref">
+        <details class="ref" id="ref-{key}">
           <summary>📘 {label or "Reference"}</summary>
-
-          <!-- full-screen click-away overlay (separate from summary) -->
-          <button class="overlay" type="button" aria-label="Close"></button>
-
+          <button class="overlay" id="overlay-{key}" type="button" aria-label="Close"></button>
           <div class="panel">
+            <button class="close-x" id="close-{key}" type="button" aria-label="Close">×</button>
             <img src="data:image/png;base64,{img_b64}" alt="reference" loading="lazy"/>
             <div style="margin-top:8px; text-align:right;">
               <a id="open-{key}" href="#" target="_blank" rel="noopener">Open this page ↗</a>
@@ -90,6 +85,7 @@ def render_reference_card(label: str, img_b64: str, page_b64: str, key: str):
         unsafe_allow_html=True,
     )
 
+    # JS: attach blob URL to link + closing (overlay, X, Esc). Hidden iframe (height=0) to run script.
     components.html(
         f"""<!doctype html><meta charset='utf-8'>
 <style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
@@ -102,25 +98,25 @@ def render_reference_card(label: str, img_b64: str, page_b64: str, key: str):
     var d = window.parent && window.parent.document;
     if(!d) return setTimeout(attach,120);
 
-    // wire the "Open this page" link
-    var a = d.getElementById('open-{key}');
-    if(!a) return setTimeout(attach,120);
+    var ref = d.getElementById('ref-{key}');
+    var a   = d.getElementById('open-{key}');
+    var ovl = d.getElementById('overlay-{key}');
+    var cls = d.getElementById('close-{key}');
+    if(!ref || !a || !ovl || !cls) return setTimeout(attach,120);
+
     a.setAttribute('href', url);
 
-    // click-away overlay closes the details
-    d.addEventListener('click', function(e){{
-      if (e.target && e.target.classList && e.target.classList.contains('overlay')) {{
-        var det = e.target.closest('details'); if (det) det.removeAttribute('open');
-      }}
-    }}, {{ once: true }});
+    function closeRef(){{ ref.removeAttribute('open'); }}
+    ovl.addEventListener('click', closeRef);
+    cls.addEventListener('click', closeRef);
+    d.addEventListener('keydown', function(e){{ if(e.key==='Escape') closeRef(); }});
   }}
   attach();
 
-  var me=window.frameElement; if(me){{me.style.display='none';me.style.height='0';me.style.border='0';}}
+  var me = window.frameElement; if(me){{me.style.display='none';me.style.height='0';me.style.border='0';}}
 }})();</script>""",
         height=0,
     )
-
 
 
 
@@ -263,44 +259,55 @@ st.markdown("""
 .user-bubble {background:#007bff;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:right;margin:4px;}
 .assistant-bubble {background:#1e1e1e;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:left;margin:4px;}
 .clearfix::after {content:"";display:table;clear:both;}
+
 /* Reference chip + panel */
 .ref{ display:block; width:60%; max-width:900px; margin:6px 0 12px 8px; }
+
+/* the chip */
 .ref summary{
   display:inline-flex; align-items:center; gap:8px; cursor:pointer; list-style:none; outline:none;
   background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:10px; padding:6px 10px;
 }
 .ref summary::before{ content:"▶"; font-size:12px; line-height:1; }
 .ref[open] summary::before{ content:"▼"; }
-.ref[open] summary{ border-bottom-left-radius:0; border-bottom-right-radius:0; }
-.ref .panel{
-  background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-top:none;
-  border-radius:0 10px 10px 10px; padding:10px; margin-top:0; box-shadow:0 6px 20px rgba(0,0,0,.25);
-}
-.ref .panel img{ width:100%; height:auto; border-radius:8px; display:block; }
-/* click-away overlay */
 /* keep summary (chip) visible in place */
 .ref[open] > summary{}
 
-/* use a separate overlay element instead of hijacking summary */
+/* the lightbox panel */
+.ref .panel{
+  background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-top:none;
+  border-radius:10px; padding:10px; margin-top:0; box-shadow:0 6px 20px rgba(0,0,0,.25);
+}
+.ref .panel img{ width:100%; height:auto; border-radius:8px; display:block; }
+
+/* overlay that closes the lightbox (separate from <summary>) */
 .ref .overlay{ display:none; }
 .ref[open] .overlay{
   display:block; position:fixed; inset:0; z-index:998;
   background:transparent; border:0; padding:0; margin:0;
 }
+
+/* float the panel as a modal when open */
 .ref[open] > .panel{
   position: fixed; z-index: 999; top: 12vh; left: 50%; transform: translateX(-50%);
   width: min(900px, 90vw); max-height: 75vh; overflow: auto; box-shadow:0 20px 60px rgba(0,0,0,.45);
 }
-.chip{
-  display:inline-flex;align-items:center;gap:.5rem;
-  background:#0f172a;color:#e2e8f0;border:1px solid #334155;
-  border-radius:10px;padding:.35rem .6rem;font:14px/1.2 system-ui;
+
+/* optional close X */
+.ref .close-x{
+  position:absolute; top:6px; right:10px; border:0; background:transparent;
+  color:#94a3b8; font-size:20px; line-height:1; cursor:pointer;
 }
+
+/* (kept from before) small link-chip style if you use it elsewhere */
+.chip{ display:inline-flex;align-items:center;gap:.5rem;
+  background:#0f172a;color:#e2e8f0;border:1px solid #334155;
+  border-radius:10px;padding:.35rem .6rem;font:14px/1.2 system-ui; }
 .chip a{color:#93c5fd;text-decoration:none}
 .chip a:hover{text-decoration:underline}
-
 </style>
 """, unsafe_allow_html=True)
+
 
 # ================= Prompt helpers =================
 def format_chat_history(messages):
