@@ -325,8 +325,8 @@ for msg in st.session_state.messages:
 
     if msg.get("source_img") and msg.get("source_b64"):
         render_reference_card(
-            label=f"Reference: {msg.get('source') or 'Page'}",
-            img_b64=msg["source_img"],   # not used by the compact chip anymore, fine to keep param
+            label=(msg.get("source") or "Page"),  # e.g., "Page 17"
+            img_b64=msg["source_img"],
             page_b64=msg["source_b64"],
             key=msg.get("id", "k0"),
         )
