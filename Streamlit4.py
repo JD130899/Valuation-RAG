@@ -130,11 +130,11 @@ def pil_to_base64(img: Image.Image) -> str:
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 def build_pdf_page_link(page_num: int) -> str | None:
-    if st.session_state.get("source_type") == "drive" and st.session_state.get("last_synced_file_id"):
-        fid = st.session_state["last_synced_file_id"]
-        # More reliable than /preview#page=...
-        # Use /view with ?page= and keep #page= as a fallback.
-        return f"https://drive.google.com/file/d/{fid}/view?page={page_num}#page={page_num}"
+    fid = st.session_state.get("last_synced_file_id")
+    if st.session_state.get("source_type") == "drive" and fid:
+        # Try preview (sometimes honored), fall back to direct file endpoint.
+        return f"https://drive.google.com/file/d/{fid}/preview#page={page_num}"
+        # Or: return f"https://drive.google.com/uc?id={fid}&export=download#page={page_num}"
     return None
 
 
@@ -331,29 +331,20 @@ for msg in st.session_state.messages:
         label = f"Reference: {title}" if title else "Reference"
     
         # Try a Drive link first
-        drive_url = build_pdf_page_link(page_num) if page_num else None
-        open_link_html = (
-            f'<a href="{drive_url}" target="_blank" rel="noopener">Open PDF to page {page_num} ⧉</a>'
-            if drive_url else ""
-        )
-    
-        st.markdown(
-            f"""
-            <details class="ref">
-              <summary>📘 {label}</summary>
-              <div class="panel">
-                {'<div style="margin:0 0 8px 0;">'+open_link_html+'</div>' if open_link_html else ''}
-                <img src="data:image/png;base64,{msg['source_img']}" alt="reference" loading="lazy"/>
-              </div>
-            </details>
-            <div class="clearfix"></div>
-            """,
-            unsafe_allow_html=True
-        )
-    
-        # If no Drive URL, render a local Blob-based opener just below the panel
-        if not drive_url and page_num:
+        # Always render a reliable Blob opener (lands exactly on that page)
+        if page_num:
             render_local_pdf_open_link(page_num, label=f"Open PDF to page {page_num} ⧉")
+        
+        # Optionally also show a Drive link (may open at page 1 depending on Drive UI)
+        drive_url = build_pdf_page_link(page_num) if page_num else None
+        if drive_url:
+            st.markdown(
+                f'<div style="width:60%;max-width:900px;margin:4px 0 12px 8px;">'
+                f'<a href="{drive_url}" target="_blank" rel="noopener">Open in Drive (may start at page 1) ⧉</a>'
+                f'</div>',
+                unsafe_allow_html=True
+            )
+
 
 
 
@@ -445,28 +436,20 @@ if st.session_state.waiting_for_response:
             page_num = entry.get("source_page")
             label = entry.get("source", f"Page {page_num}")
         
-            drive_url = build_pdf_page_link(page_num) if page_num else None
-            open_link_html = (
-                f'<a href="{drive_url}" target="_blank" rel="noopener">Open PDF to page {page_num} ⧉</a>'
-                if drive_url else ""
-            )
-        
-            st.markdown(
-                f"""
-                <details class="ref">
-                  <summary>📘 Reference: {label}</summary>
-                  <div class="panel">
-                    {'<div style="margin:0 0 8px 0;">'+open_link_html+'</div>' if open_link_html else ''}
-                    <img src="data:image/png;base64,{entry['source_img']}" alt="reference" loading="lazy"/>
-                  </div>
-                </details>
-                <div class="clearfix"></div>
-                """,
-                unsafe_allow_html=True
-            )
-        
-            if not drive_url and page_num:
+            # Always render a reliable Blob opener (lands exactly on that page)
+            if page_num:
                 render_local_pdf_open_link(page_num, label=f"Open PDF to page {page_num} ⧉")
+            
+            # Optionally also show a Drive link (may open at page 1 depending on Drive UI)
+            drive_url = build_pdf_page_link(page_num) if page_num else None
+            if drive_url:
+                st.markdown(
+                    f'<div style="width:60%;max-width:900px;margin:4px 0 12px 8px;">'
+                    f'<a href="{drive_url}" target="_blank" rel="noopener">Open in Drive (may start at page 1) ⧉</a>'
+                    f'</div>',
+                    unsafe_allow_html=True
+                )
+
 
 
 
