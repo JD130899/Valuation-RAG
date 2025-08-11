@@ -272,7 +272,7 @@ if "uploaded_file_from_drive" in st.session_state:
     st.markdown(
         f"""
         <div style="background:#1f2c3a; padding:8px; border-radius:8px; color:#fff;">
-          ✅ <b>Using synced file:</b>
+          <b>Using Uploaded File:</b>
           <a id="hdr-open-drive" href="#" target="_blank" rel="noopener"
              style="color:#93c5fd; text-decoration:underline;">{display_name}</a>
         </div>
@@ -314,7 +314,7 @@ else:
         st.markdown(
             f'''
             <div style="background:#1f2c3a; padding:8px; border-radius:8px; color:#fff;">
-              ✅ <b>Using synced file:</b>
+              <b>Using Uploaded File:</b>
               <a id="hdr-open-local" href="#" target="_blank" rel="noopener"
                  style="color:#93c5fd; text-decoration:underline;">{display_name}</a>
             </div>
