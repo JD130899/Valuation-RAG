@@ -71,34 +71,44 @@ def single_page_pdf_b64(pdf_bytes: bytes, page_number: int) -> str:
 
 
 def render_reference_card(label: str, img_b64: str, page_b64: str, key: str):
-    # The small chip
+    # UI: collapsible "Reference" chip -> panel with page image + open link
     st.markdown(
-        f'''
-<span class="chip">
-  📘 {label or "Reference"} ·
-  <a id="open-{key}" href="#" target="_blank" rel="noopener">Open this page ↗</a>
-</span>
-''',
+        f"""
+        <details class="ref">
+          <summary>📘 {label or "Reference"}</summary>
+          <div class="panel">
+            <img src="data:image/png;base64,{img_b64}" alt="reference" loading="lazy"/>
+            <div style="margin-top:8px; text-align:right;">
+              <a id="open-{key}" href="#" target="_blank" rel="noopener">Open this page ↗</a>
+            </div>
+          </div>
+        </details>
+        <div class="clearfix"></div>
+        """,
         unsafe_allow_html=True,
     )
 
-    # Invisible helper: create a Blob URL from base64 and attach it to the anchor once it exists
-    helper_html = (
-        "<!doctype html><meta charset='utf-8'>"
-        "<style>html,body{background:transparent;margin:0;height:0;overflow:hidden}</style>"
-        "<script>(function(){"
-        "function b64ToUint8Array(s){var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}"
-        f"var blob=new Blob([b64ToUint8Array('{page_b64}')],{{type:'application/pdf'}});"
-        "var url=URL.createObjectURL(blob);"
-        "function attach(){var d=window.parent&&window.parent.document;if(!d)return setTimeout(attach,120);"
-        f"var a=d.getElementById('open-{key}');"
-        "if(!a)return setTimeout(attach,120);"
-        "a.setAttribute('href',url);}"
-        "attach();"
-        "var me=window.frameElement;if(me){me.style.display='none';me.style.height='0';me.style.border='0';}"
-        "})();</script>"
+    # Helper: build blob URL from base64 and attach it to the anchor (no visible iframe)
+    components.html(
+        f"""<!doctype html><meta charset='utf-8'>
+<style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
+<script>(function(){{
+  function b64ToUint8Array(s){{var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}}
+  var blob = new Blob([b64ToUint8Array('{page_b64}')], {{type:'application/pdf'}});
+  var url  = URL.createObjectURL(blob);
+  function attach(){{
+    var d = window.parent && window.parent.document;
+    if(!d) return setTimeout(attach,120);
+    var a = d.getElementById('open-{key}');
+    if(!a) return setTimeout(attach,120);
+    a.setAttribute('href', url);
+  }}
+  attach();
+  var me = window.frameElement; if(me){{me.style.display='none';me.style.height='0';me.style.border='0';}}
+}})();</script>""",
+        height=0,
     )
-    components.html(helper_html, height=0)
+
 
 
 
