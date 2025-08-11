@@ -130,6 +130,37 @@ if not st.session_state._css_done:
     """, unsafe_allow_html=True)
     st.session_state._css_done = True
 
+def pdf_banner(display_name: str, link_id: str, pdf_bytes: bytes):
+    # Visible banner (clickable file name, no .pdf suffix)
+    st.markdown(
+        f'''
+        <div style="background:#1f2c3a; padding:8px; border-radius:8px; color:#fff;">
+          <b>Using Uploaded File:</b>
+          <a id="{link_id}" href="#" target="_blank" rel="noopener"
+             style="color:#93c5fd; text-decoration:underline;">{display_name}</a>
+        </div>
+        ''',
+        unsafe_allow_html=True,
+    )
+
+    # Hidden iframe: attach a Blob URL to the link (NO f-string here)
+    b64 = base64.b64encode(pdf_bytes).decode("ascii")
+    script = (
+        "<!doctype html><meta charset='utf-8'>"
+        "<style>html,body{background:transparent;margin:0;height:0;overflow:hidden}</style>"
+        "<script>(function(){"
+        "function b64ToU8(s){var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}"
+        "var url=URL.createObjectURL(new Blob([b64ToU8('$B64')], {type:'application/pdf'}));"
+        "function attach(){var d=window.parent&&window.parent.document;var a=d&&d.getElementById('$ID');"
+        "if(!a)return setTimeout(attach,100);"
+        "if(a.dataset.wired==='1')return;"
+        "a.setAttribute('href',url);a.dataset.wired='1';}"
+        "attach();"
+        "var me=window.frameElement;if(me){me.style.display='none';me.style.height='0';me.style.border='0';}"
+        "})();</script>"
+    ).replace("$B64", b64).replace("$ID", link_id)
+
+    components.html(script, height=0)
 
 def _new_id():
     n = st.session_state.next_msg_id
@@ -352,8 +383,11 @@ st.title("Underwriting Agent")
 # ================= Source selector (Drive or local upload) =================
 if "uploaded_file_from_drive" in st.session_state:
     file_name = st.session_state.uploaded_file_name
-    display_name = os.path.splitext(file_name)[0]  # no ".pdf"
-    pdf_bytes_for_banner = st.session_state.uploaded_file_from_drive
+    display_name = os.path.splitext(file_name)[0]
+    pdf_banner(display_name, "hdr-open-drive", st.session_state.uploaded_file_from_drive)
+    
+    up = io.BytesIO(st.session_state.uploaded_file_from_drive)
+    up.name = file_name
 
     # Banner: file name is the clickable link
     st.markdown(
@@ -403,8 +437,10 @@ else:
 
     if up is not None:
         file_name = up.name
-        display_name = os.path.splitext(file_name)[0]  # no ".pdf"
+        display_name = os.path.splitext(file_name)[0]
         pdf_bytes_for_banner = up.getvalue()
+        
+        pdf_banner(display_name, "hdr-open-local", pdf_bytes_for_banner)
 
         st.markdown(
             f'''
