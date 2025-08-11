@@ -130,15 +130,13 @@ def pil_to_base64(img: Image.Image) -> str:
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 def build_pdf_page_link(page_num: int) -> str | None:
-    """
-    If the source is Google Drive, return a viewer URL that opens on the page.
-    Otherwise return None (we'll fall back to a local Blob link).
-    """
     if st.session_state.get("source_type") == "drive" and st.session_state.get("last_synced_file_id"):
         fid = st.session_state["last_synced_file_id"]
-        # Drive preview supports #page= param
-        return f"https://drive.google.com/file/d/{fid}/preview#page={page_num}"
+        # More reliable than /preview#page=...
+        # Use /view with ?page= and keep #page= as a fallback.
+        return f"https://drive.google.com/file/d/{fid}/view?page={page_num}#page={page_num}"
     return None
+
 
 
 def render_local_pdf_open_link(page_num: int, label: str = "Open PDF to this page ⧉"):
