@@ -393,53 +393,16 @@ if "uploaded_file_from_drive" in st.session_state:
     display_name = os.path.splitext(file_name)[0]   # remove ".pdf"
     pdf_bytes = st.session_state.uploaded_file_from_drive
 
+    # one banner (clickable file name)
     pdf_banner(display_name, "hdr-open-drive", pdf_bytes)
 
+    # normalize uploader object to a BytesIO with a .name for downstream code
     up = io.BytesIO(pdf_bytes)
     up.name = file_name
 
 
     # Banner: file name is the clickable link
-    st.markdown(
-        f"""
-        <div style="background:#1f2c3a; padding:8px; border-radius:8px; color:#fff;">
-          <b>Using Uploaded File:</b>
-          <a id="hdr-open-drive" href="#" target="_blank" rel="noopener"
-             style="color:#93c5fd; text-decoration:underline;">{display_name}</a>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    # Attach a Blob URL to that link
-    _b64 = base64.b64encode(pdf_bytes_for_banner).decode("ascii")
-    components.html(
-    f'''<!doctype html><meta charset='utf-8'>
-<style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
-<script>(function(){{                               /* doubled */
-  function b64ToU8(s){{var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}}
-  function attach(){{ 
-    var d = window.parent && window.parent.document;
-    var a = d && d.getElementById("hdr-open-drive");
-    if(!a) return setTimeout(attach, 100);
-    if (a.dataset.wired === "1") return;
-
-    var url = URL.createObjectURL(new Blob([b64ToU8("{_b64}")], {{type:"application/pdf"}}));
-    a.setAttribute("href", url);
-    a.dataset.wired = "1";
-  }}
-  attach();
-
-  var me = window.frameElement; if(me){{me.style.display="none";me.style.height="0";me.style.border="0";}}
-}})();</script>''',
-    height=0,
-)
-
-
-
-    up = io.BytesIO(pdf_bytes_for_banner)
-    up.name = file_name
-
+   
 else:
     up = st.file_uploader("Upload a valuation report PDF", type="pdf")
     if up is not None:
@@ -447,44 +410,12 @@ else:
         display_name = os.path.splitext(file_name)[0]
         pdf_bytes = up.getvalue()
 
+        # one banner (clickable file name)
         pdf_banner(display_name, "hdr-open-local", pdf_bytes)
 
-
-        st.markdown(
-            f'''
-            <div style="background:#1f2c3a; padding:8px; border-radius:8px; color:#fff;">
-              <b>Using Uploaded File:</b>
-              <a id="hdr-open-local" href="#" target="_blank" rel="noopener"
-                 style="color:#93c5fd; text-decoration:underline;">{display_name}</a>
-            </div>
-            ''',
-            unsafe_allow_html=True,
-        )
-
-        _b64_local = base64.b64encode(pdf_bytes_for_banner).decode("ascii")
-        components.html(
-        f"""<!doctype html><meta charset='utf-8'>
-    <style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
-    <script>(function(){{ 
-      function b64ToU8(s){{var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}}
-      function attach(){{ 
-        var d = window.parent && window.parent.document;
-        var a = d && d.getElementById("hdr-open-local");
-        if(!a) return setTimeout(attach, 100);
-    
-        // guard
-        if (a.dataset.wired === "1") return;
-    
-        var url = URL.createObjectURL(new Blob([b64ToU8("{_b64_local}")], {{type:"application/pdf"}}));
-        a.setAttribute("href", url);
-        a.dataset.wired = "1";
-      }}
-      attach();
-    
-      var me = window.frameElement; if(me){{me.style.display="none";me.style.height="0";me.style.border="0";}}
-    }})();</script>""",
-        height=0,
-    )
+        # normalize to BytesIO with .name
+        up = io.BytesIO(pdf_bytes)
+        up.name = file_name
 
 
 
