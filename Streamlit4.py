@@ -46,7 +46,8 @@ if "page_images" not in st.session_state:
 if "next_msg_id" not in st.session_state:
     st.session_state.next_msg_id = 0
 
-
+if "loading_new_pdf" not in st.session_state:
+    st.session_state.loading_new_pdf = False
 
 
 
@@ -212,11 +213,15 @@ if pdf_files:
                 st.session_state.uploaded_file_from_drive = open(path, "rb").read()
                 st.session_state.uploaded_file_name = fname
                 st.session_state.last_synced_file_id = fid
-                # reset convo for new doc
-                st.session_state.messages = [
-                    {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
-                    {"role": "assistant", "content": "What can I help you with?"}
-                ]
+    
+                # <<< wipe chat immediately and mark that we’re building >>>
+                st.session_state.messages = []
+                st.session_state.loading_new_pdf = True
+                # make sure the next block rebuilds
+                st.session_state.last_processed_pdf = None
+    
+                st.rerun()
+
 else:
     st.sidebar.warning("📭 No PDFs found in Drive.")
 
@@ -241,17 +246,30 @@ if not up:
     st.stop()
 
 # Rebuild retriever when file changes
+
 if st.session_state.get("last_processed_pdf") != up.name:
+    # First pass after a new selection: clear UI and rerun quickly
+    if not st.session_state.loading_new_pdf:
+        st.session_state.messages = []
+        st.session_state.loading_new_pdf = True
+        st.rerun()
+
+    # Second pass: actually build
     pdf_bytes = up.getvalue()
     st.session_state.pdf_bytes = pdf_bytes
     st.session_state.retriever, st.session_state.page_images = build_retriever_from_pdf(pdf_bytes, up.name)
 
-    # reset convo for new doc
+    # Re-seed greetings only after build completes
     st.session_state.messages = [
         {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
         {"role": "assistant", "content": "What can I help you with?"}
     ]
     st.session_state.last_processed_pdf = up.name
+    st.session_state.loading_new_pdf = False
+
+    # Optional: quick refresh so the new greetings appear instantly
+    st.rerun()
+
 
 # ================= Styles =================
 st.markdown("""
