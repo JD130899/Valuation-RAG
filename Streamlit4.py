@@ -46,10 +46,64 @@ if "page_images" not in st.session_state:
 if "next_msg_id" not in st.session_state:
     st.session_state.next_msg_id = 0
 
+
 def _new_id():
     n = st.session_state.next_msg_id
     st.session_state.next_msg_id += 1
     return f"m{n}"
+
+def render_reference_card(label: str, img_b64: str, page_b64: str, key: str, height: int = 620):
+    html = """
+<!doctype html><meta charset='utf-8'>
+<style>
+  .ref summary{ display:inline-flex; align-items:center; gap:8px; cursor:pointer; list-style:none; outline:none;
+    background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:10px; padding:6px 10px; }
+  .ref summary::before{ content:"▶"; font-size:12px; line-height:1; }
+  .ref[open] summary::before{ content:"▼"; }
+  .ref[open] summary{ border-bottom-left-radius:0; border-bottom-right-radius:0; }
+  .panel{ background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-top:none;
+    border-radius:0 10px 10px 10px; padding:10px; margin-top:0; box-shadow:0 6px 20px rgba(0,0,0,.25); }
+  .panel img{ width:100%; height:auto; border-radius:8px; display:block; }
+  html,body{ background:transparent; margin:0; }
+</style>
+
+<details class="ref">
+  <summary>📘 __LABEL__</summary>
+  <div class="panel">
+    <img src="data:image/png;base64,__IMG__" alt="reference" loading="lazy"/>
+    <div style="margin-top:8px;text-align:right;">
+      <a href="#" id="open-__KEY__">Open this page ↗</a>
+    </div>
+  </div>
+</details>
+
+<script>
+(function(){
+  function b64ToUint8Array(s){
+    const b = atob(s); const u = new Uint8Array(b.length);
+    for (let i=0;i<b.length;i++) u[i] = b.charCodeAt(i);
+    return u;
+  }
+  const blob = new Blob([b64ToUint8Array("__PAGE_B64__")], { type: "application/pdf" });
+  const url  = URL.createObjectURL(blob);
+  const a = document.getElementById("open-__KEY__");
+  if (a) {
+    a.addEventListener("click", function(ev){
+      ev.preventDefault();
+      const w = window.open(url, "_blank", "noopener");
+      if (!w) window.location.href = url;
+    });
+  }
+})();
+</script>
+"""
+    html = (html
+            .replace("__LABEL__", label)
+            .replace("__IMG__", img_b64)
+            .replace("__KEY__", key)
+            .replace("__PAGE_B64__", page_b64))
+    components.html(html, height=height)
+
 
 # Make a ONE-PAGE PDF (base64) from a given page
 def single_page_pdf_b64(pdf_bytes: bytes, page_number: int) -> str:
@@ -98,6 +152,8 @@ components.html("""
 for m in st.session_state.messages:
     if "id" not in m:
         m["id"] = _new_id()
+
+
 
 # ================= Builder =================
 @st.cache_resource(show_spinner="📦 Processing & indexing PDF…")
@@ -304,39 +360,15 @@ for msg in st.session_state.messages:
     cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
     st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
 
-    if msg.get("source_img"):
-        title = msg.get("source")
-        label = f"Reference: {title}" if title else "Reference"
-
-        # Link uses a tiny key; the blob URL is registered below
-        key = msg.get("id", "k0")
-        link_html = (
-            "<div style='margin-top:8px;text-align:right;'>"
-            f"<a class='ref-open' href='#' data-key='{key}'>Open this page ↗</a>"
-            "</div>"
+    if msg.get("source_img") and msg.get("source_b64"):
+        render_reference_card(
+            label=f"Reference: {msg.get('source') or 'Page'}",
+            img_b64=msg["source_img"],
+            page_b64=msg["source_b64"],
+            key=msg.get("id", "k0"),
         )
 
-        st.markdown(
-            f"""
-            <details class="ref">
-              <summary>📘 {label}</summary>
-              <div class="panel">
-                <img src="data:image/png;base64,{msg['source_img']}" alt="reference" loading="lazy"/>
-                {link_html}
-              </div>
-            </details>
-            <div class="clearfix"></div>
-            """,
-            unsafe_allow_html=True
-        )
 
-        # Register the blob URL for this message key (no white bars; height=0)
-        if msg.get("source_b64"):
-            components.html(f"""
-<!doctype html><meta charset='utf-8'>
-<style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
-<script>window.parent && window.parent.registerPdfBlob && window.parent.registerPdfBlob("{key}", "{msg['source_b64']}");</script>
-""", height=0)
 
 # ================= Answer (single-pass, no rerun) =================
 if st.session_state.waiting_for_response:
@@ -419,34 +451,16 @@ if st.session_state.waiting_for_response:
     with block.container():
         st.markdown(f"<div class='assistant-bubble clearfix'>{answer}</div>", unsafe_allow_html=True)
 
+        # Register the blob URL for this new message (no white bars; height=0)
         if entry.get("source_img"):
-            label = entry.get("source", f"Page {ref_page}")
-            key = entry.get("id", "k0")
-            link_html = (
-                "<div style='margin-top:8px;text-align:right;'>"
-                f"<a class='ref-open' href='#' data-key='{key}'>Open this page ↗</a>"
-                "</div>"
+            render_reference_card(
+                label=entry.get("source", f"Page {ref_page}"),
+                img_b64=entry["source_img"],
+                page_b64=entry["source_b64"],
+                key=entry.get("id", "k0"),
             )
 
-            st.markdown(
-                f"""
-                <details class="ref">
-                  <summary>📘 Reference: {label}</summary>
-                  <div class="panel">
-                    <img src="data:image/png;base64,{entry['source_img']}" alt="reference" loading="lazy"/>
-                    {link_html}
-                  </div>
-                </details>
-                <div class="clearfix"></div>
-                """,
-                unsafe_allow_html=True
-            )
-            # Register the blob for this new message
-            components.html(f"""
-<!doctype html><meta charset='utf-8'>
-<style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
-<script>window.parent && window.parent.registerPdfBlob && window.parent.registerPdfBlob("{key}", "{entry['source_b64']}");</script>
-""", height=0)
+
 
     # Persist
     st.session_state.messages.append(entry)
