@@ -410,12 +410,8 @@ if st.session_state.waiting_for_response:
                             entry["source_img"] = ref_img_b64
 
                             # Drive → open viewer at #page=N; Local → one-page blob
-                            if "uploaded_file_from_drive" in st.session_state:
-                                entry["source_url"] = f"{st.session_state.pdf_link_base}#page={ref_page}"
-                                entry["source_b64"] = ""
-                            else:
-                                entry["source_url"] = ""
-                                entry["source_b64"] = single_page_pdf_b64(st.session_state.pdf_bytes, ref_page)
+                            entry["source_url"] = ""  # don't use Drive link to avoid auto-downloads
+                            entry["source_b64"] = single_page_pdf_b64(st.session_state.pdf_bytes, ref_page)
 
             except Exception as e:
                 st.info(f"ℹ️ Reference selection skipped: {e}")
