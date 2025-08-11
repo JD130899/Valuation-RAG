@@ -122,12 +122,45 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
         ),
         base_compressor=reranker
     )
-    return retriever, page_images
+    return retriever, page_images, pdf_path 
 
 def pil_to_base64(img: Image.Image) -> str:
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return base64.b64encode(buf.getvalue()).decode("ascii")
+
+def build_pdf_page_link(page_num: int) -> str | None:
+    """
+    If the source is Google Drive, return a viewer URL that opens on the page.
+    Otherwise return None (we'll fall back to a local Blob link).
+    """
+    if st.session_state.get("source_type") == "drive" and st.session_state.get("last_synced_file_id"):
+        fid = st.session_state["last_synced_file_id"]
+        # Drive preview supports #page= param
+        return f"https://drive.google.com/file/d/{fid}/preview#page={page_num}"
+    return None
+
+
+def render_local_pdf_open_link(page_num: int, label: str = "Open PDF to this page ⧉"):
+    pdf_bytes = st.session_state.get("current_pdf_bytes")
+    if not pdf_bytes:
+        return
+    b64 = base64.b64encode(pdf_bytes).decode("ascii")
+    html = """
+    <div style="width:60%;max-width:900px;margin:8px 0 12px 8px;">
+      <a href="#" onclick='(function(){{ 
+          const b64="{b64}";
+          const byteChars = atob(b64);
+          const byteNumbers = new Array(byteChars.length);
+          for (let i = 0; i < byteChars.length; i++) byteNumbers[i] = byteChars.charCodeAt(i);
+          const byteArray = new Uint8Array(byteNumbers);
+          const blob = new Blob([byteArray], {{type: "application/pdf"}});
+          const url = URL.createObjectURL(blob);
+          window.open(url + "#page={page_num}", "_blank", "noopener");
+      }})()'>{label}</a>
+    </div>
+    """.format(b64=b64, page_num=page_num, label=label)
+    components.html(html, height=36)
 
 # ================= Sidebar: Google Drive loader =================
 service = get_drive_service()
@@ -146,6 +179,8 @@ if pdf_files:
                 st.session_state.uploaded_file_from_drive = open(path, "rb").read()
                 st.session_state.uploaded_file_name = fname
                 st.session_state.last_synced_file_id = fid
+                st.session_state.source_type = "drive"            
+                st.session_state.source_drive_id = fid     
                 # reset convo for new doc
                 st.session_state.messages = [
                     {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
@@ -177,12 +212,15 @@ if not up:
 # Rebuild retriever when file changes
 if st.session_state.get("last_processed_pdf") != up.name:
     pdf_bytes = up.getvalue()
-    st.session_state.retriever, st.session_state.page_images = build_retriever_from_pdf(pdf_bytes, up.name)
+    st.session_state.retriever, st.session_state.page_images, st.session_state.current_pdf_path = build_retriever_from_pdf(pdf_bytes, up.name)  # <- NEW: pdf_path
+    st.session_state.current_pdf_bytes = pdf_bytes  # NEW: keep bytes for local "blob" link
+    st.session_state.source_type = "drive" if "uploaded_file_from_drive" in st.session_state else "upload"  # NEW
+   
     st.session_state.messages = [
         {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
         {"role": "assistant", "content": "What can I help you with?"}
     ]
-    st.session_state.last_processed_pdf = up.name
+    st.session_state.current_pdf_name = up.name  # NEW (optional)
 
 
 st.markdown("""
@@ -291,12 +329,22 @@ for msg in st.session_state.messages:
 
     if msg.get("source_img"):
         title = msg.get("source")
+        page_num = msg.get("source_page")
         label = f"Reference: {title}" if title else "Reference"
+    
+        # Try a Drive link first
+        drive_url = build_pdf_page_link(page_num) if page_num else None
+        open_link_html = (
+            f'<a href="{drive_url}" target="_blank" rel="noopener">Open PDF to page {page_num} ⧉</a>'
+            if drive_url else ""
+        )
+    
         st.markdown(
             f"""
             <details class="ref">
               <summary>📘 {label}</summary>
               <div class="panel">
+                {'<div style="margin:0 0 8px 0;">'+open_link_html+'</div>' if open_link_html else ''}
                 <img src="data:image/png;base64,{msg['source_img']}" alt="reference" loading="lazy"/>
               </div>
             </details>
@@ -304,6 +352,11 @@ for msg in st.session_state.messages:
             """,
             unsafe_allow_html=True
         )
+    
+        # If no Drive URL, render a local Blob-based opener just below the panel
+        if not drive_url and page_num:
+            render_local_pdf_open_link(page_num, label=f"Open PDF to page {page_num} ⧉")
+
 
 
 # ================= Answer (single-pass, no rerun) =================
@@ -381,6 +434,7 @@ if st.session_state.waiting_for_response:
                         if ref_img_b64:
                             entry["source"] = f"Page {ref_page}"
                             entry["source_img"] = ref_img_b64
+                            entry["source_page"] = ref_page  
             except Exception as e:
                 st.info(f"ℹ️ Reference selection skipped: {e}")
 
@@ -390,12 +444,21 @@ if st.session_state.waiting_for_response:
         st.markdown(f"<div class='assistant-bubble clearfix'>{answer}</div>", unsafe_allow_html=True)
     
         if entry.get("source_img"):
-            label = entry.get("source", f"Page {ref_page}")
+            page_num = entry.get("source_page")
+            label = entry.get("source", f"Page {page_num}")
+        
+            drive_url = build_pdf_page_link(page_num) if page_num else None
+            open_link_html = (
+                f'<a href="{drive_url}" target="_blank" rel="noopener">Open PDF to page {page_num} ⧉</a>'
+                if drive_url else ""
+            )
+        
             st.markdown(
                 f"""
                 <details class="ref">
                   <summary>📘 Reference: {label}</summary>
                   <div class="panel">
+                    {'<div style="margin:0 0 8px 0;">'+open_link_html+'</div>' if open_link_html else ''}
                     <img src="data:image/png;base64,{entry['source_img']}" alt="reference" loading="lazy"/>
                   </div>
                 </details>
@@ -403,6 +466,10 @@ if st.session_state.waiting_for_response:
                 """,
                 unsafe_allow_html=True
             )
+        
+            if not drive_url and page_num:
+                render_local_pdf_open_link(page_num, label=f"Open PDF to page {page_num} ⧉")
+
 
 
     # Persist
