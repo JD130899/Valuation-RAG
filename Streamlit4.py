@@ -25,26 +25,6 @@ load_dotenv()
 st.set_page_config(page_title="Underwriting Agent", layout="wide")
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# ------- Session state bootstrapping (must be above any usage) -------
-def _boot_state():
-    ss = st.session_state
-    ss.setdefault("last_synced_file_id", None)
-    ss.setdefault("messages", [
-        {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
-        {"role": "assistant", "content": "What can I help you with?"}
-    ])
-    ss.setdefault("pending_input", None)
-    ss.setdefault("waiting_for_response", False)
-    ss.setdefault("retriever", None)
-    ss.setdefault("page_images", {})
-    ss.setdefault("next_msg_id", 0)
-    ss.setdefault("loading_new_pdf", False)
-    ss.setdefault("last_processed_pdf", None)
-
-_boot_state()
-
-
-
 # ---------- Session state ----------
 if "last_synced_file_id" not in st.session_state:
     st.session_state.last_synced_file_id = None
@@ -69,104 +49,6 @@ if "next_msg_id" not in st.session_state:
 if "loading_new_pdf" not in st.session_state:
     st.session_state.loading_new_pdf = False
 
-# right after session_state init:
-if "_css_done" not in st.session_state:
-    st.session_state._css_done = False
-
-# replace your current CSS st.markdown(...) with:
-if not st.session_state._css_done:
-    st.markdown("""
-    <style>
-    .user-bubble {background:#007bff;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:right;margin:4px;}
-    .assistant-bubble {background:#1e1e1e;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:left;margin:4px;}
-    .clearfix::after {content:"";display:table;clear:both;}
-    
-    /* Reference chip + panel */
-    .ref{ display:block; width:60%; max-width:900px; margin:6px 0 12px 8px; }
-    
-    /* the chip */
-    .ref summary{
-      display:inline-flex; align-items:center; gap:8px; cursor:pointer; list-style:none; outline:none;
-      background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:10px; padding:6px 10px;
-    }
-    .ref summary::before{ content:"▶"; font-size:12px; line-height:1; }
-    .ref[open] summary::before{ content:"▼"; }
-    /* keep summary (chip) visible in place */
-    .ref[open] > summary{}
-    
-    /* the lightbox panel */
-    .ref .panel{
-      background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-top:none;
-      border-radius:10px; padding:10px; margin-top:0; box-shadow:0 6px 20px rgba(0,0,0,.25);
-    }
-    .ref .panel img{ width:100%; height:auto; border-radius:8px; display:block; }
-    
-    /* overlay that closes the lightbox (separate from <summary>) */
-    .ref .overlay{ display:none; }
-    .ref[open] .overlay{
-      display:block; position:fixed; inset:0; z-index:998;
-      background:transparent; border:0; padding:0; margin:0;
-    }
-    
-    /* float the panel as a modal when open */
-    .ref[open] > .panel{
-      position: fixed; z-index: 999; top: 12vh; left: 50%; transform: translateX(-50%);
-      width: min(900px, 90vw); max-height: 75vh; overflow: auto; box-shadow:0 20px 60px rgba(0,0,0,.45);
-    }
-    
-    /* optional close X */
-    .ref .close-x{
-      position:absolute; top:6px; right:10px; border:0; background:transparent;
-      color:#94a3b8; font-size:20px; line-height:1; cursor:pointer;
-    }
-    
-    /* (kept from before) small link-chip style if you use it elsewhere */
-    .chip{ display:inline-flex;align-items:center;gap:.5rem;
-      background:#0f172a;color:#e2e8f0;border:1px solid #334155;
-      border-radius:10px;padding:.35rem .6rem;font:14px/1.2 system-ui; }
-    .chip a{color:#93c5fd;text-decoration:none}
-    .chip a:hover{text-decoration:underline}
-    </style>
-    """, unsafe_allow_html=True)
-    st.session_state._css_done = True
-
-def pdf_banner(display_name: str, link_id: str, pdf_bytes: bytes):
-    """Render the blue banner and wire the link to a Blob URL of the PDF."""
-    import base64
-    b64 = base64.b64encode(pdf_bytes).decode("ascii")
-
-    # Visible banner (file name is the clickable link)
-    st.markdown(
-        f'''
-        <div style="background:#1f2c3a; padding:8px; border-radius:8px; color:#fff;">
-          <b>Using Uploaded File:</b>
-          <a id="{link_id}" href="#" target="_blank" rel="noopener"
-             style="color:#93c5fd; text-decoration:underline;">{display_name}</a>
-        </div>
-        ''',
-        unsafe_allow_html=True,
-    )
-
-    # Hidden iframe with JS: attach a Blob URL to that link (NOTE the doubled {{ }})
-    components.html(
-        f'''<!doctype html><meta charset="utf-8">
-<style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
-<script>(function(){{
-  function b64ToU8(s){{var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}}
-  function attach(){{
-    var d = window.parent && window.parent.document;
-    if(!d) return setTimeout(attach, 100);
-    var a = d.getElementById("{link_id}");
-    if(!a || a.dataset.wired==="1") return setTimeout(attach, 100);
-    var url = URL.createObjectURL(new Blob([b64ToU8("{b64}")], {{type:"application/pdf"}}));
-    a.setAttribute("href", url);
-    a.dataset.wired = "1";
-  }}
-  attach();
-  var me = window.frameElement; if(me){{me.style.display="none";me.style.height="0";me.style.border="0";}}
-}})();</script>''',
-        height=0,
-    )
 
 
 def _new_id():
@@ -239,43 +121,36 @@ def render_reference_card(label: str, img_b64: str, page_b64: str, key: str):
 
     # JS: attach blob URL to link + closing (overlay, X, Esc). Hidden iframe (height=0) to run script.
     components.html(
-    f"""<!doctype html><meta charset='utf-8'>
+        f"""<!doctype html><meta charset='utf-8'>
 <style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
 <script>(function(){{
-  function b64ToU8(s){{ var b=atob(s), u=new Uint8Array(b.length); for (var i=0;i<b.length;i++) u[i]=b.charCodeAt(i); return u; }}
-  var blob = new Blob([b64ToU8('{page_b64}')], {{type:'application/pdf'}});
+  function b64ToUint8Array(s){{var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}}
+  var blob = new Blob([b64ToUint8Array('{page_b64}')], {{type:'application/pdf'}});
   var url  = URL.createObjectURL(blob);
 
   function attach(){{
     var d = window.parent && window.parent.document;
-    if (!d) return setTimeout(attach,120);
+    if(!d) return setTimeout(attach,120);
 
     var ref = d.getElementById('ref-{key}');
     var a   = d.getElementById('open-{key}');
     var ovl = d.getElementById('overlay-{key}');
     var cls = d.getElementById('close-{key}');
-    if (!ref || !a || !ovl || !cls) return setTimeout(attach,120);
-
-    // guard: wire only once (prevents re-flicker on reruns)
-    if (a.dataset.wired === '1') return;
+    if(!ref || !a || !ovl || !cls) return setTimeout(attach,120);
 
     a.setAttribute('href', url);
-    a.dataset.wired = '1';
 
     function closeRef(){{ ref.removeAttribute('open'); }}
     ovl.addEventListener('click', closeRef);
     cls.addEventListener('click', closeRef);
-    d.addEventListener('keydown', function(e){{ if (e.key === 'Escape') closeRef(); }});
+    d.addEventListener('keydown', function(e){{ if(e.key==='Escape') closeRef(); }});
   }}
   attach();
 
-  var me = window.frameElement; if (me) {{ me.style.display='none'; me.style.height='0'; me.style.border='0'; }}
+  var me = window.frameElement; if(me){{me.style.display='none';me.style.height='0';me.style.border='0';}}
 }})();</script>""",
-    height=0,
-)
-
-
-
+        height=0,
+    )
 
 
 
@@ -390,34 +265,81 @@ st.title("Underwriting Agent")
 # ================= Source selector (Drive or local upload) =================
 if "uploaded_file_from_drive" in st.session_state:
     file_name = st.session_state.uploaded_file_name
-    display_name = os.path.splitext(file_name)[0]   # remove ".pdf"
-    pdf_bytes = st.session_state.uploaded_file_from_drive
-
-    # one banner (clickable file name)
-    pdf_banner(display_name, "hdr-open-drive", pdf_bytes)
-
-    # normalize uploader object to a BytesIO with a .name for downstream code
-    up = io.BytesIO(pdf_bytes)
-    up.name = file_name
-
+    display_name = os.path.splitext(file_name)[0]  # no ".pdf"
+    pdf_bytes_for_banner = st.session_state.uploaded_file_from_drive
 
     # Banner: file name is the clickable link
-   
+    st.markdown(
+        f"""
+        <div style="background:#1f2c3a; padding:8px; border-radius:8px; color:#fff;">
+          <b>Using Uploaded File:</b>
+          <a id="hdr-open-drive" href="#" target="_blank" rel="noopener"
+             style="color:#93c5fd; text-decoration:underline;">{display_name}</a>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # Attach a Blob URL to that link
+    _b64 = base64.b64encode(pdf_bytes_for_banner).decode("ascii")
+    components.html(
+        f'''<!doctype html><meta charset='utf-8'>
+<style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
+<script>(function(){{
+  function b64ToU8(s){{var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}}
+  var url = URL.createObjectURL(new Blob([b64ToU8("{_b64}")], {{type:"application/pdf"}}));
+  function attach(){{
+    var d = window.parent && window.parent.document;
+    var a = d && d.getElementById("hdr-open-drive");
+    if(!a) return setTimeout(attach, 100);
+    a.setAttribute("href", url);
+  }}
+  attach();
+  var me = window.frameElement; if(me){{me.style.display="none";me.style.height="0";me.style.border="0";}}
+}})();</script>''',
+        height=0,
+    )
+
+    up = io.BytesIO(pdf_bytes_for_banner)
+    up.name = file_name
+
 else:
     up = st.file_uploader("Upload a valuation report PDF", type="pdf")
+
     if up is not None:
         file_name = up.name
-        display_name = os.path.splitext(file_name)[0]
-        pdf_bytes = up.getvalue()
+        display_name = os.path.splitext(file_name)[0]  # no ".pdf"
+        pdf_bytes_for_banner = up.getvalue()
 
-        # one banner (clickable file name)
-        pdf_banner(display_name, "hdr-open-local", pdf_bytes)
+        st.markdown(
+            f'''
+            <div style="background:#1f2c3a; padding:8px; border-radius:8px; color:#fff;">
+              <b>Using Uploaded File:</b>
+              <a id="hdr-open-local" href="#" target="_blank" rel="noopener"
+                 style="color:#93c5fd; text-decoration:underline;">{display_name}</a>
+            </div>
+            ''',
+            unsafe_allow_html=True,
+        )
 
-        # normalize to BytesIO with .name
-        up = io.BytesIO(pdf_bytes)
-        up.name = file_name
-
-
+        _b64_local = base64.b64encode(pdf_bytes_for_banner).decode("ascii")
+        components.html(
+            f'''<!doctype html><meta charset='utf-8'>
+<style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
+<script>(function(){{
+  function b64ToU8(s){{var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}}
+  var url = URL.createObjectURL(new Blob([b64ToU8("{_b64_local}")], {{type:"application/pdf"}}));
+  function attach(){{
+    var d = window.parent && window.parent.document;
+    var a = d && d.getElementById("hdr-open-local");
+    if(!a) return setTimeout(attach, 100);
+    a.setAttribute("href", url);
+  }}
+  attach();
+  var me = window.frameElement; if(me){{me.style.display="none";me.style.height="0";me.style.border="0";}}
+}})();</script>''',
+            height=0,
+        )
 
 # Guard if nothing selected yet
 if not up:
@@ -446,14 +368,65 @@ if st.session_state.get("last_processed_pdf") != up.name:
     ]
     st.session_state.last_processed_pdf = up.name
     st.session_state.loading_new_pdf = False
-    st.rerun()
 
     # Optional: quick refresh so the new greetings appear instantly
-
+    st.rerun()
 
 
 # ================= Styles =================
+st.markdown("""
+<style>
+.user-bubble {background:#007bff;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:right;margin:4px;}
+.assistant-bubble {background:#1e1e1e;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:left;margin:4px;}
+.clearfix::after {content:"";display:table;clear:both;}
 
+/* Reference chip + panel */
+.ref{ display:block; width:60%; max-width:900px; margin:6px 0 12px 8px; }
+
+/* the chip */
+.ref summary{
+  display:inline-flex; align-items:center; gap:8px; cursor:pointer; list-style:none; outline:none;
+  background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:10px; padding:6px 10px;
+}
+.ref summary::before{ content:"▶"; font-size:12px; line-height:1; }
+.ref[open] summary::before{ content:"▼"; }
+/* keep summary (chip) visible in place */
+.ref[open] > summary{}
+
+/* the lightbox panel */
+.ref .panel{
+  background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-top:none;
+  border-radius:10px; padding:10px; margin-top:0; box-shadow:0 6px 20px rgba(0,0,0,.25);
+}
+.ref .panel img{ width:100%; height:auto; border-radius:8px; display:block; }
+
+/* overlay that closes the lightbox (separate from <summary>) */
+.ref .overlay{ display:none; }
+.ref[open] .overlay{
+  display:block; position:fixed; inset:0; z-index:998;
+  background:transparent; border:0; padding:0; margin:0;
+}
+
+/* float the panel as a modal when open */
+.ref[open] > .panel{
+  position: fixed; z-index: 999; top: 12vh; left: 50%; transform: translateX(-50%);
+  width: min(900px, 90vw); max-height: 75vh; overflow: auto; box-shadow:0 20px 60px rgba(0,0,0,.45);
+}
+
+/* optional close X */
+.ref .close-x{
+  position:absolute; top:6px; right:10px; border:0; background:transparent;
+  color:#94a3b8; font-size:20px; line-height:1; cursor:pointer;
+}
+
+/* (kept from before) small link-chip style if you use it elsewhere */
+.chip{ display:inline-flex;align-items:center;gap:.5rem;
+  background:#0f172a;color:#e2e8f0;border:1px solid #334155;
+  border-radius:10px;padding:.35rem .6rem;font:14px/1.2 system-ui; }
+.chip a{color:#93c5fd;text-decoration:none}
+.chip a:hover{text-decoration:underline}
+</style>
+""", unsafe_allow_html=True)
 
 
 # ================= Prompt helpers =================
@@ -529,56 +502,19 @@ if user_q:
     st.session_state.pending_input = user_q
     st.session_state.waiting_for_response = True
 
-MAX_VISIBLE = 30
-
-try:
-    from streamlit import fragment
-except Exception:
-    fragment = None
-
-if fragment:
-    @fragment
-    def render_history():
-        msgs = st.session_state.messages
-        to_show = msgs[-MAX_VISIBLE:]
-        for msg in to_show:
-            cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
-            st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
-            if msg.get("source_img") and msg.get("source_b64"):
-                render_reference_card(
-                    label=(msg.get("source") or "Page"),
-                    img_b64=msg["source_img"],
-                    page_b64=msg["source_b64"],
-                    key=msg.get("id", "k0"),
-                )
-    render_history()
-else:
-    # Fallback without fragments
-    msgs = st.session_state.messages
-    to_show = msgs[-MAX_VISIBLE:]
-    for msg in to_show:
-        cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
-        st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
-        if msg.get("source_img") and msg.get("source_b64"):
-            render_reference_card(
-                label=(msg.get("source") or "Page"),
-                img_b64=msg["source_img"],
-                page_b64=msg["source_b64"],
-                key=msg.get("id", "k0"),
-            )
-
-            
 # ================= History =================
-#for msg in visible:
-    #cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
-    #st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
-    #if msg.get("source_img") and msg.get("source_b64"):
-        #render_reference_card(
-            #label=(msg.get("source") or "Page"),
-            #img_b64=msg["source_img"],
-            #page_b64=msg["source_b64"],
-            #key=msg.get("id", "k0"),
-        #)
+for msg in st.session_state.messages:
+    cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
+    st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
+
+    if msg.get("source_img") and msg.get("source_b64"):
+        render_reference_card(
+            label=(msg.get("source") or "Page"),  # e.g., "Page 17"
+            img_b64=msg["source_img"],
+            page_b64=msg["source_b64"],
+            key=msg.get("id", "k0"),
+        )
+
 
 
 # ================= Answer (single-pass, no rerun) =================
