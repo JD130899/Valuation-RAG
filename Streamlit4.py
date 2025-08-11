@@ -56,6 +56,39 @@ def _new_id():
     st.session_state.next_msg_id += 1
     return f"m{n}"
 
+def render_pdf_banner(file_name: str, pdf_bytes: bytes, key: str = "hdr"):
+    # Visible banner
+    st.markdown(
+        f'''
+        <div style="background:#1f2c3a; padding:8px; border-radius:8px; color:#fff;">
+          ✅ <b>Using synced file:</b> {file_name}
+          &nbsp;·&nbsp;<a id="hdr-open-{key}" href="#" target="_blank" rel="noopener" style="color:#93c5fd;">Open PDF ↗</a>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    # Hidden script: make a Blob URL from the PDF bytes and attach it to the link
+    b64 = base64.b64encode(pdf_bytes).decode("ascii")
+    components.html(
+        f"""<!doctype html><meta charset='utf-8'>
+<style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
+<script>(function(){{
+  function b64ToU8(s){{var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}}
+  var url = URL.createObjectURL(new Blob([b64ToU8("{b64}")], {{type:"application/pdf"}}));
+  function attach(){{
+    var d = window.parent && window.parent.document;
+    var a = d && d.getElementById("hdr-open-{key}");
+    if(!a) return setTimeout(attach, 100);
+    a.setAttribute("href", url);
+  }}
+  attach();
+  var me = window.frameElement; if(me){{me.style.display="none";me.style.height="0";me.style.border="0";}}
+}})();</script>''',
+        height=0,
+    )
+
+
 
 # Make a ONE-PAGE PDF (base64) from a given page
 def single_page_pdf_b64(pdf_bytes: bytes, page_number: int) -> str:
@@ -229,21 +262,85 @@ else:
 st.title("Underwriting Agent")
 
 # Source selector (Drive or local upload)
+# ================= Source selector (Drive or local upload) =================
 if "uploaded_file_from_drive" in st.session_state:
+    file_name = st.session_state.uploaded_file_name
+    pdf_bytes_for_banner = st.session_state.uploaded_file_from_drive
+
+    # Banner with hyperlink placeholder
     st.markdown(
-        f"<div style='background:#1f2c3a; padding:8px; border-radius:8px; color:#fff;'>"
-        f"✅ <b>Using synced file:</b> {st.session_state.uploaded_file_name}"
-        "</div>",
-        unsafe_allow_html=True
+        f'''
+        <div style="background:#1f2c3a; padding:8px; border-radius:8px; color:#fff;">
+          ✅ <b>Using synced file:</b> {file_name}
+          &nbsp;·&nbsp;<a id="hdr-open-drive" href="#" target="_blank" rel="noopener" style="color:#93c5fd;">Open PDF ↗</a>
+        </div>
+        ''',
+        unsafe_allow_html=True,
     )
-    up = io.BytesIO(st.session_state.uploaded_file_from_drive)
-    up.name = st.session_state.uploaded_file_name
+    # Attach a Blob URL to the link (no huge data: URL)
+    _b64 = base64.b64encode(pdf_bytes_for_banner).decode("ascii")
+    components.html(
+        f'''<!doctype html><meta charset='utf-8'>
+<style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
+<script>(function(){{
+  function b64ToU8(s){{var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}}
+  var url = URL.createObjectURL(new Blob([b64ToU8("{_b64}")], {{type:"application/pdf"}}));
+  function attach(){{
+    var d = window.parent && window.parent.document;
+    var a = d && d.getElementById("hdr-open-drive");
+    if(!a) return setTimeout(attach, 100);
+    a.setAttribute("href", url);
+  }}
+  attach();
+  var me = window.frameElement; if(me){{me.style.display="none";me.style.height="0";me.style.border="0";}}
+}})();</script>''',
+        height=0,
+    )
+
+    up = io.BytesIO(pdf_bytes_for_banner)
+    up.name = file_name
+
 else:
     up = st.file_uploader("Upload a valuation report PDF", type="pdf")
 
+    # If a local file is provided, show the same banner + link
+    if up is not None:
+        file_name = up.name
+        pdf_bytes_for_banner = up.getvalue()
+
+        st.markdown(
+            f"""
+            <div style="background:#1f2c3a; padding:8px; border-radius:8px; color:#fff;">
+              ✅ <b>Using synced file:</b> {file_name}
+              &nbsp;·&nbsp;<a id="hdr-open-local" href="#" target="_blank" rel="noopener" style="color:#93c5fd;">Open PDF ↗</a>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+        _b64_local = base64.b64encode(pdf_bytes_for_banner).decode("ascii")
+        components.html(
+            f'''<!doctype html><meta charset='utf-8'>
+<style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
+<script>(function(){{
+  function b64ToU8(s){{var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}}
+  var url = URL.createObjectURL(new Blob([b64ToU8("{_b64_local}")], {{type:"application/pdf"}}));
+  function attach(){{
+    var d = window.parent && window.parent.document;
+    var a = d && d.getElementById("hdr-open-local");
+    if(!a) return setTimeout(attach, 100);
+    a.setAttribute("href", url);
+  }}
+  attach();
+  var me = window.frameElement; if(me){{me.style.display="none";me.style.height="0";me.style.border="0";}}
+}})();</script>''',
+            height=0,
+        )
+
+# Guard if nothing is selected yet
 if not up:
     st.warning("Please upload or load a PDF to continue.")
     st.stop()
+
 
 # Rebuild retriever when file changes
 
