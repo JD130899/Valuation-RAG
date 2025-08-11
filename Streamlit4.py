@@ -529,15 +529,15 @@ if fragment:
     def render_history(items):
         
         for msg in items:
-        cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
-        st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
-        if msg.get("source_img") and msg.get("source_b64"):
-            render_reference_card(
-                label=(msg.get("source") or "Page"),
-                img_b64=msg["source_img"],
-                page_b64=msg["source_b64"],
-                key=msg.get("id", "k0"),
-            )
+            cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
+            st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
+            if msg.get("source_img") and msg.get("source_b64"):
+                render_reference_card(
+                    label=(msg.get("source") or "Page"),
+                    img_b64=msg["source_img"],
+                    page_b64=msg["source_b64"],
+                    key=msg.get("id", "k0"),
+                )
     render_history(visible)
             
 # ================= History =================
