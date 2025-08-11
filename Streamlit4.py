@@ -77,7 +77,55 @@ if "_css_done" not in st.session_state:
 if not st.session_state._css_done:
     st.markdown("""
     <style>
-      /* your full CSS exactly as you have it */
+    .user-bubble {background:#007bff;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:right;margin:4px;}
+    .assistant-bubble {background:#1e1e1e;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:left;margin:4px;}
+    .clearfix::after {content:"";display:table;clear:both;}
+    
+    /* Reference chip + panel */
+    .ref{ display:block; width:60%; max-width:900px; margin:6px 0 12px 8px; }
+    
+    /* the chip */
+    .ref summary{
+      display:inline-flex; align-items:center; gap:8px; cursor:pointer; list-style:none; outline:none;
+      background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:10px; padding:6px 10px;
+    }
+    .ref summary::before{ content:"▶"; font-size:12px; line-height:1; }
+    .ref[open] summary::before{ content:"▼"; }
+    /* keep summary (chip) visible in place */
+    .ref[open] > summary{}
+    
+    /* the lightbox panel */
+    .ref .panel{
+      background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-top:none;
+      border-radius:10px; padding:10px; margin-top:0; box-shadow:0 6px 20px rgba(0,0,0,.25);
+    }
+    .ref .panel img{ width:100%; height:auto; border-radius:8px; display:block; }
+    
+    /* overlay that closes the lightbox (separate from <summary>) */
+    .ref .overlay{ display:none; }
+    .ref[open] .overlay{
+      display:block; position:fixed; inset:0; z-index:998;
+      background:transparent; border:0; padding:0; margin:0;
+    }
+    
+    /* float the panel as a modal when open */
+    .ref[open] > .panel{
+      position: fixed; z-index: 999; top: 12vh; left: 50%; transform: translateX(-50%);
+      width: min(900px, 90vw); max-height: 75vh; overflow: auto; box-shadow:0 20px 60px rgba(0,0,0,.45);
+    }
+    
+    /* optional close X */
+    .ref .close-x{
+      position:absolute; top:6px; right:10px; border:0; background:transparent;
+      color:#94a3b8; font-size:20px; line-height:1; cursor:pointer;
+    }
+    
+    /* (kept from before) small link-chip style if you use it elsewhere */
+    .chip{ display:inline-flex;align-items:center;gap:.5rem;
+      background:#0f172a;color:#e2e8f0;border:1px solid #334155;
+      border-radius:10px;padding:.35rem .6rem;font:14px/1.2 system-ui; }
+    .chip a{color:#93c5fd;text-decoration:none}
+    .chip a:hover{text-decoration:underline}
     </style>
     """, unsafe_allow_html=True)
     st.session_state._css_done = True
@@ -153,7 +201,7 @@ def render_reference_card(label: str, img_b64: str, page_b64: str, key: str):
 
     # JS: attach blob URL to link + closing (overlay, X, Esc). Hidden iframe (height=0) to run script.
     components.html(
-        f"""<!doctype html><meta charset='utf-8'>
+    f"""<!doctype html><meta charset='utf-8'>
 <style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
 <script>(function(){{
   function b64ToUint8Array(s){{var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}}
@@ -170,6 +218,7 @@ def render_reference_card(label: str, img_b64: str, page_b64: str, key: str):
     var cls = d.getElementById('close-{key}');
     if(!ref || !a || !ovl || !cls) return setTimeout(attach,120);
 
+    if (a.getAttribute('href') && a.getAttribute('href').startsWith('blob:')) return; // ✅ guard
     a.setAttribute('href', url);
 
     function closeRef(){{ ref.removeAttribute('open'); }}
@@ -181,8 +230,10 @@ def render_reference_card(label: str, img_b64: str, page_b64: str, key: str):
 
   var me = window.frameElement; if(me){{me.style.display='none';me.style.height='0';me.style.border='0';}}
 }})();</script>""",
-        height=0,
-    )
+    height=0,
+    key=f"ref-js-{key}"   # (optional but recommended from step 2)
+)
+
 
 
 
@@ -315,22 +366,26 @@ if "uploaded_file_from_drive" in st.session_state:
     # Attach a Blob URL to that link
     _b64 = base64.b64encode(pdf_bytes_for_banner).decode("ascii")
     components.html(
-        f'''<!doctype html><meta charset='utf-8'>
+    f'''<!doctype html><meta charset='utf-8'>
 <style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
 <script>(function(){{
   function b64ToU8(s){{var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}}
   var url = URL.createObjectURL(new Blob([b64ToU8("{_b64}")], {{type:"application/pdf"}}));
+
   function attach(){{
     var d = window.parent && window.parent.document;
     var a = d && d.getElementById("hdr-open-drive");
     if(!a) return setTimeout(attach, 100);
+    if (a.getAttribute("href") && a.getAttribute("href").startsWith("blob:")) return; // ✅ guard
     a.setAttribute("href", url);
   }}
   attach();
+
   var me = window.frameElement; if(me){{me.style.display="none";me.style.height="0";me.style.border="0";}}
 }})();</script>''',
-        height=0,
-    )
+    height=0,
+    key="hdr-js-drive"   # (optional but recommended from step 2)
+)
 
     up = io.BytesIO(pdf_bytes_for_banner)
     up.name = file_name
@@ -356,22 +411,27 @@ else:
 
         _b64_local = base64.b64encode(pdf_bytes_for_banner).decode("ascii")
         components.html(
-            f'''<!doctype html><meta charset='utf-8'>
-<style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
-<script>(function(){{
-  function b64ToU8(s){{var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}}
-  var url = URL.createObjectURL(new Blob([b64ToU8("{_b64_local}")], {{type:"application/pdf"}}));
-  function attach(){{
-    var d = window.parent && window.parent.document;
-    var a = d && d.getElementById("hdr-open-local");
-    if(!a) return setTimeout(attach, 100);
-    a.setAttribute("href", url);
-  }}
-  attach();
-  var me = window.frameElement; if(me){{me.style.display="none";me.style.height="0";me.style.border="0";}}
-}})();</script>''',
-            height=0,
-        )
+        f'''<!doctype html><meta charset='utf-8'>
+    <style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
+    <script>(function(){{
+      function b64ToU8(s){{var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}}
+      var url = URL.createObjectURL(new Blob([b64ToU8("{_b64_local}")], {{type:"application/pdf"}}));
+    
+      function attach(){{
+        var d = window.parent && window.parent.document;
+        var a = d && d.getElementById("hdr-open-local");
+        if(!a) return setTimeout(attach, 100);
+        if (a.getAttribute("href") && a.getAttribute("href").startsWith("blob:")) return; // ✅ guard
+        a.setAttribute("href", url);
+      }}
+      attach();
+    
+      var me = window.frameElement; if(me){{me.style.display="none";me.style.height="0";me.style.border="0";}}
+    }})();</script>''',
+        height=0,
+        key="hdr-js-local"   # (optional but recommended from step 2)
+    )
+
 
 # Guard if nothing selected yet
 if not up:
@@ -407,59 +467,7 @@ if st.session_state.get("last_processed_pdf") != up.name:
 
 
 # ================= Styles =================
-st.markdown("""
-<style>
-.user-bubble {background:#007bff;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:right;margin:4px;}
-.assistant-bubble {background:#1e1e1e;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:left;margin:4px;}
-.clearfix::after {content:"";display:table;clear:both;}
 
-/* Reference chip + panel */
-.ref{ display:block; width:60%; max-width:900px; margin:6px 0 12px 8px; }
-
-/* the chip */
-.ref summary{
-  display:inline-flex; align-items:center; gap:8px; cursor:pointer; list-style:none; outline:none;
-  background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:10px; padding:6px 10px;
-}
-.ref summary::before{ content:"▶"; font-size:12px; line-height:1; }
-.ref[open] summary::before{ content:"▼"; }
-/* keep summary (chip) visible in place */
-.ref[open] > summary{}
-
-/* the lightbox panel */
-.ref .panel{
-  background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-top:none;
-  border-radius:10px; padding:10px; margin-top:0; box-shadow:0 6px 20px rgba(0,0,0,.25);
-}
-.ref .panel img{ width:100%; height:auto; border-radius:8px; display:block; }
-
-/* overlay that closes the lightbox (separate from <summary>) */
-.ref .overlay{ display:none; }
-.ref[open] .overlay{
-  display:block; position:fixed; inset:0; z-index:998;
-  background:transparent; border:0; padding:0; margin:0;
-}
-
-/* float the panel as a modal when open */
-.ref[open] > .panel{
-  position: fixed; z-index: 999; top: 12vh; left: 50%; transform: translateX(-50%);
-  width: min(900px, 90vw); max-height: 75vh; overflow: auto; box-shadow:0 20px 60px rgba(0,0,0,.45);
-}
-
-/* optional close X */
-.ref .close-x{
-  position:absolute; top:6px; right:10px; border:0; background:transparent;
-  color:#94a3b8; font-size:20px; line-height:1; cursor:pointer;
-}
-
-/* (kept from before) small link-chip style if you use it elsewhere */
-.chip{ display:inline-flex;align-items:center;gap:.5rem;
-  background:#0f172a;color:#e2e8f0;border:1px solid #334155;
-  border-radius:10px;padding:.35rem .6rem;font:14px/1.2 system-ui; }
-.chip a{color:#93c5fd;text-decoration:none}
-.chip a:hover{text-decoration:underline}
-</style>
-""", unsafe_allow_html=True)
 
 
 # ================= Prompt helpers =================
