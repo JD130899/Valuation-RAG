@@ -52,43 +52,16 @@ def _new_id():
     st.session_state.next_msg_id += 1
     return f"m{n}"
 
-def render_reference_card(label: str, img_b64: str, page_b64: str, key: str, height: int = 38):
-    # Compact chip with an open link (no large panel / image to avoid whitespace)
-    html = """
-<!doctype html><meta charset='utf-8'>
-<style>
-  .chip{display:inline-flex;align-items:center;gap:.5rem;background:#0f172a;color:#e2e8f0;
-        border:1px solid #334155;border-radius:10px;padding:.35rem .6rem;font:14px/1.2 system-ui;}
-  .chip a{color:#93c5fd;text-decoration:none}
-  .chip a:hover{text-decoration:underline}
-  html,body{background:transparent;margin:0}
-</style>
-<div class="chip">📘 __LABEL__ · <a href="#" id="open-__KEY__">Open this page ↗</a></div>
-<script>
-(function(){
-  function b64ToUint8Array(s){
-    const b = atob(s); const u = new Uint8Array(b.length);
-    for (let i=0;i<b.length;i++) u[i] = b.charCodeAt(i);
-    return u;
-  }
-  const blob = new Blob([b64ToUint8Array("__PAGE_B64__")], { type: "application/pdf" });
-  const url  = URL.createObjectURL(blob);
-  const a = document.getElementById("open-__KEY__");
-  if (a) {
-    a.addEventListener("click", function(ev){
-      ev.preventDefault();
-      const w = window.open(url, "_blank", "noopener");
-      if (!w) window.location.href = url;
-    });
-  }
-})();
-</script>
-"""
-    html = (html
-            .replace("__LABEL__", label)
-            .replace("__KEY__", key)
-            .replace("__PAGE_B64__", page_b64))
-    components.html(html, height=height)
+def render_reference_card(label: str, img_b64: str, page_b64: str, key: str):
+    data_url = "data:application/pdf;base64," + page_b64
+    html = (
+        '<span class="chip">'
+        '  📘 __LABEL__ · '
+        '  <a href="__URL__" target="_blank" rel="noopener">Open this page ↗</a>'
+        '</span>'
+    )
+    html = html.replace('__LABEL__', label or '').replace('__URL__', data_url)
+    st.markdown(html, unsafe_allow_html=True)
 
 
 # Make a ONE-PAGE PDF (base64) from a given page
@@ -265,6 +238,14 @@ st.markdown("""
   position: fixed; z-index: 999; top: 12vh; left: 50%; transform: translateX(-50%);
   width: min(900px, 90vw); max-height: 75vh; overflow: auto; box-shadow:0 20px 60px rgba(0,0,0,.45);
 }
+.chip{
+  display:inline-flex;align-items:center;gap:.5rem;
+  background:#0f172a;color:#e2e8f0;border:1px solid #334155;
+  border-radius:10px;padding:.35rem .6rem;font:14px/1.2 system-ui;
+}
+.chip a{color:#93c5fd;text-decoration:none}
+.chip a:hover{text-decoration:underline}
+
 </style>
 """, unsafe_allow_html=True)
 
