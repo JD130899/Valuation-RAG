@@ -416,27 +416,25 @@ if "uploaded_file_from_drive" in st.session_state:
     components.html(
     f'''<!doctype html><meta charset='utf-8'>
 <style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
-<script>(function(){
-  function b64ToU8(s){var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}
-
-  function attach(){
+<script>(function(){{                               /* doubled */
+  function b64ToU8(s){{var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}}
+  function attach(){{ 
     var d = window.parent && window.parent.document;
     var a = d && d.getElementById("hdr-open-drive");
     if(!a) return setTimeout(attach, 100);
-
-    // ✅ guard: only wire once
     if (a.dataset.wired === "1") return;
 
-    var url = URL.createObjectURL(new Blob([b64ToU8("{_b64}")], {type:"application/pdf"}));
+    var url = URL.createObjectURL(new Blob([b64ToU8("{_b64}")], {{type:"application/pdf"}}));
     a.setAttribute("href", url);
     a.dataset.wired = "1";
-  }
+  }}
   attach();
 
-  var me = window.frameElement; if(me){me.style.display="none";me.style.height="0";me.style.border="0";}
-})();</script>''',
+  var me = window.frameElement; if(me){{me.style.display="none";me.style.height="0";me.style.border="0";}}
+}})();</script>''',
     height=0,
 )
+
 
 
     up = io.BytesIO(pdf_bytes_for_banner)
