@@ -22,6 +22,7 @@ from langchain_core.prompts import PromptTemplate
 
 import openai
 from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
+import streamlit.components.v1 as components
 
 # ================= Setup =================
 load_dotenv()
@@ -53,6 +54,42 @@ def _new_id():
     n = st.session_state.next_msg_id
     st.session_state.next_msg_id += 1
     return f"m{n}"
+
+def single_page_pdf_html_url(pdf_bytes: bytes, page_number: int) -> str:
+    # Build a 1-page PDF
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    one = fitz.open()
+    one.insert_pdf(doc, from_page=page_number - 1, to_page=page_number - 1)
+    pdf_b64 = base64.b64encode(one.tobytes()).decode("ascii")
+    one.close(); doc.close()
+
+    # HTML that decodes base64 -> Blob, then NAVIGATES to the blob URL.
+    # Fallback: if navigation is blocked, it embeds an iframe.
+    html = """<!doctype html><meta charset="utf-8">
+<script>
+(function(){
+  const b64="__B64__";
+  const raw=atob(b64);
+  const bytes=new Uint8Array(raw.length);
+  for(let i=0;i<raw.length;i++) bytes[i]=raw.charCodeAt(i);
+  const url=URL.createObjectURL(new Blob([bytes], {type:"application/pdf"}));
+  // Navigate so Chrome's PDF viewer renders immediately
+  location.replace(url);
+  // Fallback to iframe if navigation is blocked
+  setTimeout(()=>{
+    if(!document.body.children.length){
+      const ifr=document.createElement('iframe');
+      ifr.src=url;
+      ifr.style="position:fixed;inset:0;border:0;width:100%;height:100%";
+      document.body.appendChild(ifr);
+    }
+  }, 30);
+})();
+</script>"""
+    html = html.replace("__B64__", pdf_b64)
+    return "data:text/html;base64," + base64.b64encode(html.encode("utf-8")).decode("ascii")
+
+
 
 # give IDs to any preloaded messages (greetings)
 for m in st.session_state.messages:
@@ -174,9 +211,26 @@ if not up:
     st.stop()
 
 # Rebuild retriever when file changes
+
 if st.session_state.get("last_processed_pdf") != up.name:
     pdf_bytes = up.getvalue()
+    st.session_state.pdf_bytes = pdf_bytes 
     st.session_state.retriever, st.session_state.page_images = build_retriever_from_pdf(pdf_bytes, up.name)
+
+    # 🔗 Build a base URL for this PDF (used later as base#page=N)
+    if "uploaded_file_from_drive" in st.session_state:
+        # Drive file — make sure sharing is set to "Anyone with the link – Viewer"
+        fid = st.session_state.last_synced_file_id
+        st.session_state.pdf_link_base = f"https://drive.google.com/uc?export=download&id={fid}"
+
+        # (If page jump doesn't work, try '/view' instead of '/preview')
+    else:
+        # Local upload fallback: data URL so it can still open in a new tab
+        st.session_state.pdf_link_base = (
+            "data:application/pdf;base64," + base64.b64encode(pdf_bytes).decode("ascii")
+        )
+
+    # reset convo for new doc (keep your existing messages)
     st.session_state.messages = [
         {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
         {"role": "assistant", "content": "What can I help you with?"}
@@ -185,7 +239,6 @@ if st.session_state.get("last_processed_pdf") != up.name:
 
 
 
-# ================= Chat UI CSS =================
 st.markdown("""
 <style>
 .user-bubble {background:#007bff;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:right;margin:4px;}
@@ -205,8 +258,41 @@ st.markdown("""
   border-radius:0 10px 10px 10px; padding:10px; margin-top:0; box-shadow:0 6px 20px rgba(0,0,0,.25);
 }
 .ref .panel img{ width:100%; height:auto; border-radius:8px; display:block; }
+/* Click-away close for <details class="ref"> (no JS needed) */
+.ref[open] > summary{
+  position: fixed;         /* make summary cover the whole viewport */
+  inset: 0;
+  background: transparent;
+  z-index: 998;            /* below the panel, above page */
+  color: transparent;      /* hide the label while open */
+  border: none;
+  padding: 0;
+  cursor: default;
+}
+
+/* hide the caret when open (optional) */
+.ref[open] > summary::before { display: none; }
+
+/* float the reference panel above the overlay */
+.ref[open] > .panel{
+  position: fixed;
+  z-index: 999;
+  top: 12vh;               /* center-ish modal placement */
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(900px, 90vw);
+  max-height: 75vh;
+  overflow: auto;
+  box-shadow: 0 20px 60px rgba(0,0,0,.45);
+}
+
 </style>
 """, unsafe_allow_html=True)
+
+
+
+
+
 
 # ================= Prompt helpers =================
 def format_chat_history(messages):
@@ -260,18 +346,24 @@ for msg in st.session_state.messages:
     if msg.get("source_img"):
         title = msg.get("source")
         label = f"Reference: {title}" if title else "Reference"
+        link_html = ""
+        if msg.get("source_url"):
+            link_html = f"<div style='margin-top:8px;text-align:right;'><a href='{msg['source_url']}' target='_blank' rel='noopener'>Open this page ↗</a></div>"
+    
         st.markdown(
             f"""
             <details class="ref">
               <summary>📘 {label}</summary>
               <div class="panel">
                 <img src="data:image/png;base64,{msg['source_img']}" alt="reference" loading="lazy"/>
+                {link_html}
               </div>
             </details>
             <div class="clearfix"></div>
             """,
             unsafe_allow_html=True
         )
+
 
 
 # ================= Answer (single-pass, no rerun) =================
@@ -349,6 +441,13 @@ if st.session_state.waiting_for_response:
                         if ref_img_b64:
                             entry["source"] = f"Page {ref_page}"
                             entry["source_img"] = ref_img_b64
+                            # 🔗 make a one-page PDF and link to it
+                            try:
+                                page_url = single_page_pdf_html_url(st.session_state.pdf_bytes, ref_page)
+                                entry["source_url"] = page_url
+                            except Exception as _e:
+                                pass
+
             except Exception as e:
                 st.info(f"ℹ️ Reference selection skipped: {e}")
 
@@ -359,18 +458,24 @@ if st.session_state.waiting_for_response:
     
         if entry.get("source_img"):
             label = entry.get("source", f"Page {ref_page}")
+            link_html = ""
+            if entry.get("source_url"):
+                link_html = f"<div style='margin-top:8px;text-align:right;'><a href='{entry['source_url']}' target='_blank' rel='noopener'>Open this page ↗</a></div>"
+        
             st.markdown(
                 f"""
                 <details class="ref">
                   <summary>📘 Reference: {label}</summary>
                   <div class="panel">
                     <img src="data:image/png;base64,{entry['source_img']}" alt="reference" loading="lazy"/>
+                    {link_html}
                   </div>
                 </details>
                 <div class="clearfix"></div>
                 """,
                 unsafe_allow_html=True
             )
+
 
 
     # Persist
