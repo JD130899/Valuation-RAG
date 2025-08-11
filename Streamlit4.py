@@ -203,37 +203,39 @@ def render_reference_card(label: str, img_b64: str, page_b64: str, key: str):
     components.html(
     f"""<!doctype html><meta charset='utf-8'>
 <style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
-<script>(function(){
-  function b64ToU8(s){var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}
+<script>(function(){{
+  function b64ToU8(s){{ var b=atob(s), u=new Uint8Array(b.length); for (var i=0;i<b.length;i++) u[i]=b.charCodeAt(i); return u; }}
+  var blob = new Blob([b64ToU8('{page_b64}')], {{type:'application/pdf'}});
+  var url  = URL.createObjectURL(blob);
 
-  function attach(){
+  function attach(){{
     var d = window.parent && window.parent.document;
-    if(!d) return setTimeout(attach,120);
+    if (!d) return setTimeout(attach,120);
 
     var ref = d.getElementById('ref-{key}');
     var a   = d.getElementById('open-{key}');
     var ovl = d.getElementById('overlay-{key}');
     var cls = d.getElementById('close-{key}');
-    if(!ref || !a || !ovl || !cls) return setTimeout(attach,120);
+    if (!ref || !a || !ovl || !cls) return setTimeout(attach,120);
 
-    // ✅ guard: only wire once
-    if (a.dataset.wired === "1") return;
+    // guard: wire only once (prevents re-flicker on reruns)
+    if (a.dataset.wired === '1') return;
 
-    var url  = URL.createObjectURL(new Blob([b64ToU8('{page_b64}')], {type:'application/pdf'}));
     a.setAttribute('href', url);
-    a.dataset.wired = "1";
+    a.dataset.wired = '1';
 
-    function closeRef(){ ref.removeAttribute('open'); }
+    function closeRef(){{ ref.removeAttribute('open'); }}
     ovl.addEventListener('click', closeRef);
     cls.addEventListener('click', closeRef);
-    d.addEventListener('keydown', function(e){ if(e.key==='Escape') closeRef(); });
-  }
+    d.addEventListener('keydown', function(e){{ if (e.key === 'Escape') closeRef(); }});
+  }}
   attach();
 
-  var me = window.frameElement; if(me){me.style.display='none';me.style.height='0';me.style.border='0';}
-})();</script>""",
+  var me = window.frameElement; if (me) {{ me.style.display='none'; me.style.height='0'; me.style.border='0'; }}
+}})();</script>""",
     height=0,
 )
+
 
 
 
