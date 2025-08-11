@@ -61,7 +61,7 @@ def render_pdf_banner(file_name: str, pdf_bytes: bytes, key: str = "hdr"):
     st.markdown(
         f'''
         <div style="background:#1f2c3a; padding:8px; border-radius:8px; color:#fff;">
-          ✅ <b>Using synced file:</b> {file_name}
+           <b>Using Uploaded File:</b> {file_name}
           &nbsp;·&nbsp;<a id="hdr-open-{key}" href="#" target="_blank" rel="noopener" style="color:#93c5fd;">Open PDF ↗</a>
         </div>
         """,
