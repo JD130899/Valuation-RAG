@@ -52,31 +52,18 @@ def _new_id():
     st.session_state.next_msg_id += 1
     return f"m{n}"
 
-def render_reference_card(label: str, img_b64: str, page_b64: str, key: str, height: int = 620):
+def render_reference_card(label: str, img_b64: str, page_b64: str, key: str, height: int = 38):
+    # Compact chip with an open link (no large panel / image to avoid whitespace)
     html = """
 <!doctype html><meta charset='utf-8'>
 <style>
-  .ref summary{ display:inline-flex; align-items:center; gap:8px; cursor:pointer; list-style:none; outline:none;
-    background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:10px; padding:6px 10px; }
-  .ref summary::before{ content:"▶"; font-size:12px; line-height:1; }
-  .ref[open] summary::before{ content:"▼"; }
-  .ref[open] summary{ border-bottom-left-radius:0; border-bottom-right-radius:0; }
-  .panel{ background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-top:none;
-    border-radius:0 10px 10px 10px; padding:10px; margin-top:0; box-shadow:0 6px 20px rgba(0,0,0,.25); }
-  .panel img{ width:100%; height:auto; border-radius:8px; display:block; }
-  html,body{ background:transparent; margin:0; }
+  .chip{display:inline-flex;align-items:center;gap:.5rem;background:#0f172a;color:#e2e8f0;
+        border:1px solid #334155;border-radius:10px;padding:.35rem .6rem;font:14px/1.2 system-ui;}
+  .chip a{color:#93c5fd;text-decoration:none}
+  .chip a:hover{text-decoration:underline}
+  html,body{background:transparent;margin:0}
 </style>
-
-<details class="ref">
-  <summary>📘 __LABEL__</summary>
-  <div class="panel">
-    <img src="data:image/png;base64,__IMG__" alt="reference" loading="lazy"/>
-    <div style="margin-top:8px;text-align:right;">
-      <a href="#" id="open-__KEY__">Open this page ↗</a>
-    </div>
-  </div>
-</details>
-
+<div class="chip">📘 __LABEL__ · <a href="#" id="open-__KEY__">Open this page ↗</a></div>
 <script>
 (function(){
   function b64ToUint8Array(s){
@@ -99,7 +86,6 @@ def render_reference_card(label: str, img_b64: str, page_b64: str, key: str, hei
 """
     html = (html
             .replace("__LABEL__", label)
-            .replace("__IMG__", img_b64)
             .replace("__KEY__", key)
             .replace("__PAGE_B64__", page_b64))
     components.html(html, height=height)
@@ -114,39 +100,7 @@ def single_page_pdf_b64(pdf_bytes: bytes, page_number: int) -> str:
     one.close(); doc.close()
     return b64
 
-# ---- Global, invisible opener: keeps a map of blob URLs and opens them on click ----
-components.html("""
-<!doctype html><meta charset='utf-8'>
-<style>html,body{background:transparent;margin:0;height:0;overflow:hidden}</style>
-<script>
-(function(){
-  window.__PDF_BLOB_URLS = window.__PDF_BLOB_URLS || {};
-  function b64ToUint8Array(s){const b=atob(s);const u=new Uint8Array(b.length);for(let i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}
-  // Register/Cache a blob URL for key
-  window.registerPdfBlob = function(key, b64){
-    if (window.__PDF_BLOB_URLS[key]) return;
-    try{
-      const blob = new Blob([b64ToUint8Array(b64)], {type:'application/pdf'});
-      window.__PDF_BLOB_URLS[key] = URL.createObjectURL(blob);
-    }catch(e){ console.error('registerPdfBlob failed', e); }
-  };
-  // Delegate clicks to open
-  function openFrom(el, ev){
-    ev && ev.preventDefault && ev.preventDefault();
-    const key = el.getAttribute('data-key');
-    const url = window.__PDF_BLOB_URLS[key];
-    if(!url) return;
-    const w = window.open(url, '_blank', 'noopener'); if(!w) window.location.href = url;
-  }
-  const doc = window.parent && window.parent.document;
-  if(doc){ doc.addEventListener('click', function(e){
-    const a = e.target && e.target.closest ? e.target.closest('a.ref-open') : null;
-    if(a) openFrom(a, e);
-  }, true); }
-  const me = window.frameElement; if(me){ me.style.display='none'; me.style.height='0'; me.style.border='0'; }
-})();
-</script>
-""", height=0)
+
 
 # give IDs to any preloaded messages (greetings)
 for m in st.session_state.messages:
@@ -363,7 +317,7 @@ for msg in st.session_state.messages:
     if msg.get("source_img") and msg.get("source_b64"):
         render_reference_card(
             label=f"Reference: {msg.get('source') or 'Page'}",
-            img_b64=msg["source_img"],
+            img_b64=msg["source_img"],   # not used by the compact chip anymore, fine to keep param
             page_b64=msg["source_b64"],
             key=msg.get("id", "k0"),
         )
