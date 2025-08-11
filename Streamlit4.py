@@ -1,8 +1,4 @@
-import os
-import io
-import pickle
-import base64
-
+import os, io, pickle, base64
 import streamlit as st
 import fitz  # PyMuPDF
 from PIL import Image
@@ -46,7 +42,7 @@ if "retriever" not in st.session_state:
 if "page_images" not in st.session_state:
     st.session_state.page_images = {}
 
-# --- Stable IDs for messages (used to key popovers etc.) ---
+# --- Stable IDs for messages ---
 if "next_msg_id" not in st.session_state:
     st.session_state.next_msg_id = 0
 
@@ -55,7 +51,7 @@ def _new_id():
     st.session_state.next_msg_id += 1
     return f"m{n}"
 
-# Build a ONE-PAGE PDF (base64) for local uploads
+# Make a ONE-PAGE PDF (base64) from a given page
 def single_page_pdf_b64(pdf_bytes: bytes, page_number: int) -> str:
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     one = fitz.open()
@@ -64,22 +60,27 @@ def single_page_pdf_b64(pdf_bytes: bytes, page_number: int) -> str:
     one.close(); doc.close()
     return b64
 
-# Invisible helper to open either a URL or a base64 one-page blob in a new tab.
+# ---- Global, invisible opener: keeps a map of blob URLs and opens them on click ----
 components.html("""
 <!doctype html><meta charset='utf-8'>
 <style>html,body{background:transparent;margin:0;height:0;overflow:hidden}</style>
 <script>
 (function(){
+  window.__PDF_BLOB_URLS = window.__PDF_BLOB_URLS || {};
   function b64ToUint8Array(s){const b=atob(s);const u=new Uint8Array(b.length);for(let i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}
+  // Register/Cache a blob URL for key
+  window.registerPdfBlob = function(key, b64){
+    if (window.__PDF_BLOB_URLS[key]) return;
+    try{
+      const blob = new Blob([b64ToUint8Array(b64)], {type:'application/pdf'});
+      window.__PDF_BLOB_URLS[key] = URL.createObjectURL(blob);
+    }catch(e){ console.error('registerPdfBlob failed', e); }
+  };
+  // Delegate clicks to open
   function openFrom(el, ev){
     ev && ev.preventDefault && ev.preventDefault();
-    const urlAttr = el.getAttribute('data-url') || "";
-    const b64 = el.getAttribute('data-b64') || "";
-    let url = urlAttr;
-    if(!url && b64){
-      const blob = new Blob([b64ToUint8Array(b64)], {type:'application/pdf'});
-      url = URL.createObjectURL(blob);
-    }
+    const key = el.getAttribute('data-key');
+    const url = window.__PDF_BLOB_URLS[key];
     if(!url) return;
     const w = window.open(url, '_blank', 'noopener'); if(!w) window.location.href = url;
   }
@@ -106,7 +107,7 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
     with open(pdf_path, "wb") as f:
         f.write(pdf_bytes)
 
-    # Page images (moderate dpi for speed)
+    # Page images
     doc = fitz.open(pdf_path)
     page_images = {
         i + 1: Image.open(io.BytesIO(page.get_pixmap(dpi=180).tobytes("png")))
@@ -217,13 +218,6 @@ if st.session_state.get("last_processed_pdf") != up.name:
     st.session_state.pdf_bytes = pdf_bytes
     st.session_state.retriever, st.session_state.page_images = build_retriever_from_pdf(pdf_bytes, up.name)
 
-    # 🔗 Base link for this PDF (Drive uses viewer so #page=N works; local not needed)
-    if "uploaded_file_from_drive" in st.session_state:
-        fid = st.session_state.last_synced_file_id
-        st.session_state.pdf_link_base = f"https://drive.google.com/uc?export=view&id={fid}"
-    else:
-        st.session_state.pdf_link_base = ""  # not used for local uploads
-
     # reset convo for new doc
     st.session_state.messages = [
         {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
@@ -305,7 +299,7 @@ if user_q:
     st.session_state.pending_input = user_q
     st.session_state.waiting_for_response = True
 
-# ================= History (render AFTER input so latest message shows) =================
+# ================= History =================
 for msg in st.session_state.messages:
     cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
     st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
@@ -314,12 +308,11 @@ for msg in st.session_state.messages:
         title = msg.get("source")
         label = f"Reference: {title}" if title else "Reference"
 
-        # Build link using data attributes (works for Drive or local)
-        data_url = (msg.get("source_url") or "")
-        data_b64 = (msg.get("source_b64") or "")
+        # Link uses a tiny key; the blob URL is registered below
+        key = msg.get("id", "k0")
         link_html = (
             "<div style='margin-top:8px;text-align:right;'>"
-            f"<a class='ref-open' href='#' data-url='{data_url}' data-b64='{data_b64}'>Open this page ↗</a>"
+            f"<a class='ref-open' href='#' data-key='{key}'>Open this page ↗</a>"
             "</div>"
         )
 
@@ -336,6 +329,14 @@ for msg in st.session_state.messages:
             """,
             unsafe_allow_html=True
         )
+
+        # Register the blob URL for this message key (no white bars; height=0)
+        if msg.get("source_b64"):
+            components.html(f"""
+<!doctype html><meta charset='utf-8'>
+<style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
+<script>window.parent && window.parent.registerPdfBlob && window.parent.registerPdfBlob("{key}", "{msg['source_b64']}");</script>
+""", height=0)
 
 # ================= Answer (single-pass, no rerun) =================
 if st.session_state.waiting_for_response:
@@ -408,9 +409,7 @@ if st.session_state.waiting_for_response:
                         if ref_img_b64:
                             entry["source"] = f"Page {ref_page}"
                             entry["source_img"] = ref_img_b64
-
-                            # Drive → open viewer at #page=N; Local → one-page blob
-                            entry["source_url"] = ""  # don't use Drive link to avoid auto-downloads
+                            # Always open a single-page blob (reliable across Cloud/Drive)
                             entry["source_b64"] = single_page_pdf_b64(st.session_state.pdf_bytes, ref_page)
 
             except Exception as e:
@@ -422,11 +421,10 @@ if st.session_state.waiting_for_response:
 
         if entry.get("source_img"):
             label = entry.get("source", f"Page {ref_page}")
-            data_url = (entry.get("source_url") or "")
-            data_b64 = (entry.get("source_b64") or "")
+            key = entry.get("id", "k0")
             link_html = (
                 "<div style='margin-top:8px;text-align:right;'>"
-                f"<a class='ref-open' href='#' data-url='{data_url}' data-b64='{data_b64}'>Open this page ↗</a>"
+                f"<a class='ref-open' href='#' data-key='{key}'>Open this page ↗</a>"
                 "</div>"
             )
 
@@ -443,6 +441,12 @@ if st.session_state.waiting_for_response:
                 """,
                 unsafe_allow_html=True
             )
+            # Register the blob for this new message
+            components.html(f"""
+<!doctype html><meta charset='utf-8'>
+<style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
+<script>window.parent && window.parent.registerPdfBlob && window.parent.registerPdfBlob("{key}", "{entry['source_b64']}");</script>
+""", height=0)
 
     # Persist
     st.session_state.messages.append(entry)
