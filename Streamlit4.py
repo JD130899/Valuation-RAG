@@ -44,10 +44,6 @@ def _boot_state():
 _boot_state()
 
 
-MAX_VISIBLE = 30
-msgs = st.session_state.messages
-visible = msgs[-MAX_VISIBLE:]
-hidden_count = max(0, len(msgs) - len(visible))
 
 # ---------- Session state ----------
 if "last_synced_file_id" not in st.session_state:
@@ -404,6 +400,7 @@ if st.session_state.get("last_processed_pdf") != up.name:
     ]
     st.session_state.last_processed_pdf = up.name
     st.session_state.loading_new_pdf = False
+    st.rerun()
 
     # Optional: quick refresh so the new greetings appear instantly
 
@@ -538,6 +535,8 @@ if user_q:
     st.session_state.pending_input = user_q
     st.session_state.waiting_for_response = True
 
+MAX_VISIBLE = 30
+
 try:
     from streamlit import fragment
 except Exception:
@@ -545,9 +544,10 @@ except Exception:
 
 if fragment:
     @fragment
-    def render_history(items):
-        
-        for msg in items:
+    def render_history():
+        msgs = st.session_state.messages
+        to_show = msgs[-MAX_VISIBLE:]
+        for msg in to_show:
             cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
             st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
             if msg.get("source_img") and msg.get("source_b64"):
@@ -557,7 +557,22 @@ if fragment:
                     page_b64=msg["source_b64"],
                     key=msg.get("id", "k0"),
                 )
-    render_history(visible)
+    render_history()
+else:
+    # Fallback without fragments
+    msgs = st.session_state.messages
+    to_show = msgs[-MAX_VISIBLE:]
+    for msg in to_show:
+        cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
+        st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
+        if msg.get("source_img") and msg.get("source_b64"):
+            render_reference_card(
+                label=(msg.get("source") or "Page"),
+                img_b64=msg["source_img"],
+                page_b64=msg["source_b64"],
+                key=msg.get("id", "k0"),
+            )
+
             
 # ================= History =================
 #for msg in visible:
