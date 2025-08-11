@@ -25,6 +25,11 @@ load_dotenv()
 st.set_page_config(page_title="Underwriting Agent", layout="wide")
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
+MAX_VISIBLE = 30
+msgs = st.session_state.messages
+visible = msgs[-MAX_VISIBLE:]
+hidden_count = max(0, len(msgs) - len(visible))
+
 # ---------- Session state ----------
 if "last_synced_file_id" not in st.session_state:
     st.session_state.last_synced_file_id = None
@@ -49,6 +54,18 @@ if "next_msg_id" not in st.session_state:
 if "loading_new_pdf" not in st.session_state:
     st.session_state.loading_new_pdf = False
 
+# right after session_state init:
+if "_css_done" not in st.session_state:
+    st.session_state._css_done = False
+
+# replace your current CSS st.markdown(...) with:
+if not st.session_state._css_done:
+    st.markdown("""
+    <style>
+      /* your full CSS exactly as you have it */
+    </style>
+    """, unsafe_allow_html=True)
+    st.session_state._css_done = True
 
 
 def _new_id():
@@ -370,7 +387,7 @@ if st.session_state.get("last_processed_pdf") != up.name:
     st.session_state.loading_new_pdf = False
 
     # Optional: quick refresh so the new greetings appear instantly
-    st.rerun()
+
 
 
 # ================= Styles =================
@@ -502,19 +519,38 @@ if user_q:
     st.session_state.pending_input = user_q
     st.session_state.waiting_for_response = True
 
+try:
+    from streamlit import fragment
+except Exception:
+    fragment = None
+
+if fragment:
+    @fragment
+    def render_history(items):
+        
+        for msg in items:
+        cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
+        st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
+        if msg.get("source_img") and msg.get("source_b64"):
+            render_reference_card(
+                label=(msg.get("source") or "Page"),
+                img_b64=msg["source_img"],
+                page_b64=msg["source_b64"],
+                key=msg.get("id", "k0"),
+            )
+    render_history(visible)
+            
 # ================= History =================
-for msg in st.session_state.messages:
-    cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
-    st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
-
-    if msg.get("source_img") and msg.get("source_b64"):
-        render_reference_card(
-            label=(msg.get("source") or "Page"),  # e.g., "Page 17"
-            img_b64=msg["source_img"],
-            page_b64=msg["source_b64"],
-            key=msg.get("id", "k0"),
-        )
-
+#for msg in visible:
+    #cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
+    #st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
+    #if msg.get("source_img") and msg.get("source_b64"):
+        #render_reference_card(
+            #label=(msg.get("source") or "Page"),
+            #img_b64=msg["source_img"],
+            #page_b64=msg["source_b64"],
+            #key=msg.get("id", "k0"),
+        #)
 
 
 # ================= Answer (single-pass, no rerun) =================
