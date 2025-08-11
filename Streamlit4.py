@@ -25,6 +25,25 @@ load_dotenv()
 st.set_page_config(page_title="Underwriting Agent", layout="wide")
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
+# ------- Session state bootstrapping (must be above any usage) -------
+def _boot_state():
+    ss = st.session_state
+    ss.setdefault("last_synced_file_id", None)
+    ss.setdefault("messages", [
+        {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
+        {"role": "assistant", "content": "What can I help you with?"}
+    ])
+    ss.setdefault("pending_input", None)
+    ss.setdefault("waiting_for_response", False)
+    ss.setdefault("retriever", None)
+    ss.setdefault("page_images", {})
+    ss.setdefault("next_msg_id", 0)
+    ss.setdefault("loading_new_pdf", False)
+    ss.setdefault("last_processed_pdf", None)
+
+_boot_state()
+
+
 MAX_VISIBLE = 30
 msgs = st.session_state.messages
 visible = msgs[-MAX_VISIBLE:]
