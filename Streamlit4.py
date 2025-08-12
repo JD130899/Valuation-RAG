@@ -55,6 +55,22 @@ def _new_id():
     st.session_state.next_msg_id += 1
     return f"m{n}"
 
+def file_badge_link(name: str, pdf_bytes: bytes, synced: bool = True):
+    base = os.path.splitext(name)[0]  # remove .pdf
+    b64  = base64.b64encode(pdf_bytes).decode("ascii")
+    label = "Using synced file:" if synced else "Using file:"
+    st.markdown(
+        f"""
+        <div style="background:#1f2c3a; padding:8px; border-radius:8px; color:#fff;">
+          ✅ <b>{label}</b>
+          <a href="data:application/pdf;base64,{b64}" target="_blank" rel="noopener"
+             style="color:#93c5fd; text-decoration:none;">{base}</a>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+
 
 # Make a ONE-PAGE PDF (base64) from a given page
 def single_page_pdf_b64(pdf_bytes: bytes, page_number: int) -> str:
@@ -225,16 +241,19 @@ st.title("Underwriting Agent")
 
 # Source selector (Drive or local upload)
 if "uploaded_file_from_drive" in st.session_state:
-    st.markdown(
-        f"<div style='background:#1f2c3a; padding:8px; border-radius:8px; color:#fff;'>"
-        f"✅ <b>Using synced file:</b> {st.session_state.uploaded_file_name}"
-        "</div>",
-        unsafe_allow_html=True
+    file_badge_link(
+    st.session_state.uploaded_file_name,
+    st.session_state.uploaded_file_from_drive,
+    synced=True
     )
     up = io.BytesIO(st.session_state.uploaded_file_from_drive)
     up.name = st.session_state.uploaded_file_name
+
+  
 else:
     up = st.file_uploader("Upload a valuation report PDF", type="pdf")
+    if up:
+    file_badge_link(up.name, up.getvalue(), synced=False)
 
 if not up:
     st.warning("Please upload or load a PDF to continue.")
