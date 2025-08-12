@@ -374,79 +374,79 @@ if st.session_state.waiting_for_response:
         thinking.markdown(
             "<div class='assistant-bubble clearfix'>Thinking…</div>", 
             unsafe_allow_html=True)
-            q = st.session_state.pending_input or ""
-            ctx, docs = "", []
-            try:
-                docs = st.session_state.retriever.get_relevant_documents(q)
-                ctx = "\n\n".join(d.page_content for d in docs)
-            except Exception as e:
-                st.warning(f"RAG retrieval error: {e}")
+        q = st.session_state.pending_input or ""
+        ctx, docs = "", []
+        try:
+            docs = st.session_state.retriever.get_relevant_documents(q)
+            ctx = "\n\n".join(d.page_content for d in docs)
+        except Exception as e:
+            st.warning(f"RAG retrieval error: {e}")
 
-            system_prompt = (
-                "You are a helpful assistant. Use ONLY the content under 'Context' to answer. "
-                "If the answer is not in the context, say you don't have enough information.\n\n"
-                f"Context:\n{ctx}"
+        system_prompt = (
+            "You are a helpful assistant. Use ONLY the content under 'Context' to answer. "
+            "If the answer is not in the context, say you don't have enough information.\n\n"
+            f"Context:\n{ctx}"
+        )
+
+        try:
+            response = openai.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[{"role": "system", "content": system_prompt}, *st.session_state.messages],
             )
+            answer = response.choices[0].message.content
+        except Exception as e:
+            answer = f"❌ Error: {e}"
 
-            try:
-                response = openai.chat.completions.create(
-                    model="gpt-3.5-turbo",
-                    messages=[{"role": "system", "content": system_prompt}, *st.session_state.messages],
+        entry = {"id": _new_id(), "role": "assistant", "content": answer}
+        ref_page, ref_img_b64 = None, None
+
+        try:
+            if docs:
+                texts = [d.page_content for d in docs]
+                embedder = CohereEmbeddings(
+                    model="embed-english-v3.0",
+                    user_agent="langchain",
+                    cohere_api_key=st.secrets["COHERE_API_KEY"]
                 )
-                answer = response.choices[0].message.content
-            except Exception as e:
-                answer = f"❌ Error: {e}"
+                emb_answer = embedder.embed_query(answer)
+                chunk_embs = embedder.embed_documents(texts)
+                sims = cosine_similarity([emb_answer], chunk_embs)[0]
+                ranked = sorted(list(zip(docs, sims)), key=lambda x: x[1], reverse=True)
+                top3 = [d for d, _ in ranked[:3]]
 
-            entry = {"id": _new_id(), "role": "assistant", "content": answer}
-            ref_page, ref_img_b64 = None, None
-
-            try:
-                if docs:
-                    texts = [d.page_content for d in docs]
-                    embedder = CohereEmbeddings(
-                        model="embed-english-v3.0",
-                        user_agent="langchain",
-                        cohere_api_key=st.secrets["COHERE_API_KEY"]
+                best_doc = top3[0] if top3 else (ranked[0][0] if ranked else None)
+                if len(top3) >= 3:
+                    ranking_prompt = PromptTemplate(
+                        template=("Given a user question and 3 candidate context chunks, return the number (1-3) "
+                                  "of the chunk that best answers it.\n\n"
+                                  "Question:\n{question}\n\nChunk 1:\n{chunk1}\n\nChunk 2:\n{chunk2}\n\nChunk 3:\n{chunk3}\n\nBest Chunk Number:\n"),
+                        input_variables=["question", "chunk1", "chunk2", "chunk3"]
                     )
-                    emb_answer = embedder.embed_query(answer)
-                    chunk_embs = embedder.embed_documents(texts)
-                    sims = cosine_similarity([emb_answer], chunk_embs)[0]
-                    ranked = sorted(list(zip(docs, sims)), key=lambda x: x[1], reverse=True)
-                    top3 = [d for d, _ in ranked[:3]]
+                    pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
+                        ranking_prompt.invoke({
+                            "question": q,
+                            "chunk1": top3[0].page_content,
+                            "chunk2": top3[1].page_content,
+                            "chunk3": top3[2].page_content
+                        })
+                    ).content.strip()
+                    if pick.isdigit() and 1 <= int(pick) <= 3:
+                        best_doc = top3[int(pick) - 1]
 
-                    best_doc = top3[0] if top3 else (ranked[0][0] if ranked else None)
-                    if len(top3) >= 3:
-                        ranking_prompt = PromptTemplate(
-                            template=("Given a user question and 3 candidate context chunks, return the number (1-3) "
-                                      "of the chunk that best answers it.\n\n"
-                                      "Question:\n{question}\n\nChunk 1:\n{chunk1}\n\nChunk 2:\n{chunk2}\n\nChunk 3:\n{chunk3}\n\nBest Chunk Number:\n"),
-                            input_variables=["question", "chunk1", "chunk2", "chunk3"]
-                        )
-                        pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
-                            ranking_prompt.invoke({
-                                "question": q,
-                                "chunk1": top3[0].page_content,
-                                "chunk2": top3[1].page_content,
-                                "chunk3": top3[2].page_content
-                            })
-                        ).content.strip()
-                        if pick.isdigit() and 1 <= int(pick) <= 3:
-                            best_doc = top3[int(pick) - 1]
+                if best_doc is not None:
+                    ref_page = best_doc.metadata.get("page_number")
+                    img = st.session_state.page_images.get(ref_page)
+                    ref_img_b64 = pil_to_base64(img) if img else None
+                    if ref_img_b64:
+                        entry["source"] = f"Page {ref_page}"
+                        entry["source_img"] = ref_img_b64
+                        # Always open a single-page blob (reliable across Cloud/Drive)
+                        entry["source_b64"] = single_page_pdf_b64(st.session_state.pdf_bytes, ref_page)
 
-                    if best_doc is not None:
-                        ref_page = best_doc.metadata.get("page_number")
-                        img = st.session_state.page_images.get(ref_page)
-                        ref_img_b64 = pil_to_base64(img) if img else None
-                        if ref_img_b64:
-                            entry["source"] = f"Page {ref_page}"
-                            entry["source_img"] = ref_img_b64
-                            # Always open a single-page blob (reliable across Cloud/Drive)
-                            entry["source_b64"] = single_page_pdf_b64(st.session_state.pdf_bytes, ref_page)
-
-            except Exception as e:
-                st.info(f"ℹ️ Reference selection skipped: {e}")
-            thinking.empty()
-        
+        except Exception as e:
+            st.info(f"ℹ️ Reference selection skipped: {e}")
+        thinking.empty()
+    
 
     # Final render (no rerun)
     with block.container():
