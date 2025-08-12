@@ -464,6 +464,7 @@ if st.session_state.waiting_for_response:
             st.warning(f"RAG retrieval error: {e}")
 
         history_to_use = st.session_state.messages[-10:]
+        pdf_display = os.path.splitext(up.name)[0]
 
         # Build the prompt text using your wrapped_prompt
         llm = ChatOpenAI(model="gpt-4o", temperature=0)
