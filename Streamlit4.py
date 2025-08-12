@@ -116,6 +116,7 @@ def render_reference_card(label: str, img_b64: str, page_b64: str, key: str):
   var me = window.frameElement; if(me){{me.style.display='none';me.style.height='0';me.style.border='0';}}
 }})();</script>""",
         height=0,
+        key=f"refscript-{key}",
     )
 
 
@@ -369,7 +370,10 @@ for msg in st.session_state.messages:
 if st.session_state.waiting_for_response:
     block = st.empty()
     with block.container():
-        with st.spinner("Thinking…"):
+        thinking = st.empty()
+        thinking.markdown(
+            "<div class='assistant-bubble clearfix'>Thinking…</div>", 
+            unsafe_allow_html=True
             q = st.session_state.pending_input or ""
             ctx, docs = "", []
             try:
@@ -441,6 +445,8 @@ if st.session_state.waiting_for_response:
 
             except Exception as e:
                 st.info(f"ℹ️ Reference selection skipped: {e}")
+            thinking.empty()
+        
 
     # Final render (no rerun)
     with block.container():
