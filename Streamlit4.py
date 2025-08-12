@@ -441,7 +441,7 @@ if st.session_state.waiting_for_response:
         ref_ok = True  # default so later code never sees an undefined name
         try:
             response = openai.chat.completions.create(
-                model="gpt-5-mini"",
+                model="gpt-5-mini",
                 messages=[{"role": "system", "content": system_prompt}, *st.session_state.messages],
             )
             answer = response.choices[0].message.content
@@ -490,7 +490,7 @@ if st.session_state.waiting_for_response:
                         """,
                         input_variables=["question", "chunk1", "chunk2", "chunk3"]
                     )
-                    pick = ChatOpenAI(model="gpt-5-mini"", temperature=0).invoke(
+                    pick = ChatOpenAI(model="gpt-5-mini", temperature=0).invoke(
                         ranking_prompt.invoke({
                             "question": q,
                             "chunk1": top3[0].page_content,
