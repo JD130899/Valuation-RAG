@@ -109,7 +109,7 @@ def single_page_pdf_b64(pdf_bytes: bytes, page_number: int) -> str:
     one.close(); doc.close()
     return b64
 
-def render_reference_card(label: str, img_b64: str, page_b64: str, key: str):
+def render_reference_card(label: str, img_b64: str, pdf_b64: str, page: int, key: str):
     # Markup: chip + overlay + modal panel
     st.markdown(
         f"""
@@ -129,14 +129,14 @@ def render_reference_card(label: str, img_b64: str, page_b64: str, key: str):
         unsafe_allow_html=True,
     )
 
-    # JS: attach blob URL to link + closing (overlay, X, Esc). Hidden iframe (height=0) to run script.
     components.html(
         f"""<!doctype html><meta charset='utf-8'>
 <style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
 <script>(function(){{
   function b64ToUint8Array(s){{var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}}
-  var blob = new Blob([b64ToUint8Array('{page_b64}')], {{type:'application/pdf'}});
-  var url  = URL.createObjectURL(blob);
+  var blob = new Blob([b64ToUint8Array('{pdf_b64}')], {{type:'application/pdf'}});
+  // Open FULL PDF, jump to the target page:
+  var url  = URL.createObjectURL(blob) + '#page={page}';
 
   function attach(){{
     var d = window.parent && window.parent.document;
@@ -402,13 +402,15 @@ for msg in st.session_state.messages:
     cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
     st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
 
-    if msg.get("source_img") and msg.get("source_b64"):
+    if msg.get("source_img") and msg.get("source_pdf_b64") and msg.get("source_page"):
         render_reference_card(
-            label=(msg.get("source") or "Page"),  # e.g., "Page 17"
+            label=(msg.get("source") or "Page"),
             img_b64=msg["source_img"],
-            page_b64=msg["source_b64"],
+            pdf_b64=msg["source_pdf_b64"],
+            page=msg["source_page"],
             key=msg.get("id", "k0"),
         )
+
 
 
 
@@ -486,8 +488,9 @@ if st.session_state.waiting_for_response:
                     if ref_img_b64:
                         entry["source"] = f"Page {ref_page}"
                         entry["source_img"] = ref_img_b64
-                        # Always open a single-page blob (reliable across Cloud/Drive)
-                        entry["source_b64"] = single_page_pdf_b64(st.session_state.pdf_bytes, ref_page)
+                        entry["source_pdf_b64"] = base64.b64encode(st.session_state.pdf_bytes).decode("ascii")
+                        entry["source_page"] = ref_page
+
 
         except Exception as e:
             st.info(f"ℹ️ Reference selection skipped: {e}")
@@ -503,9 +506,11 @@ if st.session_state.waiting_for_response:
             render_reference_card(
                 label=entry.get("source", f"Page {ref_page}"),
                 img_b64=entry["source_img"],
-                page_b64=entry["source_b64"],
+                pdf_b64=entry["source_pdf_b64"],
+                page=entry["source_page"],
                 key=entry.get("id", "k0"),
             )
+
 
 
 
