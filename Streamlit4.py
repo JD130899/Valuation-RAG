@@ -437,6 +437,8 @@ if st.session_state.waiting_for_response:
             f"Context:\n{ctx}"
         )
 
+        # --- get model answer + judge ---
+        ref_ok = True  # default so later code never sees an undefined name
         try:
             response = openai.chat.completions.create(
                 model="gpt-3.5-turbo",
@@ -444,11 +446,12 @@ if st.session_state.waiting_for_response:
             )
             answer = response.choices[0].message.content
             ref_ok = should_show_reference(q, answer, ctx)
-            entry["ref_ok"] = ref_ok
         except Exception as e:
             answer = f"❌ Error: {e}"
+        
+        # create entry AFTER you have answer/ref_ok
+        entry = {"id": _new_id(), "role": "assistant", "content": answer, "ref_ok": ref_ok}
 
-        entry = {"id": _new_id(), "role": "assistant", "content": answer}
         ref_page, ref_img_b64 = None, None
 
         try:
@@ -504,7 +507,7 @@ if st.session_state.waiting_for_response:
                 entry["chosen_score"] = chosen_score
                 
                 # attach reference only if LLM says OK (and score passes threshold if you keep it)
-                if best_doc is not None and ref_ok and (chosen_score or 0.0) >= THRESHOLD:
+                if best_doc is not None and entry["ref_ok"] and (chosen_score or 0.0) >= THRESHOLD:
                     ref_page = best_doc.metadata.get("page_number")
                     entry["ref_page"] = ref_page
                     img = st.session_state.page_images.get(ref_page)
@@ -525,12 +528,11 @@ if st.session_state.waiting_for_response:
     with block.container():
         st.markdown(f"<div class='assistant-bubble clearfix'>{answer}</div>", unsafe_allow_html=True)
     
-        if entry.get("chosen_score") is not None:
-            st.markdown(
-                f"<div class='chip'>🔎 Chosen chunk score: {entry['chosen_score']:.4f}"
-                f"{f' (page {entry.get('ref_page')})' if entry.get('ref_page') else ''}</div>",
-                unsafe_allow_html=True
-            )
+        page_suffix = f" (page {entry.get('ref_page')})" if entry.get("ref_page") else ""
+        st.markdown(
+            f"<div class='chip'>🔎 Chosen chunk score: {entry['chosen_score']:.4f}{page_suffix}</div>",
+            unsafe_allow_html=True
+        )
     
         if (entry.get("source_img") and entry.get("ref_ok", True) and (entry.get("chosen_score") or 0.0) >= THRESHOLD):
             render_reference_card(
