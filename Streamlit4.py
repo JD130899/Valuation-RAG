@@ -170,46 +170,52 @@ for m in st.session_state.messages:
     if "id" not in m:
         m["id"] = _new_id()
 
-def guess_suggestion(question: str, docs):
-    """Pick a short (<=6 words) line from the retrieved chunks that overlaps with the question."""
-    q_terms = set(w.lower() for w in re.findall(r"[A-Za-z]{3,}", question))
-    best_line, best_score = None, 0
-    for d in docs or []:
-        for ln in d.page_content.splitlines():
-            ln = ln.strip()
-            if not ln:
-                continue
-            # prefer short, title-like lines
-            if len(ln.split()) > 6:
-                continue
-            words = set(w.lower() for w in re.findall(r"[A-Za-z]{3,}", ln))
-            score = len(q_terms & words)
-            if score > best_score:
-                best_score, best_line = score, ln
-    return best_line or "Valuation Summary"
-
-
-def sanitize_suggestion(answer: str, question: str, docs):
-    """
-    If the model outputs the fallback:
-      - fill any [ ... ] with a guessed suggestion
-      - or, if suggestion is missing/too long, rebuild with a good guess
-    Otherwise, return as-is.
-    """
+def needs_suggestion(answer: str) -> bool:
+    """Detect vague / low-signal replies that should be turned into a 'Did you mean ...?'."""
     low = answer.lower().strip()
-    if "sorry i didnt understand the question" not in low:
-        return answer
 
-    # Case 1: model left brackets like [X]
+    # Common "I don't know" style signals
+    patterns = [
+        r"\bhmm\b",
+        r"\bi(?:'| a)m not sure\b",
+        r"\bnot enough (?:info|information|context)\b",
+        r"\bi (?:don'?t|do not) (?:see|have)\b",
+        r"\bcannot (?:find|answer)\b",
+        r"\bno (?:context|data)\b",
+        r"\bunsure\b",
+    ]
+    if any(re.search(p, low) for p in patterns):
+        return True
+
+    # Too short = likely unhelpful
+    if len(low) < 25:
+        return True
+
+    # If it's only a question back to the user and not a “Did you mean …?”
+    if low.endswith("?") and "did you mean" not in low:
+        return True
+
+    return False
+
+
+def build_suggestion_or_fix(answer: str, question: str, docs):
+    """
+    - If the model left [ ... ] anywhere, replace it with a best guess.
+    - If the answer looks vague (needs_suggestion), replace the whole thing with:
+        'Sorry I didnt understand the question. Did you mean <guess>?'
+    Returns (new_answer, is_ambiguous: bool)
+    """
+    # Replace any bracket placeholders [ ... ] directly
     if "[" in answer and "]" in answer:
-        return re.sub(r"\[.*?\]", guess_suggestion(question, docs), answer)
+        return re.sub(r"\[.*?\]", guess_suggestion(question, docs), answer), True
 
-    # Case 2: ensure 'Did you mean <short>?' exists and is short enough
-    m = re.search(r"Did you mean\s+(.+?)(\?)", answer, flags=re.IGNORECASE)
-    cand = (m.group(1).strip() if m else "")
-    if not cand or len(cand.split()) > 6:
-        return "Sorry I didnt understand the question. Did you mean " + guess_suggestion(question, docs) + "?"
-    return answer
+    # Heuristic: decide when to generate a suggestion
+    if needs_suggestion(answer):
+        guess = guess_suggestion(question, docs)
+        return f"Sorry I didnt understand the question. Did you mean {guess}?", True
+
+    return answer, False
+
 
 
 # ================= Builder =================
@@ -444,14 +450,7 @@ prompt = PromptTemplate(
  
     4. **Theory/textual question**  
        • Try to return an explanation **based on the context**.
-       
-    5. **If you cannot find an answer in Context**
-       • Reply **exactly**:
-         "Sorry I didnt understand the question. Did you mean SUGGESTION?"
-       • Where **SUGGESTION** is a short (≤6 words) phrase you pick from **Context** that best matches the user’s words
-         (e.g., a metric name, table heading, or section title). Do **not** use brackets. Do **not** invent terms.
-
-    
+           
     ---
     Context:
     {context}
@@ -521,16 +520,17 @@ if st.session_state.waiting_for_response:
             "pdf_name":     pdf_display,
         }
         answer = llm.invoke(wrapped_prompt.invoke(full_input)).content
-        answer = sanitize_suggestion(answer, q, docs)
+        answer, is_ambiguous = build_suggestion_or_fix(answer, q, docs)
 
-        apology = f"Sorry I can only answer question related to {pdf_display} pdf document"
+
+        apology = f"Sorry I can only answer question related to {pdf_display}"
         is_unrelated = apology.lower() in answer.strip().lower()
 
         entry = {"id": _new_id(), "role": "assistant", "content": answer}
         ref_page, ref_img_b64 = None, None
 
         try:
-            if docs and not is_unrelated:
+            if docs and not is_unrelated and not is_ambiguous:
                 texts = [d.page_content for d in docs]
                 embedder = CohereEmbeddings(
                     model="embed-english-v3.0",
