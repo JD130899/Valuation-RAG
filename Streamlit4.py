@@ -1,5 +1,6 @@
 import os, io, pickle, base64
 import streamlit as st
+import re
 import fitz  # PyMuPDF
 from PIL import Image
 from dotenv import load_dotenv
@@ -169,6 +170,46 @@ for m in st.session_state.messages:
     if "id" not in m:
         m["id"] = _new_id()
 
+def guess_suggestion(question: str, docs):
+    """Pick a short (<=6 words) line from the retrieved chunks that overlaps with the question."""
+    q_terms = set(w.lower() for w in re.findall(r"[A-Za-z]{3,}", question))
+    best_line, best_score = None, 0
+    for d in docs or []:
+        for ln in d.page_content.splitlines():
+            ln = ln.strip()
+            if not ln:
+                continue
+            # prefer short, title-like lines
+            if len(ln.split()) > 6:
+                continue
+            words = set(w.lower() for w in re.findall(r"[A-Za-z]{3,}", ln))
+            score = len(q_terms & words)
+            if score > best_score:
+                best_score, best_line = score, ln
+    return best_line or "Valuation Summary"
+
+
+def sanitize_suggestion(answer: str, question: str, docs):
+    """
+    If the model outputs the fallback:
+      - fill any [ ... ] with a guessed suggestion
+      - or, if suggestion is missing/too long, rebuild with a good guess
+    Otherwise, return as-is.
+    """
+    low = answer.lower().strip()
+    if "sorry i didnt understand the question" not in low:
+        return answer
+
+    # Case 1: model left brackets like [X]
+    if "[" in answer and "]" in answer:
+        return re.sub(r"\[.*?\]", guess_suggestion(question, docs), answer)
+
+    # Case 2: ensure 'Did you mean <short>?' exists and is short enough
+    m = re.search(r"Did you mean\s+(.+?)(\?)", answer, flags=re.IGNORECASE)
+    cand = (m.group(1).strip() if m else "")
+    if not cand or len(cand.split()) > 6:
+        return "Sorry I didnt understand the question. Did you mean " + guess_suggestion(question, docs) + "?"
+    return answer
 
 
 # ================= Builder =================
@@ -404,7 +445,12 @@ prompt = PromptTemplate(
     4. **Theory/textual question**  
        • Try to return an explanation **based on the context**.
        
-    If you still cannot see the answer, reply **“Hmm, I am not sure. Are you able to rephrase your question?”**
+    5. **If you cannot find an answer in Context**
+       • Reply **exactly**:
+         "Sorry I didnt understand the question. Did you mean SUGGESTION?"
+       • Where **SUGGESTION** is a short (≤6 words) phrase you pick from **Context** that best matches the user’s words
+         (e.g., a metric name, table heading, or section title). Do **not** use brackets. Do **not** invent terms.
+
     
     ---
     Context:
@@ -475,6 +521,7 @@ if st.session_state.waiting_for_response:
             "pdf_name":     pdf_display,
         }
         answer = llm.invoke(wrapped_prompt.invoke(full_input)).content
+        answer = sanitize_suggestion(answer, q, docs)
 
         apology = f"Sorry I can only answer question related to {pdf_display} pdf document"
         is_unrelated = apology.lower() in answer.strip().lower()
