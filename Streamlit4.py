@@ -373,8 +373,13 @@ prompt = PromptTemplate(
           “Would you like more detail on [X]?”  
        Otherwise, **do not** ask any follow-up.
 
+       **HARD RULE (unrelated questions)**
+        If the user's question is unrelated to this PDF or requires information outside the Context, reply **exactly**:
+        "Sorry I can only answer question related to {pdf_name} pdf document"
+        Do not add anything else.
+ 
     **Use ONLY what appears under “Context”.**
-
+    
     ### How to answer
     1. **Single value questions**  
        • Find the row + column that match the user's words.  
@@ -408,7 +413,7 @@ prompt = PromptTemplate(
     ---
     Question: {question}
     Answer:""",
-            input_variables=["context", "question"]
+            input_variables=["context", "question","pdf_name"]
         )
 
 base_text = prompt.template
@@ -418,7 +423,7 @@ Conversation so far:
 {chat_history}
 
 """, 
-    input_variables=["chat_history", "context", "question"]
+    input_variables=["chat_history", "context", "question","pdf_name"]
 )
 
 # ================= Input =================
@@ -458,35 +463,26 @@ if st.session_state.waiting_for_response:
         except Exception as e:
             st.warning(f"RAG retrieval error: {e}")
 
-        system_prompt = (
-            "You are a helpful assistant. Use ONLY the content under 'Context' to answer. "
-            "If the answer is not in the context, say you don't have enough information.\n\n"
-            f"Context:\n{ctx}"
-        )
+        history_to_use = st.session_state.messages[-10:]
 
         # Build the prompt text using your wrapped_prompt
-        chat_hist = format_chat_history(st.session_state.messages)  # you already defined this helper above
-        prompt_text = wrapped_prompt.format(chat_history=chat_hist, context=ctx, question=q)
-        
-        try:
-            # keep messages minimal: 1 system + 1 user containing the wrapped prompt
-            response = openai.chat.completions.create(
-                model="gpt-4o",  # "gpt-4o-mini" or "gpt-4o"
-                messages=[
-                    {"role": "system", "content": "Follow the instructions in the next message exactly."},
-                    {"role": "user", "content": prompt_text},
-                ],
-                temperature=0,
-            )
-            answer = response.choices[0].message.content
-        except Exception as e:
-            answer = f"❌ Error: {e}"
+        llm = ChatOpenAI(model="gpt-4o", temperature=0)
+        full_input = {
+            "chat_history": format_chat_history(history_to_use),
+            "context":      ctx,
+            "question":     q,
+            "pdf_name":     pdf_display,
+        }
+        answer = llm.invoke(wrapped_prompt.invoke(full_input)).content
+
+        apology = f"Sorry I can only answer question related to {pdf_display} pdf document"
+        is_unrelated = apology.lower() in answer.strip().lower()
 
         entry = {"id": _new_id(), "role": "assistant", "content": answer}
         ref_page, ref_img_b64 = None, None
 
         try:
-            if docs:
+            if docs and not is_unrelated:
                 texts = [d.page_content for d in docs]
                 embedder = CohereEmbeddings(
                     model="embed-english-v3.0",
@@ -502,11 +498,25 @@ if st.session_state.waiting_for_response:
                 best_doc = top3[0] if top3 else (ranked[0][0] if ranked else None)
                 if len(top3) >= 3:
                     ranking_prompt = PromptTemplate(
-                        template=("Given a user question and 3 candidate context chunks, return the number (1-3) "
-                                  "of the chunk that best answers it.\n\n"
-                                  "Question:\n{question}\n\nChunk 1:\n{chunk1}\n\nChunk 2:\n{chunk2}\n\nChunk 3:\n{chunk3}\n\nBest Chunk Number:\n"),
-                        input_variables=["question", "chunk1", "chunk2", "chunk3"]
-                    )
+                         template="""
+                        Given a user question and 3 candidate context chunks, return the number (1-3) of the chunk that best answers it.
+                        
+                        Question:
+                        {question}
+                        
+                        Chunk 1:
+                        {chunk1}
+                        
+                        Chunk 2:
+                        {chunk2}
+                        
+                        Chunk 3:
+                        {chunk3}
+                        
+                        Best Chunk Number:
+                        """,
+                                    input_variables=["question","chunk1","chunk2","chunk3"]
+                                )
                     pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
                         ranking_prompt.invoke({
                             "question": q,
