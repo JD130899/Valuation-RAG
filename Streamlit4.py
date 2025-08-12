@@ -20,6 +20,8 @@ import openai
 from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
 import streamlit.components.v1 as components
 
+THRESHOLD = 0.70
+
 # ================= Setup =================
 load_dotenv()
 st.set_page_config(page_title="Underwriting Agent", layout="wide")
@@ -355,13 +357,17 @@ for msg in st.session_state.messages:
     cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
     st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
 
-    if msg.get("source_img") and msg.get("source_b64"):
+    if (
+        msg.get("source_img") and msg.get("source_b64")
+        and (msg.get("chosen_score") or 0.0) >= THRESHOLD
+    ):
         render_reference_card(
-            label=(msg.get("source") or "Page"),  # e.g., "Page 17"
+            label=(msg.get("source") or f"Page {msg.get('ref_page','?')}"),
             img_b64=msg["source_img"],
             page_b64=msg["source_b64"],
             key=msg.get("id", "k0"),
         )
+
 
 
 
@@ -432,18 +438,21 @@ if st.session_state.waiting_for_response:
                     if pick.isdigit() and 1 <= int(pick) <= 3:
                         best_doc = top3[int(pick) - 1]
                # >>> put this right before:  if best_doc is not None:
+        
                 chosen_score = next((float(s) for d, s in ranked if d is best_doc), None)
                 entry["chosen_score"] = chosen_score
-         
-                if best_doc is not None:
+                
+                # only attach reference if score passes threshold
+                if best_doc is not None and (chosen_score or 0.0) >= THRESHOLD:
                     ref_page = best_doc.metadata.get("page_number")
+                    entry["ref_page"] = ref_page  # store page on the message
                     img = st.session_state.page_images.get(ref_page)
                     ref_img_b64 = pil_to_base64(img) if img else None
                     if ref_img_b64:
                         entry["source"] = f"Page {ref_page}"
                         entry["source_img"] = ref_img_b64
-                        # Always open a single-page blob (reliable across Cloud/Drive)
                         entry["source_b64"] = single_page_pdf_b64(st.session_state.pdf_bytes, ref_page)
+
 
         except Exception as e:
             st.info(f"ℹ️ Reference selection skipped: {e}")
@@ -453,23 +462,22 @@ if st.session_state.waiting_for_response:
     # Final render (no rerun)
     with block.container():
         st.markdown(f"<div class='assistant-bubble clearfix'>{answer}</div>", unsafe_allow_html=True)
-
+    
         if entry.get("chosen_score") is not None:
-            
             st.markdown(
                 f"<div class='chip'>🔎 Chosen chunk score: {entry['chosen_score']:.4f}"
-                f"{f' (page {ref_page})' if 'ref_page' in locals() and ref_page else ''}</div>",
+                f"{f' (page {entry.get('ref_page')})' if entry.get('ref_page') else ''}</div>",
                 unsafe_allow_html=True
             )
-
-        # Register the blob URL for this new message (no white bars; height=0)
-        if entry.get("source_img"):
+    
+        if entry.get("source_img") and (entry.get("chosen_score") or 0.0) >= THRESHOLD:
             render_reference_card(
-                label=entry.get("source", f"Page {ref_page}"),
+                label=entry.get("source", f"Page {entry.get('ref_page','?')}"),
                 img_b64=entry["source_img"],
                 page_b64=entry["source_b64"],
                 key=entry.get("id", "k0"),
             )
+
 
 
 
