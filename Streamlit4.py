@@ -433,11 +433,8 @@ if st.session_state.waiting_for_response:
                         best_doc = top3[int(pick) - 1]
                # >>> put this right before:  if best_doc is not None:
                 chosen_score = next((float(s) for d, s in ranked if d is best_doc), None)
-                if chosen_score is not None:
-                    st.write(f"🔎 Chosen chunk score: {chosen_score:.4f} "
-                             f"(page {best_doc.metadata.get('page_number')})")
+                entry["chosen_score"] = chosen_score
          
-
                 if best_doc is not None:
                     ref_page = best_doc.metadata.get("page_number")
                     img = st.session_state.page_images.get(ref_page)
@@ -456,6 +453,14 @@ if st.session_state.waiting_for_response:
     # Final render (no rerun)
     with block.container():
         st.markdown(f"<div class='assistant-bubble clearfix'>{answer}</div>", unsafe_allow_html=True)
+
+        if entry.get("chosen_score") is not None:
+            
+            st.markdown(
+                f"<div class='chip'>🔎 Chosen chunk score: {entry['chosen_score']:.4f}"
+                f"{f' (page {ref_page})' if 'ref_page' in locals() and ref_page else ''}</div>",
+                unsafe_allow_html=True
+            )
 
         # Register the blob URL for this new message (no white bars; height=0)
         if entry.get("source_img"):
