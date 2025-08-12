@@ -437,7 +437,7 @@ if st.session_state.waiting_for_response:
         try:
             response = openai.chat.completions.create(
                 #model="gpt-3.5-turbo",
-                model="gpt-5-mini"
+                model="gpt-5-mini",
                 messages=[{"role": "system", "content": system_prompt}, *st.session_state.messages],
             )
             answer = response.choices[0].message.content
