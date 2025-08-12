@@ -32,7 +32,7 @@ def should_show_reference(question: str, answer: str, context: str) -> bool:
         "Answer with only 'yes' or 'no'."
     )
     try:
-        out = ChatOpenAI(model="gpt-4o-mini", temperature=0).invoke(prompt).content.strip().lower()
+        out = ChatOpenAI(model="gpt-5-mini", temperature=0).invoke(prompt).content.strip().lower()
         return out.startswith("y")
     except Exception:
         return True  # safe default if judge call fails
@@ -441,7 +441,7 @@ if st.session_state.waiting_for_response:
         ref_ok = True  # default so later code never sees an undefined name
         try:
             response = openai.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model="gpt-5-mini"",
                 messages=[{"role": "system", "content": system_prompt}, *st.session_state.messages],
             )
             answer = response.choices[0].message.content
@@ -490,7 +490,7 @@ if st.session_state.waiting_for_response:
                         """,
                         input_variables=["question", "chunk1", "chunk2", "chunk3"]
                     )
-                    pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
+                    pick = ChatOpenAI(model="gpt-5-mini"", temperature=0).invoke(
                         ranking_prompt.invoke({
                             "question": q,
                             "chunk1": top3[0].page_content,
