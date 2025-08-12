@@ -4,6 +4,8 @@ import fitz  # PyMuPDF
 from PIL import Image
 from dotenv import load_dotenv
 from sklearn.metrics.pairwise import cosine_similarity
+# add at top
+import uuid, hashlib
 
 # LangChain / RAG deps
 from langchain_core.documents import Document
@@ -56,18 +58,44 @@ def _new_id():
     return f"m{n}"
 
 def file_badge_link(name: str, pdf_bytes: bytes, synced: bool = True):
-    base = os.path.splitext(name)[0]  # remove .pdf
+    base = os.path.splitext(name)[0]          # remove .pdf
     b64  = base64.b64encode(pdf_bytes).decode("ascii")
     label = "Using synced file:" if synced else "Using file:"
+    link_id = f"open-file-{uuid.uuid4().hex[:8]}"
+
+    # Visible banner + placeholder link
     st.markdown(
-        f"""
+        f'''
         <div style="background:#1f2c3a; padding:8px; border-radius:8px; color:#fff;">
           ✅ <b>{label}</b>
-          <a href="data:application/pdf;base64,{b64}" target="_blank" rel="noopener"
+          <a id="{link_id}" href="#" target="_blank" rel="noopener"
              style="color:#93c5fd; text-decoration:none;">{base}</a>
         </div>
-        """,
+        ''',
         unsafe_allow_html=True
+    )
+
+    # Create a blob URL for the PDF and attach it to the link (works across browsers)
+    components.html(
+        f'''<!doctype html><meta charset='utf-8'>
+<style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
+<script>(function(){{
+  function b64ToUint8Array(s){{var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}}
+  var blob = new Blob([b64ToUint8Array("{b64}")], {{type:"application/pdf"}});
+  var url  = URL.createObjectURL(blob);
+
+  function attach(){{
+    var d = window.parent && window.parent.document;
+    if(!d) return setTimeout(attach,120);
+    var a = d.getElementById("{link_id}");
+    if(!a) return setTimeout(attach,120);
+    a.setAttribute("href", url);
+  }}
+  attach();
+
+  var me = window.frameElement; if(me){{me.style.display="none";me.style.height="0";me.style.border="0";}}
+}})();</script>''',
+        height=0,
     )
 
 
