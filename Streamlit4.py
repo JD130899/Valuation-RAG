@@ -116,7 +116,6 @@ def render_reference_card(label: str, img_b64: str, page_b64: str, key: str):
   var me = window.frameElement; if(me){{me.style.display='none';me.style.height='0';me.style.border='0';}}
 }})();</script>""",
         height=0,
-        key=f"refscript-{key}",
     )
 
 
