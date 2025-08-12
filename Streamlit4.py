@@ -20,24 +20,6 @@ import openai
 from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
 import streamlit.components.v1 as components
 
-THRESHOLD = 0.40
-from langchain_openai import ChatOpenAI  # you already import this
-
-def should_show_reference(question: str, answer: str, context: str) -> bool:
-    prompt = (
-        "You are a strict judge. Given a QUESTION, an ASSISTANT_ANSWER, and the CONTEXT used to answer, "
-        "return exactly 'yes' if the answer relies on the context (quotes or depends on values/text from it). "
-        "Return 'no' if the answer says there isn't enough info, is generic, or not grounded in the context.\n\n"
-        f"QUESTION:\n{question}\n\nASSISTANT_ANSWER:\n{answer}\n\nCONTEXT:\n{context}\n\n"
-        "Answer with only 'yes' or 'no'."
-    )
-    try:
-        out = ChatOpenAI(model="gpt-5-mini", temperature=0).invoke(prompt).content.strip().lower()
-        return out.startswith("y")
-    except Exception:
-        return True  # safe default if judge call fails
-
-
 # ================= Setup =================
 load_dotenv()
 st.set_page_config(page_title="Underwriting Agent", layout="wide")
@@ -336,51 +318,24 @@ def format_chat_history(messages):
     return "\n".join(lines)
 
 prompt = PromptTemplate(
-        template = """
-       You are a financial-data extraction assistant.
-    
-       **IMPORTANT CONDITIONAL FOLLOW-UP**  
-        🛎️ After you answer the user’s question (using steps 1–4), **only if** there is still **unused** relevant report content, **ask**:  
-          “Would you like more detail on [X]?”  
-       Otherwise, **do not** ask any follow-up.
+    template="""
+You are a financial-data extraction assistant.
 
-    **Use ONLY what appears under “Context”.**
+**Use ONLY what appears under “Context”.**
+1) Single value → short sentence with the exact number.
+2) Table questions → return the full table in GitHub-flavoured markdown.
+3) Valuation methods → synthesize across chunks, show weights and corresponding $ values; prefer detailed breakdowns.
+4) Theory/text → explain using context.
 
-    ### How to answer
-    1. **Single value questions**  
-       • Find the row + column that match the user's words.  
-       • Return the answer in a **short, clear sentence** using the exact number from the context.  
-         Example: “The Income (DCF) approach value is $1,150,000.”  
-       • **Do NOT repeat the metric name or company name** unless the user asks.
-    
-    2. **Table questions**  
-       • Return the full table **with its header row** in GitHub-flavoured markdown.
-    
-    3. **Valuation method / theory / reasoning questions**
-        
-       • If the question involves **valuation methods**, **concluded value**, or topics like **Income Approach**, **Market Approach**, or **Valuation Summary**, do the following:
-         - Combine and synthesize relevant information across all chunks.
-         - Pay special attention to how **weights are distributed** (e.g., “50% DCF, 25% EBITDA, 25% SDE”).
-         - Avoid oversimplifying if more detailed breakdowns (like subcomponents of market approach) are available.
-         - If a table gives a simplified view (e.g., "50% Market Approach"), but other parts break it down (e.g., 25% EBITDA + 25% SDE), **prefer the detailed breakdown with percent value**.   
-         - When describing weights, also mention the **corresponding dollar values** used in the context (e.g., “50% DCF = $3,712,000, 25% EBITDA = $4,087,000...”)
-         - **If Market approach is composed of sub-methods like EBITDA and SDE, then explicitly extract and show their individual weights and values, even if not listed together in a single table.**
-        
- 
-    4. **Theory/textual question**  
-       • Try to return an explanation **based on the context**.
-       
-    If you still cannot see the answer, reply **“Hmm, I am not sure. Are you able to rephrase your question?”**
-    
-    ---
-    Context:
-    {context}
-    
-    ---
-    Question: {question}
-    Answer:""",
-            input_variables=["context", "question"]
-        )
+If not enough info: “Hmm, I am not sure. Are you able to rephrase your question?”
+---
+Context:
+{context}
+---
+Question: {question}
+Answer:""",
+    input_variables=["context", "question"]
+)
 
 base_text = prompt.template
 wrapped_prompt = PromptTemplate(
@@ -400,18 +355,13 @@ for msg in st.session_state.messages:
     cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
     st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
 
-    if (
-        msg.get("source_img") and msg.get("source_b64")
-        and msg.get("ref_ok", True)
-        and (msg.get("chosen_score") or 0.0) >= THRESHOLD
-    ):
+    if msg.get("source_img") and msg.get("source_b64"):
         render_reference_card(
-            label=(msg.get("source") or f"Page {msg.get('ref_page','?')}"),
+            label=(msg.get("source") or "Page"),  # e.g., "Page 17"
             img_b64=msg["source_img"],
             page_b64=msg["source_b64"],
             key=msg.get("id", "k0"),
         )
-
 
 
 
@@ -437,21 +387,16 @@ if st.session_state.waiting_for_response:
             f"Context:\n{ctx}"
         )
 
-        # --- get model answer + judge ---
-        ref_ok = True  # default so later code never sees an undefined name
         try:
             response = openai.chat.completions.create(
-                model="gpt-5-mini",
+                model="gpt-3.5-turbo",
                 messages=[{"role": "system", "content": system_prompt}, *st.session_state.messages],
             )
             answer = response.choices[0].message.content
-            ref_ok = should_show_reference(q, answer, ctx)
         except Exception as e:
             answer = f"❌ Error: {e}"
-        
-        # create entry AFTER you have answer/ref_ok
-        entry = {"id": _new_id(), "role": "assistant", "content": answer, "ref_ok": ref_ok}
 
+        entry = {"id": _new_id(), "role": "assistant", "content": answer}
         ref_page, ref_img_b64 = None, None
 
         try:
@@ -471,26 +416,12 @@ if st.session_state.waiting_for_response:
                 best_doc = top3[0] if top3 else (ranked[0][0] if ranked else None)
                 if len(top3) >= 3:
                     ranking_prompt = PromptTemplate(
-                        template="""
-                        Given a user question and 3 candidate context chunks, return the number (1-3) of the chunk that best answers it.
-
-                        Question:
-                        {question}
-                        
-                        Chunk 1:
-                        {chunk1}
-                        
-                        Chunk 2:
-                        {chunk2}
-                        
-                        Chunk 3:
-                        {chunk3}
-                        
-                        Best Chunk Number:
-                        """,
+                        template=("Given a user question and 3 candidate context chunks, return the number (1-3) "
+                                  "of the chunk that best answers it.\n\n"
+                                  "Question:\n{question}\n\nChunk 1:\n{chunk1}\n\nChunk 2:\n{chunk2}\n\nChunk 3:\n{chunk3}\n\nBest Chunk Number:\n"),
                         input_variables=["question", "chunk1", "chunk2", "chunk3"]
                     )
-                    pick = ChatOpenAI(model="gpt-5-mini", temperature=0).invoke(
+                    pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
                         ranking_prompt.invoke({
                             "question": q,
                             "chunk1": top3[0].page_content,
@@ -500,24 +431,16 @@ if st.session_state.waiting_for_response:
                     ).content.strip()
                     if pick.isdigit() and 1 <= int(pick) <= 3:
                         best_doc = top3[int(pick) - 1]
-               # >>> put this right before:  if best_doc is not None:
-        
-                # keep cosine score for the chosen doc
-                chosen_score = next((float(s) for d, s in ranked if d is best_doc), None)
-                entry["chosen_score"] = chosen_score
-                
-                # attach reference only if LLM says OK (and score passes threshold if you keep it)
-                if best_doc is not None and entry["ref_ok"] and (chosen_score or 0.0) >= THRESHOLD:
+
+                if best_doc is not None:
                     ref_page = best_doc.metadata.get("page_number")
-                    entry["ref_page"] = ref_page
                     img = st.session_state.page_images.get(ref_page)
                     ref_img_b64 = pil_to_base64(img) if img else None
                     if ref_img_b64:
                         entry["source"] = f"Page {ref_page}"
                         entry["source_img"] = ref_img_b64
+                        # Always open a single-page blob (reliable across Cloud/Drive)
                         entry["source_b64"] = single_page_pdf_b64(st.session_state.pdf_bytes, ref_page)
-
-
 
         except Exception as e:
             st.info(f"ℹ️ Reference selection skipped: {e}")
@@ -527,21 +450,15 @@ if st.session_state.waiting_for_response:
     # Final render (no rerun)
     with block.container():
         st.markdown(f"<div class='assistant-bubble clearfix'>{answer}</div>", unsafe_allow_html=True)
-    
-        page_suffix = f" (page {entry.get('ref_page')})" if entry.get("ref_page") else ""
-        st.markdown(
-            f"<div class='chip'>🔎 Chosen chunk score: {entry['chosen_score']:.4f}{page_suffix}</div>",
-            unsafe_allow_html=True
-        )
-    
-        if (entry.get("source_img") and entry.get("ref_ok", True) and (entry.get("chosen_score") or 0.0) >= THRESHOLD):
+
+        # Register the blob URL for this new message (no white bars; height=0)
+        if entry.get("source_img"):
             render_reference_card(
-                label=entry.get("source", f"Page {entry.get('ref_page','?')}"),
+                label=entry.get("source", f"Page {ref_page}"),
                 img_b64=entry["source_img"],
                 page_b64=entry["source_b64"],
                 key=entry.get("id", "k0"),
             )
-
 
 
 
