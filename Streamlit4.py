@@ -253,7 +253,7 @@ if "uploaded_file_from_drive" in st.session_state:
 else:
     up = st.file_uploader("Upload a valuation report PDF", type="pdf")
     if up:
-    file_badge_link(up.name, up.getvalue(), synced=False)
+        file_badge_link(up.name, up.getvalue(), synced=False)
 
 if not up:
     st.warning("Please upload or load a PDF to continue.")
