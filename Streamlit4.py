@@ -431,6 +431,12 @@ if st.session_state.waiting_for_response:
                     ).content.strip()
                     if pick.isdigit() and 1 <= int(pick) <= 3:
                         best_doc = top3[int(pick) - 1]
+               # >>> put this right before:  if best_doc is not None:
+                chosen_score = next((float(s) for d, s in ranked if d is best_doc), None)
+                if chosen_score is not None:
+                    st.write(f"🔎 Chosen chunk score: {chosen_score:.4f} "
+                             f"(page {best_doc.metadata.get('page_number')})")
+         
 
                 if best_doc is not None:
                     ref_page = best_doc.metadata.get("page_number")
