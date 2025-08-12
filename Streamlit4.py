@@ -449,7 +449,7 @@ if st.session_state.waiting_for_response:
                 best_doc = top3[0] if top3 else (ranked[0][0] if ranked else None)
                 if len(top3) >= 3:
                     ranking_prompt = PromptTemplate(
-                        template=("""
+                        template="""
                         Given a user question and 3 candidate context chunks, return the number (1-3) of the chunk that best answers it.
 
                         Question:
