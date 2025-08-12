@@ -21,6 +21,22 @@ from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
 import streamlit.components.v1 as components
 
 THRESHOLD = 0.40
+from langchain_openai import ChatOpenAI  # you already import this
+
+def should_show_reference(question: str, answer: str, context: str) -> bool:
+    prompt = (
+        "You are a strict judge. Given a QUESTION, an ASSISTANT_ANSWER, and the CONTEXT used to answer, "
+        "return exactly 'yes' if the answer relies on the context (quotes or depends on values/text from it). "
+        "Return 'no' if the answer says there isn't enough info, is generic, or not grounded in the context.\n\n"
+        f"QUESTION:\n{question}\n\nASSISTANT_ANSWER:\n{answer}\n\nCONTEXT:\n{context}\n\n"
+        "Answer with only 'yes' or 'no'."
+    )
+    try:
+        out = ChatOpenAI(model="gpt-4o-mini", temperature=0).invoke(prompt).content.strip().lower()
+        return out.startswith("y")
+    except Exception:
+        return True  # safe default if judge call fails
+
 
 # ================= Setup =================
 load_dotenv()
@@ -386,6 +402,7 @@ for msg in st.session_state.messages:
 
     if (
         msg.get("source_img") and msg.get("source_b64")
+        and msg.get("ref_ok", True)
         and (msg.get("chosen_score") or 0.0) >= THRESHOLD
     ):
         render_reference_card(
@@ -426,6 +443,8 @@ if st.session_state.waiting_for_response:
                 messages=[{"role": "system", "content": system_prompt}, *st.session_state.messages],
             )
             answer = response.choices[0].message.content
+            ref_ok = should_show_reference(q, answer, ctx)
+            entry["ref_ok"] = ref_ok
         except Exception as e:
             answer = f"❌ Error: {e}"
 
@@ -480,19 +499,21 @@ if st.session_state.waiting_for_response:
                         best_doc = top3[int(pick) - 1]
                # >>> put this right before:  if best_doc is not None:
         
+                # keep cosine score for the chosen doc
                 chosen_score = next((float(s) for d, s in ranked if d is best_doc), None)
                 entry["chosen_score"] = chosen_score
                 
-                # only attach reference if score passes threshold
-                if best_doc is not None and (chosen_score or 0.0) >= THRESHOLD:
+                # attach reference only if LLM says OK (and score passes threshold if you keep it)
+                if best_doc is not None and ref_ok and (chosen_score or 0.0) >= THRESHOLD:
                     ref_page = best_doc.metadata.get("page_number")
-                    entry["ref_page"] = ref_page  # store page on the message
+                    entry["ref_page"] = ref_page
                     img = st.session_state.page_images.get(ref_page)
                     ref_img_b64 = pil_to_base64(img) if img else None
                     if ref_img_b64:
                         entry["source"] = f"Page {ref_page}"
                         entry["source_img"] = ref_img_b64
                         entry["source_b64"] = single_page_pdf_b64(st.session_state.pdf_bytes, ref_page)
+
 
 
         except Exception as e:
@@ -511,7 +532,7 @@ if st.session_state.waiting_for_response:
                 unsafe_allow_html=True
             )
     
-        if entry.get("source_img") and (entry.get("chosen_score") or 0.0) >= THRESHOLD:
+        if (entry.get("source_img") and entry.get("ref_ok", True) and (entry.get("chosen_score") or 0.0) >= THRESHOLD):
             render_reference_card(
                 label=entry.get("source", f"Page {entry.get('ref_page','?')}"),
                 img_b64=entry["source_img"],
