@@ -373,7 +373,7 @@ if st.session_state.waiting_for_response:
         thinking = st.empty()
         thinking.markdown(
             "<div class='assistant-bubble clearfix'>Thinking…</div>", 
-            unsafe_allow_html=True
+            unsafe_allow_html=True)
             q = st.session_state.pending_input or ""
             ctx, docs = "", []
             try:
