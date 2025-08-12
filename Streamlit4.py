@@ -20,7 +20,7 @@ import openai
 from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
 import streamlit.components.v1 as components
 
-THRESHOLD = 0.70
+THRESHOLD = 0.40
 
 # ================= Setup =================
 load_dotenv()
