@@ -420,10 +420,7 @@ prompt = PromptTemplate(
           “Would you like more detail on [X]?”  
        Otherwise, **do not** ask any follow-up.
 
-       **HARD RULE (unrelated questions)**
-        If the user's question is unrelated to this PDF or requires information outside the Context, reply **exactly**:
-        "Sorry I can only answer question related to {pdf_name} pdf document"
-        Do not add anything else.
+     
  
     **Use ONLY what appears under “Context”.**
     
