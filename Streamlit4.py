@@ -171,19 +171,35 @@ for m in st.session_state.messages:
         m["id"] = _new_id()
 
 def needs_suggestion(answer: str) -> bool:
-    """Detect vague / low-signal replies that should be turned into a 'Did you mean ...?'."""
-    low = answer.lower().strip()
+    low = answer.strip()
+    # Case-insensitive match on any pattern
+    if any(re.search(p, low, flags=re.IGNORECASE) for p in patterns):
+        return True
+
+    # Too short = likely unhelpful
+    if len(low) < 25:
+        return True
+
+    # Only a question back to the user (but not already "Did you mean ...?")
+    if low.endswith("?") and not re.search(r"did you mean\s", low, flags=re.IGNORECASE):
+        return True
+
+    return False
+
 
     # Common "I don't know" style signals
     patterns = [
-        r"\bhmm\b",
-        r"\bi(?:'| a)m not sure\b",
-        r"\bnot enough (?:info|information|context)\b",
-        r"\bi (?:don'?t|do not) (?:see|have)\b",
-        r"\bcannot (?:find|answer)\b",
-        r"\bno (?:context|data)\b",
-        r"\bunsure\b",
-    ]
+    r"\bhmm\b",
+    r"\bhmm[,!.\s]*i(?:'| a)m not sure\b",          # "Hmm, I'm not sure" etc.
+    r"\bi(?:'| a)m not sure\b",                     # "I'm not sure" / "I am not sure"
+    r"\bnot enough (?:info|information|context)\b",
+    r"\bi (?:don'?t|do not) (?:see|have)\b",
+    r"\bcannot (?:find|answer|determine)\b",
+    r"\bno (?:context|data)\b",
+    r"\bunsure\b",
+    r"\bare you able to rephrase (?:the )?question\??",  # <- explicit rephrase line
+]
+
     if any(re.search(p, low) for p in patterns):
         return True
 
@@ -447,6 +463,13 @@ prompt = PromptTemplate(
  
     4. **Theory/textual question**  
        • Try to return an explanation **based on the context**.
+
+    5. Unrelated questions
+        If the user's question is unrelated to this PDF or requires information outside the Context, reply **exactly**:
+        "Sorry I can only answer question related to {pdf_name} pdf document"
+        Do not add anything else.
+        
+    6. If not enough info: “Hmm, I am not sure. Are you able to rephrase your question?”    
            
     ---
     Context:
