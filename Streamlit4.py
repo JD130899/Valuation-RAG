@@ -218,9 +218,45 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
 # ------------------- Styles -------------------
 st.markdown("""
 <style>
-.user-bubble {background:#007bff;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:right;margin:4px;}
-.assistant-bubble {background:#1e1e1e;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:left;margin:4px;}
-.clearfix::after {content:"";display:table;clear:both;}
+/* Chat bubbles */
+.user-bubble,
+.assistant-bubble{
+  display:inline-block;            /* shrink to content width */
+  box-sizing:border-box;
+  max-width:60%;
+  padding:10px 12px;
+  margin:6px 4px;
+  border-radius:10px;
+  color:#fff;
+  line-height:1.45;
+
+  /* keep text inside the box */
+  white-space:pre-wrap;            /* respect newlines */
+  overflow-wrap:anywhere;          /* break long tokens */
+  word-break:break-word;
+
+  /* avoid unintended italics from markdown */
+  font-style:normal;
+  font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+}
+.user-bubble{ background:#007bff; float:right; }
+.assistant-bubble{ background:#1e1e1e; float:left; }
+
+/* tidy up markdown inside bubbles */
+.user-bubble p,
+.assistant-bubble p{ margin:0 0 .5rem; }
+.user-bubble ul,.user-bubble ol,
+.assistant-bubble ul,.assistant-bubble ol{ margin:.25rem 0 .75rem; padding-left:1.25rem; }
+.user-bubble li,.assistant-bubble li{ margin:.15rem 0; }
+.user-bubble code,.assistant-bubble code,
+.user-bubble pre,.assistant-bubble pre{ white-space:pre-wrap; word-break:break-word; }
+.user-bubble em,.user-bubble i,
+.assistant-bubble em,.assistant-bubble i{ font-style:normal; }
+
+/* clearfix for floats */
+.clearfix::after { content:""; display:block; clear:both; }
+
+/* Reference chip + panel */
 .ref{ display:block; width:60%; max-width:900px; margin:6px 0 12px 8px; }
 .ref summary{
   display:inline-flex; align-items:center; gap:8px; cursor:pointer; list-style:none; outline:none;
@@ -245,6 +281,8 @@ st.markdown("""
   position:absolute; top:6px; right:10px; border:0; background:transparent;
   color:#94a3b8; font-size:20px; line-height:1; cursor:pointer;
 }
+
+/* Link chip */
 .chip{ display:inline-flex;align-items:center;gap:.5rem;
   background:#0f172a;color:#e2e8f0;border:1px solid #334155;
   border-radius:10px;padding:.35rem .6rem;font:14px/1.2 system-ui; }
@@ -252,6 +290,7 @@ st.markdown("""
 .chip a:hover{text-decoration:underline}
 </style>
 """, unsafe_allow_html=True)
+
 
 # ------------------- Prompt helpers -------------------
 def format_chat_history(messages):
