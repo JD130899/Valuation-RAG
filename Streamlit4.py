@@ -49,10 +49,6 @@ def is_confirmation(text: str) -> bool:
 
 
 def guess_suggestion(question: str, docs):
-    """
-    Return a short (<= 6 words) phrase from the retrieved chunks that overlaps
-    with the user's question. Falls back to 'Valuation Summary'.
-    """
     q_terms = set(w.lower() for w in re.findall(r"[A-Za-z]{3,}", question))
     best_line, best_score = None, 0
 
@@ -61,6 +57,8 @@ def guess_suggestion(question: str, docs):
             ln = ln.strip()
             if not ln:
                 continue
+            # remove leading bullets/dashes
+            ln = re.sub(r"^[\-\u2022•*·]+\s*", "", ln)   # <- NEW
             # prefer short, title-like lines
             if len(ln.split()) > 6:
                 continue
@@ -70,6 +68,7 @@ def guess_suggestion(question: str, docs):
                 best_score, best_line = score, ln
 
     return best_line or "Valuation Summary"
+
 
 
 # ================= Setup =================
@@ -97,6 +96,9 @@ if "page_images" not in st.session_state:
 # --- Stable IDs for messages ---
 if "next_msg_id" not in st.session_state:
     st.session_state.next_msg_id = 0
+
+if "used_suggested" not in st.session_state:
+    st.session_state.used_suggested = False
 
 
 
@@ -235,20 +237,27 @@ def needs_suggestion(answer: str) -> bool:
 
     return False
 
-def build_suggestion_or_fix(answer: str, question: str, docs):
+def build_suggestion_or_fix(answer: str, question: str, docs, *, force: bool = False):
     """
     Returns (new_answer, is_ambiguous, suggestion_or_none)
+
+    If force=True, we skip the 'needs_suggestion' heuristic (because the user already
+    confirmed a suggestion). We still replace any [ ... ] placeholders if present.
     """
-    # Replace any bracket placeholders [ ... ] directly
+    # always safe to replace bracket placeholders
     if "[" in answer and "]" in answer:
         guess = guess_suggestion(question, docs)
-        return re.sub(r"\[.*?\]", guess, answer), True, guess
+        return re.sub(r"\[.*?\]", guess, answer), False if force else True, (None if force else guess)
+
+    if force:
+        return answer, False, None
 
     if needs_suggestion(answer):
         guess = guess_suggestion(question, docs)
         return f"Sorry I didnt understand the question. Did you mean {guess}?", True, guess
 
     return answer, False, None
+
 
 
 
@@ -519,7 +528,10 @@ if user_q:
     if st.session_state.suggested_query and is_confirmation(user_q):
         st.session_state.pending_input = st.session_state.suggested_query
         # optional: clear so it doesn't persist forever
+        st.session_state.used_suggested = True 
         st.session_state.suggested_query = None
+    else:
+        st.session_state.used_suggested = False    
     st.session_state.waiting_for_response = True
 
 # ================= History =================
@@ -564,7 +576,7 @@ if st.session_state.waiting_for_response:
             "pdf_name":     pdf_display,
         }
         answer = llm.invoke(wrapped_prompt.invoke(full_input)).content
-        answer, is_ambiguous, suggestion = build_suggestion_or_fix(answer, q, docs)
+        answer, is_ambiguous, suggestion = build_suggestion_or_fix(answer, q, docs, force=st.session_state.used_suggested)
         
         # remember the suggestion for the next user turn (so "Yes" can trigger it)
         st.session_state.suggested_query = suggestion if is_ambiguous else None
