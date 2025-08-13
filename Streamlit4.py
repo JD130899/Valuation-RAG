@@ -436,6 +436,7 @@ for msg in st.session_state.messages:
         )
 
 # ------------------- Answer (single-pass, no rerun) -------------------
+
 if st.session_state.waiting_for_response:
     block = st.empty()
     with block.container():
@@ -462,24 +463,46 @@ if st.session_state.waiting_for_response:
         }
         answer = llm.invoke(wrapped_prompt.invoke(full_input)).content
 
-        # Capture follow-up topic for the next turn (if the model asked one)
-        m = FOLLOWUP_RX.search(answer)
-        if m:
-            topic = re.sub(r"^[\-\u2022•*·]+\s*", "", m.group(1).strip())
-            st.session_state.pending_followup = topic or None
+        # --- classify the answer ---
+        apology_re = re.compile(
+            rf"^\s*Sorry I can only answer question related to {re.escape(pdf_display)}(?: pdf document)?\s*$",
+            re.IGNORECASE,
+        )
+        is_unrelated = bool(apology_re.match(answer.strip()))
+
+        low_confidence = bool(re.search(
+            r"\b(hmm|i(?:'| a)m not sure|not enough (?:info|information|context)|"
+            r"i (?:don'?t|do not) (?:see|have)|cannot (?:find|answer|determine)|"
+            r"no (?:context|data)|unsure)\b",
+            answer,
+            re.IGNORECASE,
+        ))
+
+        # Clear any old follow-up each turn
+        st.session_state.pending_followup = None
 
         entry = {"id": _new_id(), "role": "assistant", "content": answer}
 
-        # Simple reference: first retrieved chunk's page preview
-        if docs:
-            best_doc = docs[0]
-            ref_page = best_doc.metadata.get("page_number")
-            img = st.session_state.page_images.get(ref_page)
-            if img:
-                entry["source"] = f"Page {ref_page}"
-                entry["source_img"] = pil_to_base64(img)
-                entry["source_pdf_b64"] = base64.b64encode(st.session_state.pdf_bytes).decode("ascii")
-                entry["source_page"] = ref_page
+        # --- Only attach follow-up + reference when answer is valid ---
+        if not (is_unrelated or low_confidence):
+            # Capture follow-up topic (if the model asked one)
+            m = FOLLOWUP_RX.search(answer)
+            if m:
+                topic = m.group(1).strip()
+                topic = re.sub(r"^[\-\u2022•*·]+\s*", "", topic)   # strip bullets
+                topic = re.sub(r"[`*_]+", "", topic).rstrip(" .)!") # strip md/strays
+                st.session_state.pending_followup = topic or None
+
+            # Attach a reference chip (use first retrieved chunk's page)
+            if docs:
+                best_doc = docs[0]
+                ref_page = best_doc.metadata.get("page_number")
+                img = st.session_state.page_images.get(ref_page)
+                if img:
+                    entry["source"] = f"Page {ref_page}"
+                    entry["source_img"] = pil_to_base64(img)
+                    entry["source_pdf_b64"] = base64.b64encode(st.session_state.pdf_bytes).decode("ascii")
+                    entry["source_page"] = ref_page
 
         thinking.empty()
 
@@ -499,3 +522,4 @@ if st.session_state.waiting_for_response:
     st.session_state.messages.append(entry)
     st.session_state.pending_input = None
     st.session_state.waiting_for_response = False
+
