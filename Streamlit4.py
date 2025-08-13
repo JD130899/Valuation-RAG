@@ -239,6 +239,58 @@ def pil_to_base64(img: Image.Image) -> str:
     img.save(buf, format="PNG")
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
+# ---------- Add near other helpers ----------
+import re
+
+def is_not_sure(text: str) -> bool:
+    t = (text or "").lower()
+    patterns = [
+        r"\bi[' ]?m not sure\b",
+        r"\bi am not sure\b",
+        r"\bdon't have enough information\b",
+        r"\bdo not have enough information\b",
+        r"\bnot enough information\b",
+        r"\bhmm[, ]?\s*i\b.*not sure\b",
+        r"^hmm[, ]?\s*i[' ]?m not sure",
+    ]
+    return any(re.search(p, t) for p in patterns)
+
+def propose_disambiguation(question: str, docs: list) -> str | None:
+    """Ask the LLM to guess the single most likely thing the user meant,
+    strictly from retrieved context. Returns a short phrase, or None."""
+    if not docs:
+        return None
+    # Use up to ~6 chunks to keep prompt small
+    top_ctx = "\n\n---\n\n".join(d.page_content[:3000] for d in docs[:6])
+
+    prompt2 = (
+        "You are a careful assistant. Based ONLY on the context below, infer the SINGLE most likely, "
+        "concrete thing the user meant (e.g., a table/section name, metric, approach, page topic). "
+        "Return ONLY a short noun phrase (<= 12 words). If nothing in the context is plausible, output EXACTLY: NONE.\n\n"
+        f"Question:\n{question}\n\nContext:\n{top_ctx}"
+    )
+
+    try:
+        resp = openai.chat.completions.create(
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": "Return only the phrase, no extra words."},
+                {"role": "user", "content": prompt2},
+            ],
+            temperature=0,
+            max_tokens=40,
+        )
+        guess = (resp.choices[0].message.content or "").strip()
+        if guess and guess.upper() != "NONE":
+            # sanitize a bit
+            guess = re.sub(r"^[\"'“”‘’\s]+|[\"'“”‘’\s]+$", "", guess)
+            # keep it tight
+            return guess[:120]
+    except Exception:
+        pass
+    return None
+
+
 # ================= Sidebar: Google Drive loader =================
 service = get_drive_service()
 pdf_files = get_all_pdfs(service)
@@ -479,8 +531,19 @@ if st.session_state.waiting_for_response:
                 temperature=0,
             )
             answer = response.choices[0].message.content
+
+            # ----- Disambiguation second pass if the model was unsure -----
+            if is_not_sure(answer):
+                suggestion = propose_disambiguation(q, docs)
+                if suggestion:
+                    answer = f"Hmm, I am not sure. Did you mean {suggestion}?"
+                else:
+                    # keep original unsure message if we couldn't infer anything
+                    answer = "Hmm, I am not sure. Could you rephrase your question?"
+
         except Exception as e:
             answer = f"❌ Error: {e}"
+            
 
         entry = {"id": _new_id(), "role": "assistant", "content": answer}
         ref_page, ref_img_b64 = None, None
