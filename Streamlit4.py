@@ -563,7 +563,7 @@ if st.session_state.waiting_for_response:
             "question":     q,
             "pdf_name":     pdf_display,
         }
-        aanswer = llm.invoke(wrapped_prompt.invoke(full_input)).content
+        answer = llm.invoke(wrapped_prompt.invoke(full_input)).content
         answer, is_ambiguous, suggestion = build_suggestion_or_fix(answer, q, docs)
         
         # remember the suggestion for the next user turn (so "Yes" can trigger it)
