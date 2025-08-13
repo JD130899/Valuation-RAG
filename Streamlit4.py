@@ -454,21 +454,23 @@ if st.session_state.waiting_for_response:
         history_to_use = st.session_state.messages[-10:]
         pdf_display = os.path.splitext(up.name)[0]
 
-        llm = ChatOpenAI(model="gpt-4o", temperature=0)
+        # keep replies tighter if you want (optional)
+        llm = ChatOpenAI(model="gpt-4o", temperature=0, max_tokens=600)
+
         full_input = {
             "chat_history": format_chat_history(history_to_use),
             "context":      ctx,
             "question":     q,
             "pdf_name":     pdf_display,
         }
-        answer = llm.invoke(wrapped_prompt.invoke(full_input)).content
+        answer = llm.invoke(wrapped_prompt.invoke(full_input)).content.strip()
 
         # --- classify the answer ---
         apology_re = re.compile(
             rf"^\s*Sorry I can only answer question related to {re.escape(pdf_display)}(?: pdf document)?\s*$",
             re.IGNORECASE,
         )
-        is_unrelated = bool(apology_re.match(answer.strip()))
+        is_unrelated = bool(apology_re.match(answer))
 
         low_confidence = bool(re.search(
             r"\b(hmm|i(?:'| a)m not sure|not enough (?:info|information|context)|"
@@ -481,34 +483,35 @@ if st.session_state.waiting_for_response:
         # Clear any old follow-up each turn
         st.session_state.pending_followup = None
 
+        # --- Capture follow-up topic and REMOVE it from the visible answer ---
+        # This keeps the bubble short while still letting "yes" trigger the deeper dive.
+        m = FOLLOWUP_RX.search(answer)
+        if m and not (is_unrelated or low_confidence):
+            topic = m.group(1).strip()
+            topic = re.sub(r"^[\-\u2022•*·]+\s*", "", topic)   # strip bullets
+            topic = re.sub(r"[`*_]+", "", topic).rstrip(" .)!")
+            st.session_state.pending_followup = topic or None
+            # strip the follow-up sentence from what we display
+            answer = (answer[:m.start()] + answer[m.end():]).strip()
+
         entry = {"id": _new_id(), "role": "assistant", "content": answer}
 
-        # --- Only attach follow-up + reference when answer is valid ---
-        if not (is_unrelated or low_confidence):
-            # Capture follow-up topic (if the model asked one)
-            m = FOLLOWUP_RX.search(answer)
-            if m:
-                topic = m.group(1).strip()
-                topic = re.sub(r"^[\-\u2022•*·]+\s*", "", topic)   # strip bullets
-                topic = re.sub(r"[`*_]+", "", topic).rstrip(" .)!") # strip md/strays
-                st.session_state.pending_followup = topic or None
-
-            # Attach a reference chip (use first retrieved chunk's page)
-            if docs:
-                best_doc = docs[0]
-                ref_page = best_doc.metadata.get("page_number")
-                img = st.session_state.page_images.get(ref_page)
-                if img:
-                    entry["source"] = f"Page {ref_page}"
-                    entry["source_img"] = pil_to_base64(img)
-                    entry["source_pdf_b64"] = base64.b64encode(st.session_state.pdf_bytes).decode("ascii")
-                    entry["source_page"] = ref_page
+        # --- Only attach a reference chip when the answer is valid ---
+        if docs and not (is_unrelated or low_confidence):
+            best_doc = docs[0]
+            ref_page = best_doc.metadata.get("page_number")
+            img = st.session_state.page_images.get(ref_page)
+            if img:
+                entry["source"] = f"Page {ref_page}"
+                entry["source_img"] = pil_to_base64(img)
+                entry["source_pdf_b64"] = base64.b64encode(st.session_state.pdf_bytes).decode("ascii")
+                entry["source_page"] = ref_page
 
         thinking.empty()
 
     # Final render (no rerun)
     with block.container():
-        st.markdown(f"<div class='assistant-bubble clearfix'>{answer}</div>", unsafe_allow_html=True)
+        st.markdown(f"<div class='assistant-bubble clearfix'>{entry['content']}</div>", unsafe_allow_html=True)
         if entry.get("source_img"):
             render_reference_card(
                 label=entry.get("source", f"Page {entry.get('source_page')}"),
@@ -522,4 +525,3 @@ if st.session_state.waiting_for_response:
     st.session_state.messages.append(entry)
     st.session_state.pending_input = None
     st.session_state.waiting_for_response = False
-
