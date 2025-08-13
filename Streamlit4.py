@@ -23,6 +23,18 @@ import openai
 from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
 import streamlit.components.v1 as components
 
+PATTERNS = [
+    r"\bhmm\b",
+    r"\bhmm[,!.\s]*i(?:'| a)m not sure\b",        # "Hmm, I'm not sure"
+    r"\bi(?:'| a)m not sure\b",                   # "I'm not sure" / "I am not sure"
+    r"\bnot enough (?:info|information|context)\b",
+    r"\bi (?:don'?t|do not) (?:see|have)\b",
+    r"\bcannot (?:find|answer|determine)\b",
+    r"\bno (?:context|data)\b",
+    r"\bunsure\b",
+    r"\bare you able to rephrase (?:the )?question\??",
+]
+
 # ================= Setup =================
 load_dotenv()
 st.set_page_config(page_title="Underwriting Agent", layout="wide")
@@ -173,7 +185,7 @@ for m in st.session_state.messages:
 def needs_suggestion(answer: str) -> bool:
     low = answer.strip()
     # Case-insensitive match on any pattern
-    if any(re.search(p, low, flags=re.IGNORECASE) for p in patterns):
+    if any(re.search(p, low, flags=re.IGNORECASE) for p in PATTERNS):
         return True
 
     # Too short = likely unhelpful
@@ -185,34 +197,6 @@ def needs_suggestion(answer: str) -> bool:
         return True
 
     return False
-
-
-    # Common "I don't know" style signals
-    patterns = [
-    r"\bhmm\b",
-    r"\bhmm[,!.\s]*i(?:'| a)m not sure\b",          # "Hmm, I'm not sure" etc.
-    r"\bi(?:'| a)m not sure\b",                     # "I'm not sure" / "I am not sure"
-    r"\bnot enough (?:info|information|context)\b",
-    r"\bi (?:don'?t|do not) (?:see|have)\b",
-    r"\bcannot (?:find|answer|determine)\b",
-    r"\bno (?:context|data)\b",
-    r"\bunsure\b",
-    r"\bare you able to rephrase (?:the )?question\??",  # <- explicit rephrase line
-]
-
-    if any(re.search(p, low) for p in patterns):
-        return True
-
-    # Too short = likely unhelpful
-    if len(low) < 25:
-        return True
-
-    # If it's only a question back to the user and not a “Did you mean …?”
-    if low.endswith("?") and "did you mean" not in low:
-        return True
-
-    return False
-
 
 def build_suggestion_or_fix(answer: str, question: str, docs):
     """
