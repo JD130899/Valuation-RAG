@@ -48,6 +48,10 @@ if "page_images" not in st.session_state:
 if "next_msg_id" not in st.session_state:
     st.session_state.next_msg_id = 0
 
+FAIL_TOKEN = "<<NOT_SURE>>"   # single, unique marker
+
+def is_not_sure(text: str) -> bool:
+    return (text or "").strip().upper() == FAIL_TOKEN
 
 
 
@@ -255,21 +259,24 @@ def is_not_sure(text: str) -> bool:
     ]
     return any(re.search(p, t) for p in patterns)
 
-def propose_disambiguation(question: str, docs: list) -> str | None:
-    """Ask the LLM to guess the single most likely thing the user meant,
-    strictly from retrieved context. Returns a short phrase, or None."""
+def propose_disambiguation(question: str, docs: list):
+    """
+    Returns (phrase, best_doc_or_None).
+    """
+    import re
     if not docs:
-        return None
-    # Use up to ~6 chunks to keep prompt small
-    top_ctx = "\n\n---\n\n".join(d.page_content[:3000] for d in docs[:6])
+        return None, None
 
+    # Keep prompt tight
+    top_ctx = "\n\n---\n\n".join(d.page_content[:3000] for d in docs[:6])
     prompt2 = (
-        "You are a careful assistant. Based ONLY on the context below, infer the SINGLE most likely, "
-        "concrete thing the user meant (e.g., a table/section name, metric, approach, page topic). "
-        "Return ONLY a short noun phrase (<= 12 words). If nothing in the context is plausible, output EXACTLY: NONE.\n\n"
+        "Based ONLY on the context, infer the SINGLE most likely concrete thing the user meant "
+        "(e.g., a table/section name, metric, approach). "
+        "Return ONLY a short noun phrase (<= 12 words). If nothing is plausible, output EXACTLY: NONE.\n\n"
         f"Question:\n{question}\n\nContext:\n{top_ctx}"
     )
 
+    guess = None
     try:
         resp = openai.chat.completions.create(
             model="gpt-4o",
@@ -281,14 +288,36 @@ def propose_disambiguation(question: str, docs: list) -> str | None:
             max_tokens=40,
         )
         guess = (resp.choices[0].message.content or "").strip()
-        if guess and guess.upper() != "NONE":
-            # sanitize a bit
-            guess = re.sub(r"^[\"'“”‘’\s]+|[\"'“”‘’\s]+$", "", guess)
-            # keep it tight
-            return guess[:120]
+        if guess.upper() == "NONE":
+            return None, None
+        guess = re.sub(r"^[\"'“”‘’\s]+|[\"'“”‘’\s]+$", "", guess)[:120]
+    except Exception:
+        return None, None
+
+    # Pick the best doc for the suggestion (prefer literal hits; else cosine vs QUESTION)
+    best_doc = None
+    try:
+        # literal hit first
+        hits = [d for d in docs if guess.lower() in d.page_content.lower()]
+        if hits:
+            best_doc = hits[0]
+        else:
+            # similarity to the user question (more stable than the uncertain answer)
+            from sklearn.metrics.pairwise import cosine_similarity
+            embedder = CohereEmbeddings(
+                model="embed-english-v3.0",
+                user_agent="langchain",
+                cohere_api_key=st.secrets["COHERE_API_KEY"]
+            )
+            q_emb = embedder.embed_query(question)
+            d_embs = embedder.embed_documents([d.page_content for d in docs])
+            sims = cosine_similarity([q_emb], d_embs)[0]
+            best_doc = docs[int(sims.argmax())]
     except Exception:
         pass
-    return None
+
+    return guess, best_doc
+
 
 
 # ================= Sidebar: Google Drive loader =================
@@ -518,7 +547,9 @@ if st.session_state.waiting_for_response:
 
         # Build the prompt text using your wrapped_prompt
         chat_hist = format_chat_history(st.session_state.messages)  # you already defined this helper above
-        prompt_text = wrapped_prompt.format(chat_history=chat_hist, context=ctx, question=q)
+
+        prompt_text = wrapped_prompt.format(chat_history=chat_hist, context=ctx, question=q) + f"\n\nIf the answer is not in the context, reply EXACTLY with {FAIL_TOKEN} and nothing else."
+
         
         try:
             # keep messages minimal: 1 system + 1 user containing the wrapped prompt
@@ -534,11 +565,15 @@ if st.session_state.waiting_for_response:
 
             # ----- Disambiguation second pass if the model was unsure -----
             if is_not_sure(answer):
-                suggestion = propose_disambiguation(q, docs)
+                suggestion, best_doc_for_suggestion = propose_disambiguation(q, docs)
                 if suggestion:
                     answer = f"Hmm, I am not sure. Did you mean {suggestion}?"
+                    # Preload the reference (so the chip points to the suggested spot)
+                    if best_doc_for_suggestion is not None:
+                        ref_page = best_doc_for_suggestion.metadata.get("page_number")
+                        img = st.session_state.page_images.get(ref_page)
+                        ref_img_b64 = pil_to_base64(img) if img else None
                 else:
-                    # keep original unsure message if we couldn't infer anything
                     answer = "Hmm, I am not sure. Could you rephrase your question?"
 
         except Exception as e:
@@ -556,6 +591,8 @@ if st.session_state.waiting_for_response:
                     user_agent="langchain",
                     cohere_api_key=st.secrets["COHERE_API_KEY"]
                 )
+                use_question = is_not_sure(entry["content"])  # or check the local `answer`
+                text_for_embedding = q if use_question else answer
                 emb_answer = embedder.embed_query(answer)
                 chunk_embs = embedder.embed_documents(texts)
                 sims = cosine_similarity([emb_answer], chunk_embs)[0]
