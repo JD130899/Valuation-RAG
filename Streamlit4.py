@@ -35,6 +35,30 @@ PATTERNS = [
     r"\bare you able to rephrase (?:the )?question\??",
 ]
 
+def guess_suggestion(question: str, docs):
+    """
+    Return a short (<= 6 words) phrase from the retrieved chunks that overlaps
+    with the user's question. Falls back to 'Valuation Summary'.
+    """
+    q_terms = set(w.lower() for w in re.findall(r"[A-Za-z]{3,}", question))
+    best_line, best_score = None, 0
+
+    for d in (docs or []):
+        for ln in d.page_content.splitlines():
+            ln = ln.strip()
+            if not ln:
+                continue
+            # prefer short, title-like lines
+            if len(ln.split()) > 6:
+                continue
+            words = set(w.lower() for w in re.findall(r"[A-Za-z]{3,}", ln))
+            score = len(q_terms & words)
+            if score > best_score:
+                best_score, best_line = score, ln
+
+    return best_line or "Valuation Summary"
+
+
 # ================= Setup =================
 load_dotenv()
 st.set_page_config(page_title="Underwriting Agent", layout="wide")
