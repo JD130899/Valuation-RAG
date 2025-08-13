@@ -35,6 +35,19 @@ PATTERNS = [
     r"\bare you able to rephrase (?:the )?question\??",
 ]
 
+# remember the last suggested phrase, if any
+if "suggested_query" not in st.session_state:
+    st.session_state.suggested_query = None
+
+CONFIRM_WORDS = re.compile(
+    r"^\s*(yes|y|yeah|yep|sure|ok(?:ay)?|correct|that's right|please do|go ahead)\s*[.!?]*\s*$",
+    re.IGNORECASE,
+)
+def is_confirmation(text: str) -> bool:
+    return bool(CONFIRM_WORDS.match(text or ""))
+
+
+
 def guess_suggestion(question: str, docs):
     """
     Return a short (<= 6 words) phrase from the retrieved chunks that overlaps
@@ -224,21 +237,19 @@ def needs_suggestion(answer: str) -> bool:
 
 def build_suggestion_or_fix(answer: str, question: str, docs):
     """
-    - If the model left [ ... ] anywhere, replace it with a best guess.
-    - If the answer looks vague (needs_suggestion), replace the whole thing with:
-        'Sorry I didnt understand the question. Did you mean <guess>?'
-    Returns (new_answer, is_ambiguous: bool)
+    Returns (new_answer, is_ambiguous, suggestion_or_none)
     """
     # Replace any bracket placeholders [ ... ] directly
     if "[" in answer and "]" in answer:
-        return re.sub(r"\[.*?\]", guess_suggestion(question, docs), answer), True
+        guess = guess_suggestion(question, docs)
+        return re.sub(r"\[.*?\]", guess, answer), True, guess
 
-    # Heuristic: decide when to generate a suggestion
     if needs_suggestion(answer):
         guess = guess_suggestion(question, docs)
-        return f"Sorry I didnt understand the question. Did you mean {guess}?", True
+        return f"Sorry I didnt understand the question. Did you mean {guess}?", True, guess
 
-    return answer, False
+    return answer, False, None
+
 
 
 
@@ -504,6 +515,11 @@ user_q = st.chat_input("Type your question here…")
 if user_q:
     st.session_state.messages.append({"id": _new_id(), "role": "user", "content": user_q})
     st.session_state.pending_input = user_q
+     # if the last turn proposed a suggestion and the user confirms, use that instead
+    if st.session_state.suggested_query and is_confirmation(user_q):
+        st.session_state.pending_input = st.session_state.suggested_query
+        # optional: clear so it doesn't persist forever
+        st.session_state.suggested_query = None
     st.session_state.waiting_for_response = True
 
 # ================= History =================
@@ -547,12 +563,16 @@ if st.session_state.waiting_for_response:
             "question":     q,
             "pdf_name":     pdf_display,
         }
-        answer = llm.invoke(wrapped_prompt.invoke(full_input)).content
-        answer, is_ambiguous = build_suggestion_or_fix(answer, q, docs)
+        aanswer = llm.invoke(wrapped_prompt.invoke(full_input)).content
+        answer, is_ambiguous, suggestion = build_suggestion_or_fix(answer, q, docs)
+        
+        # remember the suggestion for the next user turn (so "Yes" can trigger it)
+        st.session_state.suggested_query = suggestion if is_ambiguous else None
 
 
-        apology = f"Sorry I can only answer question related to {pdf_display}"
-        is_unrelated = apology.lower() in answer.strip().lower()
+
+        apology_re = re.compile(rf"^sorry i can only answer question related to {re.escape(pdf_display)}(?: pdf document)?$",re.IGNORECASE,)
+        is_unrelated = bool(apology_re.match(answer.strip()))
 
         entry = {"id": _new_id(), "role": "assistant", "content": answer}
         ref_page, ref_img_b64 = None, None
