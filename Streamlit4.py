@@ -21,6 +21,65 @@ from langchain_core.prompts import PromptTemplate
 import openai
 from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
 import streamlit.components.v1 as components
+import re
+
+UNSURE_PATTERNS = [
+    r"\bhmm,? i am not sure\b",
+    r"\bi (do|don't)n't have enough information\b",
+    r"\bi'?m not sure\b",
+    r"\bi do not know\b",
+    r"\bnot (found|available) in the context\b",
+]
+
+def is_unsure(text: str) -> bool:
+    if not text:
+        return True
+    t = text.lower()
+    return any(re.search(p, t) for p in UNSURE_PATTERNS)
+
+def max_sim(sims):
+    try:
+        return float(max(sims)) if len(sims) else 0.0
+    except Exception:
+        return 0.0
+
+def craft_followups(user_q: str, docs: list, top_k: int = 3) -> list[str]:
+    """
+    Use the top retrieved chunks to propose short, targeted follow-up questions
+    that disambiguate the user's intent. Returns up to `top_k` questions.
+    """
+    try:
+        top_text = "\n\n---\n\n".join(d.page_content[:1200] for d in docs[:3])  # keep prompt small
+        llm = ChatOpenAI(model="gpt-4o", temperature=0)
+        prompt = PromptTemplate(
+            template=(
+                "You are helping clarify a user's question using ONLY the content below.\n"
+                "User question: {q}\n\n"
+                "Relevant context snippets:\n{ctx}\n\n"
+                "Task: Propose up to 3 very short, targeted follow-up questions (one per line, no numbering),\n"
+                "that would help you answer the user precisely. Prefer domain terms from the snippets "
+                "(e.g., 'Conclusion of Value', 'Income Approach (DCF)', 'EBITDA multiples', 'SDE', risk classification, etc.).\n"
+                "Do NOT answer the question; only ask clarifying follow-ups."
+            ),
+            input_variables=["q", "ctx"]
+        )
+        out = llm.invoke(prompt.format(q=user_q, ctx=top_text)).content.strip()
+        # Split into lines, clean empties, cap at top_k
+        lines = [l.strip("-• ").strip() for l in out.splitlines() if l.strip()]
+        uniq = []
+        for l in lines:
+            if l and l not in uniq:
+                uniq.append(l)
+        return uniq[:top_k] if uniq else []
+    except Exception:
+        # Safe fallback heuristics if LLM call fails
+        fallbacks = [
+            "Do you mean the Conclusion of Value (overall valuation)?",
+            "Are you referring to the Income Approach (DCF) or the Market Approach?",
+            "Should I look at the risk assessment classification?"
+        ]
+        return fallbacks[:top_k]
+
 
 # ================= Setup =================
 load_dotenv()
@@ -498,6 +557,34 @@ if st.session_state.waiting_for_response:
                 sims = cosine_similarity([emb_answer], chunk_embs)[0]
                 ranked = sorted(list(zip(docs, sims)), key=lambda x: x[1], reverse=True)
                 top3 = [d for d, _ in ranked[:3]]
+
+                unsure_by_text = is_unsure(answer)
+                unsure_by_score = max_sim(sims) < 0.22  # tweak threshold as needed
+                needs_followup = unsure_by_text or unsure_by_score
+
+
+                if needs_followup:
+                    candidate_docs = top3 if top3 else [d for d, _ in ranked[:3]] if ranked else docs[:3]
+                    followups = craft_followups(q, candidate_docs, top_k=3)  # from step 1 helper
+                
+                    # Render a clarifying message
+                    answer = "I might need a bit more detail to be precise. Did you mean one of these?"
+                    entry = {"id": _new_id(), "role": "assistant", "content": answer}
+                    st.markdown(f"<div class='assistant-bubble clearfix'>{answer}</div>", unsafe_allow_html=True)
+                
+                    # Render follow-up suggestion buttons
+                    cols = st.columns(len(followups)) if followups else [st]
+                    for i, fu in enumerate(followups or []):
+                        if cols[i].button(fu, key=f"fu_{entry['id']}_{i}"):
+                            st.session_state.messages.append({"id": _new_id(), "role": "user", "content": fu})
+                            st.session_state.pending_input = fu
+                            st.session_state.waiting_for_response = True
+                            st.rerun()
+                
+                    st.session_state.messages.append(entry)
+                    st.session_state.pending_input = None
+                    st.session_state.waiting_for_response = False
+                    st.stop()
 
                 best_doc = top3[0] if top3 else (ranked[0][0] if ranked else None)
                 if len(top3) >= 3:
