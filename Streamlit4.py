@@ -48,7 +48,8 @@ if "page_images" not in st.session_state:
 if "next_msg_id" not in st.session_state:
     st.session_state.next_msg_id = 0
 
-FAIL_TOKEN = "<<NOT_SURE>>"   # single, unique marker
+# A) Safer token
+FAIL_TOKEN = "[[NOT_SURE]]"
 
 def is_not_sure(text: str) -> bool:
     return (text or "").strip().upper() == FAIL_TOKEN
