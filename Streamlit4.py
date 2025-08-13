@@ -571,15 +571,19 @@ if st.session_state.waiting_for_response:
                     answer = "I might need a bit more detail to be precise. Did you mean one of these?"
                     entry = {"id": _new_id(), "role": "assistant", "content": answer}
                     st.markdown(f"<div class='assistant-bubble clearfix'>{answer}</div>", unsafe_allow_html=True)
-                
+                    
+                    # 👇 ADD THIS to break the float so widgets are clickable
+                    st.markdown("<div style='clear: both; height: 4px;'></div>", unsafe_allow_html=True)
+                    
                     # Render follow-up suggestion buttons
                     cols = st.columns(len(followups)) if followups else [st]
                     for i, fu in enumerate(followups or []):
-                        if cols[i].button(fu, key=f"fu_{entry['id']}_{i}"):
+                        if cols[i].button(fu, key=f"fu_{entry['id']}_{i}", use_container_width=True):
                             st.session_state.messages.append({"id": _new_id(), "role": "user", "content": fu})
                             st.session_state.pending_input = fu
                             st.session_state.waiting_for_response = True
                             st.rerun()
+
                 
                     st.session_state.messages.append(entry)
                     st.session_state.pending_input = None
