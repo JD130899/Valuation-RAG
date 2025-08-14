@@ -308,14 +308,7 @@ st.markdown("""
 .clearfix::after { content:""; display:block; clear:both; }
 
 /* Reference chip + panel */
-.ref{
-  display:block;
-  clear: both;            /* 👈 add this line */
-  width:60%;
-  max-width:900px;
-  margin:6px 0 12px 8px;
-}
-
+.ref{ display:block; width:60%; max-width:900px; margin:6px 0 12px 8px; }
 .ref summary{
   display:inline-flex; align-items:center; gap:8px; cursor:pointer; list-style:none; outline:none;
   background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:10px; padding:6px 10px;
