@@ -102,16 +102,11 @@ def single_page_pdf_b64(pdf_bytes: bytes, page_number: int) -> str:
     return b64
 
 def render_reference_card(label: str, img_b64: str, pdf_b64: str, page: int, key: str):
-    # Ensure we start on a new line under any float
-    st.markdown("<div class='clearfix'></div>", unsafe_allow_html=True)
-
-    # (optional) normalize the label so it never becomes empty/None
-    label = (label or "Reference").strip()
-
+    # chip + lightbox
     st.markdown(
         f"""
         <details class="ref" id="ref-{key}">
-          <summary>📘 {label}</summary>
+          <summary>📘 {label or "Reference"}</summary>
           <button class="overlay" id="overlay-{key}" type="button" aria-label="Close"></button>
           <div class="panel">
             <button class="close-x" id="close-{key}" type="button" aria-label="Close">×</button>
@@ -125,10 +120,6 @@ def render_reference_card(label: str, img_b64: str, pdf_b64: str, page: int, key
         """,
         unsafe_allow_html=True,
     )
-
-    # keep your existing components.html that wires up the link...
-    # (no changes needed below this line)
-
 
     # JS: open the FULL PDF and jump to the page
     components.html(
