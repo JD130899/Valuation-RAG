@@ -388,6 +388,7 @@ for msg in st.session_state.messages:
 
 
 # ================= Answer (single-pass, no rerun) =================
+# ------------------- Answer (single-pass, no rerun) -------------------
 if st.session_state.waiting_for_response:
     block = st.empty()
     with block.container():
@@ -411,7 +412,7 @@ if st.session_state.waiting_for_response:
             f"Context:\n{ctx}"
         )
 
-        # Only send role/content to OpenAI (strip local keys like `id`, `source_img`, etc.)
+        # Only send role/content to OpenAI
         history_msgs = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages]
 
         try:
@@ -425,10 +426,19 @@ if st.session_state.waiting_for_response:
 
         entry = {"id": _new_id(), "role": "assistant", "content": answer}
 
-        # Attach a reference chip (pick the single most similar retrieved chunk to the answer)
-        ref_page = None
-        try:
-            if docs:
+        # --- NEW: decide whether to attach a reference chip ---
+        LOW_CONF_RE = re.compile(
+            r"(?:\b(?:don'?t|do not)\s+have\s+enough\s+information\b"
+            r"|\bnot\s+enough\s+(?:info|information|context)\b"
+            r"|\bi(?:'| a)m\s+not\s+sure\b"
+            r"|^sorry i can only answer question related)",
+            re.IGNORECASE,
+        )
+        attach_reference = bool(docs) and not LOW_CONF_RE.search(answer)
+
+        if attach_reference:
+            try:
+                # Pick the most similar retrieved chunk to the answer
                 texts = [d.page_content for d in docs]
                 embedder = CohereEmbeddings(
                     model="embed-english-v3.0",
@@ -444,15 +454,24 @@ if st.session_state.waiting_for_response:
                 if best_doc is not None:
                     ref_page = best_doc.metadata.get("page_number")
                     img = st.session_state.page_images.get(ref_page)
-                    ref_img_b64 = pil_to_base64(img) if img else None
-                    if ref_img_b64:
+                    if img:
                         entry["source"] = f"Page {ref_page}"
-                        entry["source_img"] = ref_img_b64
+                        entry["source_img"] = base64.b64encode(
+                            io.BytesIO(img.tobytes()).getvalue()
+                        ).decode("ascii") if hasattr(img, "tobytes") else (
+                            # keep your helper for PIL -> base64
+                            (lambda im: (lambda b: base64.b64encode(b).decode("ascii"))(
+                                (lambda buf: (im.save(buf, format="PNG") or buf.getvalue()))(io.BytesIO())
+                            ))(img)
+                        )
                         entry["source_pdf_b64"] = base64.b64encode(st.session_state.pdf_bytes).decode("ascii")
                         entry["source_page"] = ref_page
-
-        except Exception as e:
-            st.info(f"ℹ️ Reference selection skipped: {e}")
+            except Exception as e:
+                st.info(f"ℹ️ Reference selection skipped: {e}")
+        else:
+            # Ensure no stale reference keys
+            for k in ("source", "source_img", "source_pdf_b64", "source_page"):
+                entry.pop(k, None)
 
         thinking.empty()
 
@@ -461,13 +480,12 @@ if st.session_state.waiting_for_response:
         st.markdown(f"<div class='assistant-bubble clearfix'>{answer}</div>", unsafe_allow_html=True)
         if entry.get("source_img"):
             render_reference_card(
-                label=entry.get("source", f"Page {ref_page}"),
+                label=entry.get("source", f"Page {entry.get('source_page')}"),
                 img_b64=entry["source_img"],
                 pdf_b64=entry["source_pdf_b64"],
                 page=entry["source_page"],
                 key=entry.get("id", "k0"),
             )
-
 
     # Persist
     st.session_state.messages.append(entry)
