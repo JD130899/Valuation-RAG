@@ -102,7 +102,7 @@ def single_page_pdf_b64(pdf_bytes: bytes, page_number: int) -> str:
     return b64
 
 def render_reference_card(label: str, img_b64: str, pdf_b64: str, page: int, key: str):
-    # Markup: chip + overlay + modal panel
+    # Chip + lightbox panel
     st.markdown(
         f"""
         <details class="ref" id="ref-{key}">
@@ -121,13 +121,13 @@ def render_reference_card(label: str, img_b64: str, pdf_b64: str, page: int, key
         unsafe_allow_html=True,
     )
 
+    # JS: open the FULL PDF at the target page
     components.html(
         f"""<!doctype html><meta charset='utf-8'>
 <style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
 <script>(function(){{
   function b64ToUint8Array(s){{var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}}
   var blob = new Blob([b64ToUint8Array('{pdf_b64}')], {{type:'application/pdf'}});
-  // Open FULL PDF, jump to the target page:
   var url  = URL.createObjectURL(blob) + '#page={page}';
 
   function attach(){{
@@ -154,34 +154,6 @@ def render_reference_card(label: str, img_b64: str, pdf_b64: str, page: int, key
         height=0,
     )
 
-
-    # JS: attach blob URL to link + closing (overlay, X, Esc).
-    components.html(
-        f"""<!doctype html><meta charset='utf-8'>
-<style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
-<script>(function(){{
-  function b64ToUint8Array(s){{var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}}
-  var blob = new Blob([b64ToUint8Array('{page_b64}')], {{type:'application/pdf'}});
-  var url  = URL.createObjectURL(blob);  // single-page blob
-  function attach(){{
-    var d = window.parent && window.parent.document;
-    if(!d) return setTimeout(attach,120);
-    var ref = d.getElementById('ref-{key}');
-    var a   = d.getElementById('open-{key}');
-    var ovl = d.getElementById('overlay-{key}');
-    var cls = d.getElementById('close-{key}');
-    if(!ref || !a || !ovl || !cls) return setTimeout(attach,120);
-    a.setAttribute('href', url);
-    function closeRef(){{ ref.removeAttribute('open'); }}
-    ovl.addEventListener('click', closeRef);
-    cls.addEventListener('click', closeRef);
-    d.addEventListener('keydown', function(e){{ if(e.key==='Escape') closeRef(); }});
-  }}
-  attach();
-  var me = window.frameElement; if(me){{me.style.display='none';me.style.height='0';me.style.border='0';}}
-}})();</script>""",
-        height=0,
-    )
 
 # give IDs to any preloaded messages (greetings)
 for m in st.session_state.messages:
