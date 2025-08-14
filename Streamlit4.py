@@ -93,7 +93,13 @@ def file_badge_link(name: str, pdf_bytes: bytes, synced: bool = True):
     )
 
 # Make a ONE-PAGE PDF (base64) from a given page
-
+def single_page_pdf_b64(pdf_bytes: bytes, page_number: int) -> str:
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    one = fitz.open()
+    one.insert_pdf(doc, from_page=page_number-1, to_page=page_number-1)
+    b64 = base64.b64encode(one.tobytes()).decode("ascii")
+    one.close(); doc.close()
+    return b64
 
 def render_reference_card(label: str, img_b64: str, pdf_b64: str, page: int, key: str):
     # Markup: chip + overlay + modal panel
