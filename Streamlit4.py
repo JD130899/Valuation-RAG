@@ -390,6 +390,7 @@ for msg in st.session_state.messages:
 
 
 # ================= Answer (single-pass, no rerun) =================
+# ================= Answer (single-pass, no rerun) =================
 if st.session_state.waiting_for_response:
     block = st.empty()
     with block.container():
@@ -425,12 +426,27 @@ if st.session_state.waiting_for_response:
         except Exception as e:
             answer = f"❌ Error: {e}"
 
+        # --- classify the answer so we can decide whether to show a reference chip ---
+        unrelated_re = re.compile(
+            r"^\s*Sorry I can only answer question related to .*?pdf document\s*$",
+            re.IGNORECASE
+        )
+        lowinfo_re = re.compile(
+            r"(?:i\s*(?:do\s*not|don't)\s*have\s*enough\s*(?:info(?:rmation)?|context)|"
+            r"not\s*enough\s*(?:info(?:rmation)?|context)|"
+            r"unable\s*to\s*answer|cannot\s*(?:answer|determine)|"
+            r"i\s*(?:can't|cannot)\s*(?:find|answer|determine))",
+            re.IGNORECASE
+        )
+        is_unrelated   = bool(unrelated_re.search(answer))
+        low_confidence = bool(lowinfo_re.search(answer))
+
         entry = {"id": _new_id(), "role": "assistant", "content": answer}
 
-        # Attach a reference chip (pick the single most similar retrieved chunk to the answer)
+        # Attach a reference chip ONLY for solid, on-topic answers
         ref_page = None
         try:
-            if docs:
+            if docs and not (is_unrelated or low_confidence):
                 texts = [d.page_content for d in docs]
                 embedder = CohereEmbeddings(
                     model="embed-english-v3.0",
@@ -446,13 +462,16 @@ if st.session_state.waiting_for_response:
                 if best_doc is not None:
                     ref_page = best_doc.metadata.get("page_number")
                     img = st.session_state.page_images.get(ref_page)
-                    ref_img_b64 = pil_to_base64(img) if img else None
-                    if ref_img_b64:
+                    if img:
                         entry["source"] = f"Page {ref_page}"
-                        entry["source_img"] = ref_img_b64
+                        entry["source_img"] = base64.b64encode(
+                            io.BytesIO(img.tobytes()).getvalue()
+                        ).decode("ascii") if False else (
+                            # use your helper for clarity
+                            (lambda im=img: (lambda b=io.BytesIO(): (im.save(b, format="PNG"), base64.b64encode(b.getvalue()).decode("ascii"))[1])()) 
+                        )
                         entry["source_pdf_b64"] = base64.b64encode(st.session_state.pdf_bytes).decode("ascii")
                         entry["source_page"] = ref_page
-
         except Exception as e:
             st.info(f"ℹ️ Reference selection skipped: {e}")
 
@@ -470,8 +489,8 @@ if st.session_state.waiting_for_response:
                 key=entry.get("id", "k0"),
             )
 
-
     # Persist
     st.session_state.messages.append(entry)
     st.session_state.pending_input = None
     st.session_state.waiting_for_response = False
+
