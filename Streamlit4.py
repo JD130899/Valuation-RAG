@@ -8,7 +8,7 @@ from PIL import Image
 from dotenv import load_dotenv
 from sklearn.metrics.pairwise import cosine_similarity  # kept (not required for ref now)
 import streamlit.components.v1 as components
-from urllib.parse import quote  # <-- added
+from urllib.parse import quote  # <-- needed for pill links
 
 # LangChain / RAG deps
 from langchain_core.documents import Document
@@ -560,15 +560,19 @@ if etran_clicked:
     st.session_state.waiting_for_response = True
 
 # ================= Quick-suggest pill bubbles (aligned to chat input, right-aligned) =================
-# ================= Quick-suggest pill bubbles (aligned to chat input, right-aligned) =================
 buttons = ["ETRAN Cheatsheet", "What is the valuation?", "Goodwill value"]
 links_html = "".join(f'<a class="qs-pill" href="?suggest={quote(lbl)}">{lbl}</a>' for lbl in buttons)
+
+# knobs you can tweak
+offset_above_input = 16   # vertical gap above the chat input (px)
+right_padding_px   = 12   # padding from the input's right edge (px)
 
 html_overlay = """
 <div id="qs-row" style="position:fixed; display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end; z-index:10000;">
   __LINKS__
 </div>
 <style>
+  #qs-row { padding: 0 __RPAD__px; }  /* keep off the send arrow */
   .qs-pill {
     text-decoration: none !important;
     border-radius: 999px;
@@ -581,27 +585,38 @@ html_overlay = """
   .qs-pill:hover { background: #222; }
 </style>
 <script>
-(function(){
+(function () {
+  const OFFSET_ABOVE_INPUT = __OFFSET__;
+  const RETRY_MS = 120;
+  let bound = false;
+
   function place(){
     const d = window.parent.document;
     const input = d.querySelector('[data-testid="stChatInput"]');
     const row   = d.getElementById('qs-row');
-    if(!input || !row) return;
+
+    if(!input || !row){
+      setTimeout(place, RETRY_MS);
+      return;
+    }
+
     const r = input.getBoundingClientRect();
     row.style.left   = (r.left + window.scrollX) + 'px';
     row.style.width  = r.width + 'px';
-    row.style.bottom = (window.innerHeight - r.top + 1208) + 'px';
+    row.style.bottom = (window.innerHeight - r.top + OFFSET_ABOVE_INPUT) + 'px';
+
+    if(!bound){
+      bound = true;
+      window.addEventListener('resize', place);
+      new ResizeObserver(place).observe(d.body);
+    }
   }
   place();
-  window.addEventListener('resize', place);
-  const obs = new ResizeObserver(place);
-  obs.observe(window.parent.document.body);
 })();
 </script>
-""".replace("__LINKS__", links_html)
+""".replace("__LINKS__", links_html).replace("__OFFSET__", str(offset_above_input)).replace("__RPAD__", str(right_padding_px))
 
 components.html(html_overlay, height=0)
-
 
 # ================= Input =================
 user_q = st.chat_input("Type your question here…")
