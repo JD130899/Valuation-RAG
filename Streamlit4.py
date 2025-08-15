@@ -428,26 +428,36 @@ st.markdown("""
 
 /* --- Floating "Etran Sheet" button --- */
 
-#etran-anchor + div.stButton > button {
-  position: fixed;
-  bottom: 22px;
-  right: 0;  /* extreme right */
-  margin-right: 12px; /* small gap from window edge */
-  z-index: 9999;
+/* --- Floating "Etran Sheet" button (extreme right, fixed) --- */
+
+/* 1) Make the anchor a fixed reference point (optional) */
+#etran-anchor { position: fixed; bottom: 0; right: 0; width: 0; height: 0; }
+
+/* 2) Pin the BUTTON CONTAINER to the viewport bottom-right */
+#etran-anchor + div.stButton,
+#etran-anchor + div[data-testid="stButton"] {
+  position: fixed !important;
+  bottom: 22px !important;
+  right: 12px !important;   /* gap from the edge */
+  z-index: 9999 !important;
+  margin: 0 !important;
+}
+
+/* 3) Style the actual button */
+#etran-anchor + div.stButton > button,
+#etran-anchor + div[data-testid="stButton"] > button {
   border-radius: 9999px;
   padding: 12px 16px;
   box-shadow: 0 10px 30px rgba(0,0,0,.35);
+  width: auto;
 }
-#etran-anchor + div.stButton {  
-  margin: 0;
-}
+
+/* Mobile tweak */
 @media (max-width: 640px){
-  #etran-anchor + div.stButton > button {
-    bottom: 18px;
-    right: 0;
-    margin-right: 10px;
-    padding: 12px 15px;
-  }
+  #etran-anchor + div.stButton,
+  #etran-anchor + div[data-testid="stButton"] { bottom: 18px !important; right: 10px !important; }
+  #etran-anchor + div.stButton > button,
+  #etran-anchor + div[data-testid="stButton"] > button { padding: 12px 15px; }
 }
 </style>
 """, unsafe_allow_html=True)
