@@ -560,14 +560,16 @@ if etran_clicked:
     st.session_state.waiting_for_response = True
 
 # ================= Quick-suggest pill bubbles (aligned to chat input, right-aligned) =================
+# ================= Quick-suggest pill bubbles (aligned to chat input, right-aligned) =================
 buttons = ["ETRAN Cheatsheet", "What is the valuation?", "Goodwill value"]
 links_html = "".join(f'<a class="qs-pill" href="?suggest={quote(lbl)}">{lbl}</a>' for lbl in buttons)
-components.html(f"""
+
+html_overlay = """
 <div id="qs-row" style="position:fixed; display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end; z-index:10000;">
-  {links_html}
+  __LINKS__
 </div>
 <style>
-  .qs-pill {{
+  .qs-pill {
     text-decoration: none !important;
     border-radius: 999px;
     padding: 8px 14px;
@@ -575,12 +577,12 @@ components.html(f"""
     background: black;
     color: white !important;
     font-size: 0.9rem;
-  }}
-  .qs-pill:hover {{ background: #222; }}
+  }
+  .qs-pill:hover { background: #222; }
 </style>
 <script>
-(function(){{
-  function place(){{
+(function(){
+  function place(){
     const d = window.parent.document;
     const input = d.querySelector('[data-testid="stChatInput"]');
     const row   = d.getElementById('qs-row');
@@ -589,14 +591,17 @@ components.html(f"""
     row.style.left   = (r.left + window.scrollX) + 'px';
     row.style.width  = r.width + 'px';
     row.style.bottom = (window.innerHeight - r.top + 8) + 'px';
-  }}
+  }
   place();
   window.addEventListener('resize', place);
   const obs = new ResizeObserver(place);
   obs.observe(window.parent.document.body);
 })();
 </script>
-""", height=0)
+""".replace("__LINKS__", links_html)
+
+components.html(html_overlay, height=0)
+
 
 # ================= Input =================
 user_q = st.chat_input("Type your question here…")
