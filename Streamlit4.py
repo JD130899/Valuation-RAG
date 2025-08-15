@@ -490,52 +490,39 @@ user_q = st.chat_input("Type your question here…")
 # ---- Floating "Etran Sheet" button just above chat input ----
 etran_clicked = False
 if up:
+    
     etran_clicked = components.html(
-        """
-        <style>
-          #etran-fab {
-            position: fixed;
-            right: 1px;
-            bottom: 84px; /* fallback */
-            z-index: 9999;
-          }
-          #etran-btn {
-            border-radius: 9999px;
-            padding: 10px 16px;
-            background: #000; color: #fff; border: none;
-            box-shadow: 0 10px 30px rgba(0,0,0,.35);
-            cursor: pointer;
-          }
-          #etran-btn:hover { background: #222; }
-          #etran-btn:active { transform: translateY(1px); }
-        </style>
+    """
+    <style>
+      #etran-fab {
+        position: fixed;
+        right: 18px;     /* horizontal offset */
+        bottom: 18px;    /* vertical offset from bottom */
+        z-index: 9999;
+      }
+      #etran-btn {
+        border-radius: 9999px;
+        padding: 10px 16px;
+        background: #000; color: #fff; border: none;
+        box-shadow: 0 10px 30px rgba(0,0,0,.35);
+        cursor: pointer;
+      }
+      #etran-btn:hover { background: #222; }
+      #etran-btn:active { transform: translateY(1px); }
+    </style>
 
-        <div id="etran-fab"><button id="etran-btn" type="button">Etran Sheet</button></div>
+    <div id="etran-fab"><button id="etran-btn" type="button">Etran Sheet</button></div>
 
-        <script src="https://unpkg.com/@streamlit/component-lib/dist/index.js"></script>
-        <script>
-          function send(v){ Streamlit.setComponentValue(v); }
+    <script src="https://unpkg.com/@streamlit/component-lib/dist/index.js"></script>
+    <script>
+      function send(v){ Streamlit.setComponentValue(v); }
+      document.getElementById("etran-btn").addEventListener("click", function(){ send(true); });
+      Streamlit.setFrameHeight(0);
+    </script>
+    """,
+    height=0
+)
 
-          function positionFab(){
-            const fab = document.getElementById("etran-fab");
-            const chat = window.parent?.document?.querySelector('[data-testid="stChatInput"]');
-            if (chat && fab){
-              const r = chat.getBoundingClientRect();
-              const distFromBottom = Math.max(16, window.innerHeight - r.top + 12);
-              fab.style.bottom = distFromBottom + "px";
-            }
-          }
-          window.addEventListener("load", positionFab, {once:true});
-          window.addEventListener("resize", positionFab);
-          const obs = new MutationObserver(positionFab);
-          obs.observe(window.parent?.document?.body || document.body, {subtree:true, childList:true, attributes:true});
-
-          document.getElementById("etran-btn").addEventListener("click", function(){ send(true); });
-          Streamlit.setFrameHeight(0);
-        </script>
-        """,
-        height=0
-    )
 
 # Only act on a real click
 if etran_clicked is True:
