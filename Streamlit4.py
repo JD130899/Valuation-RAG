@@ -426,38 +426,26 @@ st.markdown("""
 }
 .ref .close-x{ position:absolute; top:6px; right:10px; border:0; background:transparent; color:#94a3b8; font-size:20px; line-height:1; cursor:pointer; }
 
-/* --- Floating "Etran Sheet" button --- */
-
-/* --- Floating "Etran Sheet" button (extreme right, fixed) --- */
-
-/* 1) Make the anchor a fixed reference point (optional) */
-#etran-anchor { position: fixed; bottom: 0; right: 0; width: 0; height: 0; }
-
-/* 2) Pin the BUTTON CONTAINER to the viewport bottom-right */
-#etran-anchor + div.stButton,
-#etran-anchor + div[data-testid="stButton"] {
+#etran-wrapper{
   position: fixed !important;
-  bottom: 122px !important;
-  right: 0px !important;   /* gap from the edge */
-  z-index: 9999 !important;
+  bottom: 22px !important;   /* move up/down here */
+  right: 12px !important;    /* hug extreme right */
+  z-index: 10000 !important;
   margin: 0 !important;
+  pointer-events: none;      /* so only the button catches clicks */
 }
-
-/* 3) Style the actual button */
-#etran-anchor + div.stButton > button,
-#etran-anchor + div[data-testid="stButton"] > button {
+/* Style the actual Streamlit button inside */
+#etran-wrapper .stButton > button,
+#etran-wrapper [data-testid="baseButton-secondary"] {
+  pointer-events: auto;
   border-radius: 9999px;
   padding: 12px 16px;
   box-shadow: 0 10px 30px rgba(0,0,0,.35);
-  width: auto;
 }
-
-/* Mobile tweak */
 @media (max-width: 640px){
-  #etran-anchor + div.stButton,
-  #etran-anchor + div[data-testid="stButton"] { bottom: 18px !important; right: 10px !important; }
-  #etran-anchor + div.stButton > button,
-  #etran-anchor + div[data-testid="stButton"] > button { padding: 12px 15px; }
+  #etran-wrapper{ bottom: 18px !important; right: 10px !important; }
+  #etran-wrapper .stButton > button,
+  #etran-wrapper [data-testid="baseButton-secondary"]{ padding: 12px 15px; }
 }
 </style>
 """, unsafe_allow_html=True)
@@ -515,15 +503,17 @@ Conversation so far:
 # ================= Input =================
 user_q = st.chat_input("Type your question here…")
 
-st.markdown("<div id='etran-anchor'></div>", unsafe_allow_html=True)
+# ---- Floating "Etran Sheet" quick action (extreme bottom-right) ----
+st.markdown("<div id='etran-wrapper'>", unsafe_allow_html=True)
 etran_clicked = st.button("Etran Sheet", key="etran_sheet_btn")
+st.markdown("</div>", unsafe_allow_html=True)
 
 if etran_clicked:
-    # Treat as if the user typed "Etran Sheet"
     payload = "Etran Sheet"
     st.session_state.messages.append({"id": _new_id(), "role": "user", "content": payload})
     st.session_state.pending_input = payload
     st.session_state.waiting_for_response = True
+
     
 if user_q:
     # Keep the chat bubble EXACTLY as typed (e.g., "Yes", "ya", 👍)
