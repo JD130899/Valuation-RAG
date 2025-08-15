@@ -437,6 +437,39 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+st.markdown("""
+<style>
+/* Floating ETRAN bubble (bottom-right) */
+#etran-btn-wrap .stButton>button{
+  position: fixed; 
+  right: 32px; 
+  bottom: 96px;               /* sits just above the chat input */
+  z-index: 1000;
+
+  /* match assistant-bubble look */
+  background:#1e1e1e; 
+  color:#fff; 
+  border:1px solid #1e1e1e; 
+  border-radius:12px; 
+  padding:10px 14px; 
+  box-shadow:0 8px 24px rgba(0,0,0,.35);
+  line-height:1.15; 
+  font-weight:500;
+  white-space:pre-line;        /* allow the label to show on two lines */
+}
+
+/* Hover/active states */
+#etran-btn-wrap .stButton>button:hover{ filter:brightness(1.08); }
+#etran-btn-wrap .stButton>button:active{ transform:translateY(1px); }
+
+/* Mobile tweak */
+@media (max-width: 640px){
+  #etran-btn-wrap .stButton>button{ right:16px; bottom: 86px; }
+}
+</style>
+""", unsafe_allow_html=True)
+
+
 # ================= Prompt helpers =================
 def format_chat_history(messages):
     lines = []
@@ -519,16 +552,20 @@ Answer:
 )
 
 # ================= Quick Actions (always rendered) =================
+# ================= Quick Action: floating ETRAN bubble =================
+etran_clicked = False
 with st.container():
-    st.markdown('<div class="qa-wrap"></div>', unsafe_allow_html=True)
-    c1, _sp, _sp2 = st.columns([1, 4, 4])
-    etran_clicked = c1.button("📄 ETRAN Cheatsheet", key="qa_etran")
-    # If clicked, create a message and set special action
-    if etran_clicked:
-        st.session_state.messages.append({"id": _new_id(), "role": "user", "content": "ETRAN Cheatsheet"})
-        st.session_state.special_action = "etran"
-        st.session_state.pending_input = "ETRAN Cheatsheet"
-        st.session_state.waiting_for_response = True
+    # Unique wrapper div so we can target the exact button in CSS
+    st.markdown("<div id='etran-btn-wrap'>", unsafe_allow_html=True)
+    etran_clicked = st.button("📄 ETRAN\nCheatsheet", key="qa_etran")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+if etran_clicked:
+    # Behaves exactly like before: creates a user bubble and triggers special action
+    st.session_state.messages.append({"id": _new_id(), "role": "user", "content": "ETRAN Cheatsheet"})
+    st.session_state.special_action = "etran"
+    st.session_state.pending_input = "ETRAN Cheatsheet"
+    st.session_state.waiting_for_response = True
 
 # ================= Input =================
 user_q = st.chat_input("Type your question here…")
