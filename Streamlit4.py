@@ -590,7 +590,7 @@ html_overlay = """
     const r = input.getBoundingClientRect();
     row.style.left   = (r.left + window.scrollX) + 'px';
     row.style.width  = r.width + 'px';
-    row.style.bottom = (window.innerHeight - r.top + 12) + 'px';
+    row.style.bottom = (window.innerHeight - r.top + 1208) + 'px';
   }
   place();
   window.addEventListener('resize', place);
