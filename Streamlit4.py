@@ -1,12 +1,12 @@
 import os, io, pickle, base64
-import streamlit as st
 import re
+import uuid
+import streamlit as st
 import fitz  # PyMuPDF
 from PIL import Image
 from dotenv import load_dotenv
-from sklearn.metrics.pairwise import cosine_similarity
-# add at top
-import uuid, hashlib
+from sklearn.metrics.pairwise import cosine_similarity  # kept (not required for ref now)
+import streamlit.components.v1 as components
 
 # LangChain / RAG deps
 from langchain_core.documents import Document
@@ -21,7 +21,6 @@ from langchain_core.prompts import PromptTemplate
 
 import openai
 from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
-import streamlit.components.v1 as components
 
 # ================= Setup =================
 load_dotenv()
@@ -44,14 +43,12 @@ if "retriever" not in st.session_state:
     st.session_state.retriever = None
 if "page_images" not in st.session_state:
     st.session_state.page_images = {}
+if "last_suggestion" not in st.session_state:
+    st.session_state.last_suggestion = None  # remember last “Did you mean X?”
 
 # --- Stable IDs for messages ---
 if "next_msg_id" not in st.session_state:
     st.session_state.next_msg_id = 0
-
-
-
-
 
 def _new_id():
     n = st.session_state.next_msg_id
@@ -59,24 +56,19 @@ def _new_id():
     return f"m{n}"
 
 def file_badge_link(name: str, pdf_bytes: bytes, synced: bool = True):
-    base = os.path.splitext(name)[0]          # remove .pdf
-    b64  = base64.b64encode(pdf_bytes).decode("ascii")
+    base = os.path.splitext(name)[0]
+    b64 = base64.b64encode(pdf_bytes).decode("ascii")
     label = "Using synced file:" if synced else "Using file:"
     link_id = f"open-file-{uuid.uuid4().hex[:8]}"
-
-    # Visible banner + placeholder link
     st.markdown(
         f'''
         <div style="background:#1f2c3a; padding:8px; border-radius:8px; color:#fff;">
           ✅ <b>{label}</b>
-          <a id="{link_id}" href="#" target="_blank" rel="noopener"
-             style="color:#93c5fd; text-decoration:none;">{base}</a>
+          <a id="{link_id}" href="#" target="_blank" rel="noopener" style="color:#93c5fd; text-decoration:none;">{base}</a>
         </div>
         ''',
         unsafe_allow_html=True
     )
-
-    # Create a blob URL for the PDF and attach it to the link (works across browsers)
     components.html(
         f'''<!doctype html><meta charset='utf-8'>
 <style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
@@ -84,7 +76,6 @@ def file_badge_link(name: str, pdf_bytes: bytes, synced: bool = True):
   function b64ToUint8Array(s){{var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}}
   var blob = new Blob([b64ToUint8Array("{b64}")], {{type:"application/pdf"}});
   var url  = URL.createObjectURL(blob);
-
   function attach(){{
     var d = window.parent && window.parent.document;
     if(!d) return setTimeout(attach,120);
@@ -93,25 +84,12 @@ def file_badge_link(name: str, pdf_bytes: bytes, synced: bool = True):
     a.setAttribute("href", url);
   }}
   attach();
-
   var me = window.frameElement; if(me){{me.style.display="none";me.style.height="0";me.style.border="0";}}
 }})();</script>''',
         height=0,
     )
 
-
-
-# Make a ONE-PAGE PDF (base64) from a given page
-def single_page_pdf_b64(pdf_bytes: bytes, page_number: int) -> str:
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    one = fitz.open()
-    one.insert_pdf(doc, from_page=page_number-1, to_page=page_number-1)
-    b64 = base64.b64encode(one.tobytes()).decode("ascii")
-    one.close(); doc.close()
-    return b64
-
 def render_reference_card(label: str, img_b64: str, pdf_b64: str, page: int, key: str):
-    # Markup: chip + overlay + modal panel
     st.markdown(
         f"""
         <details class="ref" id="ref-{key}">
@@ -129,67 +107,48 @@ def render_reference_card(label: str, img_b64: str, pdf_b64: str, page: int, key
         """,
         unsafe_allow_html=True,
     )
-
     components.html(
         f"""<!doctype html><meta charset='utf-8'>
 <style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
 <script>(function(){{
   function b64ToUint8Array(s){{var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}}
   var blob = new Blob([b64ToUint8Array('{pdf_b64}')], {{type:'application/pdf'}});
-  // Open FULL PDF, jump to the target page:
   var url  = URL.createObjectURL(blob) + '#page={page}';
-
   function attach(){{
     var d = window.parent && window.parent.document;
     if(!d) return setTimeout(attach,120);
-
     var ref = d.getElementById('ref-{key}');
     var a   = d.getElementById('open-{key}');
     var ovl = d.getElementById('overlay-{key}');
     var cls = d.getElementById('close-{key}');
     if(!ref || !a || !ovl || !cls) return setTimeout(attach,120);
-
     a.setAttribute('href', url);
-
     function closeRef(){{ ref.removeAttribute('open'); }}
     ovl.addEventListener('click', closeRef);
     cls.addEventListener('click', closeRef);
     d.addEventListener('keydown', function(e){{ if(e.key==='Escape') closeRef(); }});
   }}
   attach();
-
   var me = window.frameElement; if(me){{me.style.display='none';me.style.height='0';me.style.border='0';}}
 }})();</script>""",
         height=0,
     )
 
-
-
-# give IDs to any preloaded messages (greetings)
+# preloaded message IDs
 for m in st.session_state.messages:
     if "id" not in m:
         m["id"] = _new_id()
 
-def guess_suggestion(question: str, docs):
-    """Pick a short (<=6 words) line from the retrieved chunks that overlaps with the question."""
-    q_terms = set(w.lower() for w in re.findall(r"[A-Za-z]{3,}", question))
-    best_line, best_score = None, 0
-    for d in docs or []:
-        for ln in d.page_content.splitlines():
-            ln = ln.strip()
-            if not ln:
-                continue
-            # prefer short, title-like lines
-            if len(ln.split()) > 6:
-                continue
-            words = set(w.lower() for w in re.findall(r"[A-Za-z]{3,}", ln))
-            score = len(q_terms & words)
-            if score > best_score:
-                best_score, best_line = score, ln
-    return best_line or "Valuation Summary"
+# ---- helpers: suggestions / confirmations / query condensation ----
+def extract_suggestion(text):
+    m = re.search(r"did you mean\s+(.+?)\?", text, flags=re.I)
+    return m.group(1).strip() if m else None
+
+def is_confirmation(text: str) -> bool:
+    t = text.strip().lower()
+    return t in {"y", "yes", "yeah", "yep", "correct", "right", "sure", "ok", "okay"}
 
 def is_clarification(answer: str) -> bool:
-    """Return True if the LLM is asking the user to rephrase / clarify."""
     low = answer.lower().strip()
     patterns = [
         "sorry i didnt understand the question",
@@ -200,32 +159,52 @@ def is_clarification(answer: str) -> bool:
         "can you clarify",
         "could you clarify",
     ]
-    # Also treat pure clarification-style outputs that end with a question mark
     return any(p in low for p in patterns)
 
+def guess_suggestion(question: str, docs):
+    q_terms = set(w.lower() for w in re.findall(r"[A-Za-z]{3,}", question))
+    best_line, best_score = None, 0
+    for d in docs or []:
+        for ln in d.page_content.splitlines():
+            ln = ln.strip()
+            if not ln or len(ln.split()) > 6:
+                continue
+            words = set(w.lower() for w in re.findall(r"[A-Za-z]{3,}", ln))
+            score = len(q_terms & words)
+            if score > best_score:
+                best_score, best_line = score, ln
+    return best_line or "Valuation Summary"
 
 def sanitize_suggestion(answer: str, question: str, docs):
-    """
-    If the model outputs the fallback:
-      - fill any [ ... ] with a guessed suggestion
-      - or, if suggestion is missing/too long, rebuild with a good guess
-    Otherwise, return as-is.
-    """
     low = answer.lower().strip()
     if "sorry i didnt understand the question" not in low:
         return answer
-
-    # Case 1: model left brackets like [X]
     if "[" in answer and "]" in answer:
         return re.sub(r"\[.*?\]", guess_suggestion(question, docs), answer)
-
-    # Case 2: ensure 'Did you mean <short>?' exists and is short enough
     m = re.search(r"Did you mean\s+(.+?)(\?)", answer, flags=re.IGNORECASE)
     cand = (m.group(1).strip() if m else "")
     if not cand or len(cand.split()) > 6:
         return "Sorry I didnt understand the question. Did you mean " + guess_suggestion(question, docs) + "?"
     return answer
 
+def condense_query(chat_history, user_input: str, pdf_name: str) -> str:
+    hist = []
+    for m in chat_history[-6:]:
+        speaker = "User" if m["role"] == "user" else "Assistant"
+        hist.append(f"{speaker}: {m['content']}")
+    hist_txt = "\n".join(hist)
+    prompt = PromptTemplate(
+        template=(
+            'Turn the last user message into a single, self-contained search query about the PDF "{pdf_name}". '
+            "Use ONLY info implied by the history; keep it short and noun-heavy. "
+            "Return just the query.\n"
+            "---\nHistory:\n{history}\n---\nLast user message: {question}\nStandalone query:"
+        ),
+        input_variables=["pdf_name", "history", "question"]
+    )
+    return ChatOpenAI(model="gpt-4o", temperature=0).invoke(
+        prompt.invoke({"pdf_name": pdf_name, "history": hist_txt, "question": user_input})
+    ).content.strip() or user_input
 
 # ================= Builder =================
 @st.cache_resource(show_spinner="📦 Processing & indexing PDF…")
@@ -312,7 +291,6 @@ if pdf_files:
                 st.session_state.uploaded_file_from_drive = open(path, "rb").read()
                 st.session_state.uploaded_file_name = fname
                 st.session_state.last_synced_file_id = fid
-                # reset convo for new doc
                 st.session_state.messages = [
                     {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
                     {"role": "assistant", "content": "What can I help you with?"}
@@ -323,17 +301,14 @@ else:
 # ================= Main UI =================
 st.title("Underwriting Agent")
 
-# Source selector (Drive or local upload)
 if "uploaded_file_from_drive" in st.session_state:
     file_badge_link(
-    st.session_state.uploaded_file_name,
-    st.session_state.uploaded_file_from_drive,
-    synced=True
+        st.session_state.uploaded_file_name,
+        st.session_state.uploaded_file_from_drive,
+        synced=True
     )
     up = io.BytesIO(st.session_state.uploaded_file_from_drive)
     up.name = st.session_state.uploaded_file_name
-
-  
 else:
     up = st.file_uploader("Upload a valuation report PDF", type="pdf")
     if up:
@@ -348,8 +323,6 @@ if st.session_state.get("last_processed_pdf") != up.name:
     pdf_bytes = up.getvalue()
     st.session_state.pdf_bytes = pdf_bytes
     st.session_state.retriever, st.session_state.page_images = build_retriever_from_pdf(pdf_bytes, up.name)
-
-    # reset convo for new doc
     st.session_state.messages = [
         {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
         {"role": "assistant", "content": "What can I help you with?"}
@@ -362,55 +335,27 @@ st.markdown("""
 .user-bubble {background:#007bff;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:right;margin:4px;}
 .assistant-bubble {background:#1e1e1e;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:left;margin:4px;}
 .clearfix::after {content:"";display:table;clear:both;}
-
-/* Reference chip + panel */
 .ref{ display:block; width:60%; max-width:900px; margin:6px 0 12px 8px; }
-
-/* the chip */
 .ref summary{
   display:inline-flex; align-items:center; gap:8px; cursor:pointer; list-style:none; outline:none;
   background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:10px; padding:6px 10px;
 }
 .ref summary::before{ content:"▶"; font-size:12px; line-height:1; }
 .ref[open] summary::before{ content:"▼"; }
-/* keep summary (chip) visible in place */
-.ref[open] > summary{}
-
-/* the lightbox panel */
 .ref .panel{
   background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-top:none;
   border-radius:10px; padding:10px; margin-top:0; box-shadow:0 6px 20px rgba(0,0,0,.25);
 }
 .ref .panel img{ width:100%; height:auto; border-radius:8px; display:block; }
-
-/* overlay that closes the lightbox (separate from <summary>) */
 .ref .overlay{ display:none; }
-.ref[open] .overlay{
-  display:block; position:fixed; inset:0; z-index:998;
-  background:transparent; border:0; padding:0; margin:0;
-}
-
-/* float the panel as a modal when open */
+ref[open] .overlay{ display:block; position:fixed; inset:0; z-index:998; background:transparent; border:0; padding:0; margin:0; }
 .ref[open] > .panel{
   position: fixed; z-index: 999; top: 12vh; left: 50%; transform: translateX(-50%);
   width: min(900px, 90vw); max-height: 75vh; overflow: auto; box-shadow:0 20px 60px rgba(0,0,0,.45);
 }
-
-/* optional close X */
-.ref .close-x{
-  position:absolute; top:6px; right:10px; border:0; background:transparent;
-  color:#94a3b8; font-size:20px; line-height:1; cursor:pointer;
-}
-
-/* (kept from before) small link-chip style if you use it elsewhere */
-.chip{ display:inline-flex;align-items:center;gap:.5rem;
-  background:#0f172a;color:#e2e8f0;border:1px solid #334155;
-  border-radius:10px;padding:.35rem .6rem;font:14px/1.2 system-ui; }
-.chip a{color:#93c5fd;text-decoration:none}
-.chip a:hover{text-decoration:underline}
+.ref .close-x{ position:absolute; top:6px; right:10px; border:0; background:transparent; color:#94a3b8; font-size:20px; line-height:1; cursor:pointer; }
 </style>
 """, unsafe_allow_html=True)
-
 
 # ================= Prompt helpers =================
 def format_chat_history(messages):
@@ -421,75 +366,51 @@ def format_chat_history(messages):
     return "\n".join(lines)
 
 prompt = PromptTemplate(
-        template = """
-       You are a financial-data extraction assistant.
-    
-       **IMPORTANT CONDITIONAL FOLLOW-UP**  
-        🛎️ After you answer the user’s question (using steps 1–4), **only if** there is still **unused** relevant report content, **ask**:  
-          “Would you like more detail on [X]?”  
-       Otherwise, **do not** ask any follow-up.
+    template = """
+You are a financial-data extraction assistant.
 
-       **HARD RULE (unrelated questions)**
-        If the user's question is unrelated to this PDF or requires information outside the Context, reply **exactly**:
-        "Sorry I can only answer question related to {pdf_name} pdf document"
-        Do not add anything else.
- 
-    **Use ONLY what appears under “Context”.**
-    
-    ### How to answer
-    1. **Single value questions**  
-       • Find the row + column that match the user's words.  
-       • Return the answer in a **short, clear sentence** using the exact number from the context.  
-         Example: “The Income (DCF) approach value is $1,150,000.”  
-       • **Do NOT repeat the metric name or company name** unless the user asks.
-    
-    2. **Table questions**  
-       • Return the full table **with its header row** in GitHub-flavoured markdown.
-    
-    3. **Valuation method / theory / reasoning questions**
-        
-       • If the question involves **valuation methods**, **concluded value**, or topics like **Income Approach**, **Market Approach**, or **Valuation Summary**, do the following:
-         - Combine and synthesize relevant information across all chunks.
-         - Pay special attention to how **weights are distributed** (e.g., “50% DCF, 25% EBITDA, 25% SDE”).
-         - Avoid oversimplifying if more detailed breakdowns (like subcomponents of market approach) are available.
-         - If a table gives a simplified view (e.g., "50% Market Approach"), but other parts break it down (e.g., 25% EBITDA + 25% SDE), **prefer the detailed breakdown with percent value**.   
-         - When describing weights, also mention the **corresponding dollar values** used in the context (e.g., “50% DCF = $3,712,000, 25% EBITDA = $4,087,000...”)
-         - **If Market approach is composed of sub-methods like EBITDA and SDE, then explicitly extract and show their individual weights and values, even if not listed together in a single table.**
-        
- 
-    4. **Theory/textual question**  
-       • Try to return an explanation **based on the context**.
-       
-    5. **If you cannot find an answer in Context**
-       • Reply **exactly**:
-         "Sorry I didnt understand the question. Did you mean SUGGESTION?"
-       • Where **SUGGESTION** is a short (≤6 words) phrase you pick from **Context** that best matches the user’s words
-         (e.g., a metric name, table heading, or section title). Do **not** use brackets. Do **not** invent terms.
+**IMPORTANT CONDITIONAL FOLLOW-UP**
+🛎️ After you answer the user’s question (using steps 1–4), **only if** there is still **unused** relevant report content, **ask**:
+“Would you like more detail on [X]?”
+Otherwise, **do not** ask any follow-up.
 
-    
-    ---
-    Context:
-    {context}
-    
-    ---
-    Question: {question}
-    Answer:""",
-            input_variables=["context", "question","pdf_name"]
-        )
+**HARD RULE (unrelated questions)**
+If the user's question is unrelated to this PDF or requires information outside the Context, reply **exactly**:
+"Sorry I can only answer question related to {pdf_name} pdf document"
+
+**Use ONLY what appears under “Context”.**
+
+### How to answer
+1. Single value → short sentence with the exact number.
+2. Table questions → return the full table in GitHub-flavoured markdown.
+3. Valuation methods → synthesize across chunks; show weights and $ values; prefer detailed breakdowns.
+4. Theory/text → explain using context.
+5. If you cannot find an answer in Context → reply exactly:
+   "Sorry I didnt understand the question. Did you mean SUGGESTION?"
+
+---
+Context:
+{context}
+---
+Question: {question}
+Answer:""",
+    input_variables=["context", "question", "pdf_name"]
+)
 
 base_text = prompt.template
 wrapped_prompt = PromptTemplate(
     template=base_text + """
 Conversation so far:
 {chat_history}
-
-""", 
-    input_variables=["chat_history", "context", "question","pdf_name"]
+""",
+    input_variables=["chat_history", "context", "question", "pdf_name"]
 )
 
 # ================= Input =================
 user_q = st.chat_input("Type your question here…")
 if user_q:
+    if is_confirmation(user_q) and st.session_state.last_suggestion:
+        user_q = st.session_state.last_suggestion
     st.session_state.messages.append({"id": _new_id(), "role": "user", "content": user_q})
     st.session_state.pending_input = user_q
     st.session_state.waiting_for_response = True
@@ -498,7 +419,6 @@ if user_q:
 for msg in st.session_state.messages:
     cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
     st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
-
     if msg.get("source_img") and msg.get("source_pdf_b64") and msg.get("source_page"):
         render_reference_card(
             label=(msg.get("source") or "Page"),
@@ -508,26 +428,27 @@ for msg in st.session_state.messages:
             key=msg.get("id", "k0"),
         )
 
-# ================= Answer (single-pass, no rerun) =================
+# ================= Answer =================
 if st.session_state.waiting_for_response:
     block = st.empty()
     with block.container():
         thinking = st.empty()
-        thinking.markdown(
-            "<div class='assistant-bubble clearfix'>Thinking…</div>", 
-            unsafe_allow_html=True)
+        thinking.markdown("<div class='assistant-bubble clearfix'>Thinking…</div>", unsafe_allow_html=True)
+
         q = st.session_state.pending_input or ""
+        history_to_use = st.session_state.messages[-10:]
+        pdf_display = os.path.splitext(up.name)[0]
+
+        # Condense for retrieval so follow-ups like “Yes” work
+        query_for_retrieval = condense_query(history_to_use, q, pdf_display)
+
         ctx, docs = "", []
         try:
-            docs = st.session_state.retriever.get_relevant_documents(q)
+            docs = st.session_state.retriever.get_relevant_documents(query_for_retrieval)
             ctx = "\n\n".join(d.page_content for d in docs)
         except Exception as e:
             st.warning(f"RAG retrieval error: {e}")
 
-        history_to_use = st.session_state.messages[-10:]
-        pdf_display = os.path.splitext(up.name)[0]
-
-        # Build the prompt text using your wrapped_prompt
         llm = ChatOpenAI(model="gpt-4o", temperature=0)
         full_input = {
             "chat_history": format_chat_history(history_to_use),
@@ -538,51 +459,36 @@ if st.session_state.waiting_for_response:
         answer = llm.invoke(wrapped_prompt.invoke(full_input)).content
         answer = sanitize_suggestion(answer, q, docs)
 
+        st.session_state.last_suggestion = extract_suggestion(answer)
+
         apology = f"Sorry I can only answer question related to {pdf_display} pdf document"
         is_unrelated = apology.lower() in answer.strip().lower()
-        is_clarify  = is_clarification(answer) 
-        entry = {"id": _new_id(), "role": "assistant", "content": answer}
-        ref_page, ref_img_b64 = None, None
+        is_clarify  = is_clarification(answer)
 
+        entry = {"id": _new_id(), "role": "assistant", "content": answer}
+
+        # ---------- TOP-3 LLM PICK (what you asked for) ----------
+        # Start with reranker order; optionally let an LLM pick among top3.
         try:
             if docs and not (is_unrelated or is_clarify):
-                texts = [d.page_content for d in docs]
-                embedder = CohereEmbeddings(
-                    model="embed-english-v3.0",
-                    user_agent="langchain",
-                    cohere_api_key=st.secrets["COHERE_API_KEY"]
-                )
-                emb_answer = embedder.embed_query(answer)
-                chunk_embs = embedder.embed_documents(texts)
-                sims = cosine_similarity([emb_answer], chunk_embs)[0]
-                ranked = sorted(list(zip(docs, sims)), key=lambda x: x[1], reverse=True)
-                top3 = [d for d, _ in ranked[:3]]
-
-                best_doc = top3[0] if top3 else (ranked[0][0] if ranked else None)
+                top3 = docs[:3]
+                best_doc = top3[0] if top3 else None
                 if len(top3) >= 3:
                     ranking_prompt = PromptTemplate(
-                         template="""
-                        Given a user question and 3 candidate context chunks, return the number (1-3) of the chunk that best answers it.
-                        
-                        Question:
-                        {question}
-                        
-                        Chunk 1:
-                        {chunk1}
-                        
-                        Chunk 2:
-                        {chunk2}
-                        
-                        Chunk 3:
-                        {chunk3}
-                        
-                        Best Chunk Number:
-                        """,
-                                    input_variables=["question","chunk1","chunk2","chunk3"]
-                                )
+                        template=(
+                            "Given the user's question and 3 candidate context chunks, "
+                            "reply with only the number (1, 2, or 3) of the chunk that best answers it.\n\n"
+                            "Question:\n{question}\n\n"
+                            "Chunk 1:\n{chunk1}\n\n"
+                            "Chunk 2:\n{chunk2}\n\n"
+                            "Chunk 3:\n{chunk3}\n\n"
+                            "Best Chunk Number:"
+                        ),
+                        input_variables=["question", "chunk1", "chunk2", "chunk3"]
+                    )
                     pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
                         ranking_prompt.invoke({
-                            "question": q,
+                            "question": query_for_retrieval,
                             "chunk1": top3[0].page_content,
                             "chunk2": top3[1].page_content,
                             "chunk3": top3[2].page_content
@@ -594,37 +500,28 @@ if st.session_state.waiting_for_response:
                 if best_doc is not None:
                     ref_page = best_doc.metadata.get("page_number")
                     img = st.session_state.page_images.get(ref_page)
-                    ref_img_b64 = pil_to_base64(img) if img else None
-                    if ref_img_b64:
+                    if img:
                         entry["source"] = f"Page {ref_page}"
-                        entry["source_img"] = ref_img_b64
+                        entry["source_img"] = pil_to_base64(img)
                         entry["source_pdf_b64"] = base64.b64encode(st.session_state.pdf_bytes).decode("ascii")
                         entry["source_page"] = ref_page
 
-
         except Exception as e:
             st.info(f"ℹ️ Reference selection skipped: {e}")
-        thinking.empty()
-    
 
-    # Final render (no rerun)
+        thinking.empty()
+
     with block.container():
         st.markdown(f"<div class='assistant-bubble clearfix'>{answer}</div>", unsafe_allow_html=True)
-
-        # Register the blob URL for this new message (no white bars; height=0)
         if entry.get("source_img"):
             render_reference_card(
-                label=entry.get("source", f"Page {ref_page}"),
+                label=entry.get("source"),
                 img_b64=entry["source_img"],
                 pdf_b64=entry["source_pdf_b64"],
                 page=entry["source_page"],
                 key=entry.get("id", "k0"),
             )
 
-
-
-
-    # Persist
     st.session_state.messages.append(entry)
     st.session_state.pending_input = None
     st.session_state.waiting_for_response = False
