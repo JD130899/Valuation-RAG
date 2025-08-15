@@ -491,7 +491,7 @@ if up:  # render only when a PDF is loaded
         <style>
           #etran-fab {
             position: fixed;
-            bottom: 70px;         /* sits above the chat input */
+            bottom: 10px;         /* sits above the chat input */
             right: 16px;          /* hug the right edge */
             z-index: 10000;
           }
