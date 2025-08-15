@@ -425,7 +425,38 @@ st.markdown("""
   width: min(900px, 90vw); max-height: 75vh; overflow: auto; box-shadow:0 20px 60px rgba(0,0,0,.45);
 }
 .ref .close-x{ position:absolute; top:6px; right:10px; border:0; background:transparent; color:#94a3b8; font-size:20px; line-height:1; cursor:pointer; }
+.user-bubble {
+    background-color: #DCF8C6;
+    border-radius: 18px;
+    padding: 10px;
+    margin: 5px;
+    max-width: 70%;
+    word-wrap: break-word;
+    align-self: flex-end;
+}
+.assistant-bubble {
+    background-color: #F1F0F0;
+    border-radius: 18px;
+    padding: 10px;
+    margin: 5px;
+    max-width: 70%;
+    word-wrap: break-word;
+    align-self: flex-start;
+}
 
+/* Floating button styling */
+#etran-anchor + div.stButton > button {
+    position: fixed;
+    bottom: 22px;
+    right: 22px;
+    z-index: 9999;
+    border-radius: 9999px;
+    padding: 12px 16px;
+    box-shadow: 0 10px 30px rgba(0,0,0,.35);
+    background-color: #4CAF50;
+    color: white;
+    font-weight: bold;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -481,58 +512,12 @@ Conversation so far:
 
 # ================= Input =================
 user_q = st.chat_input("Type your question here…")
-
-# ---- Floating "Etran Sheet" button (works reliably via components.html) ----
-# ---- Floating "Etran Sheet" button (bottom-right, only after PDF is loaded) ----
-etran_clicked = False
-if up:  # render only when a PDF is loaded
-    etran_clicked = components.html(
-        """
-        <style>
-          #etran-fab {
-            position: fixed;
-            bottom: 70px;         /* sits above the chat input */
-            right: 16px;          /* hug the right edge */
-            z-index: 10000;
-          }
-          #etran-btn {
-            border-radius: 9999px;
-            padding: 10px 16px;
-            background: #000;     /* BLACK button */
-            color: #fff;
-            border: none;
-            font: inherit;
-            box-shadow: 0 10px 30px rgba(0,0,0,.35);
-            cursor: pointer;
-          }
-          #etran-btn:hover { background: #222; }
-          #etran-btn:active { transform: translateY(1px); }
-          @media (max-width: 640px){
-            #etran-fab { bottom: 64px; right: 12px; }
-          }
-        </style>
-        <div id="etran-fab">
-          <button id="etran-btn" type="button">Etran Sheet</button>
-        </div>
-
-        <!-- Streamlit component bridge -->
-        <script src="https://unpkg.com/@streamlit/component-lib/dist/index.js"></script>
-        <script>
-          function send(v){ Streamlit.setComponentValue(v); }
-          window.addEventListener("load", function(){
-            document.getElementById("etran-btn").addEventListener("click", function(){ send(true); });
-            Streamlit.setFrameHeight(0);  // keep iframe invisible
-          });
-        </script>
-        """,
-        height=0,  # keep the iframe invisible
-    )
+st.markdown('<div id="etran-anchor"></div>', unsafe_allow_html=True)
+etran_clicked = st.button("Valuation 💰", key="etran_button")
 
 if etran_clicked:
-    payload = "Etran Sheet"
-    st.session_state.messages.append({"id": _new_id(), "role": "user", "content": payload})
-    st.session_state.pending_input = payload
-    st.session_state.waiting_for_response = True
+    # Only runs when you click
+    st.session_state.messages.append({"role": "user", "content": "Etran Sheet"})
 
 
 
