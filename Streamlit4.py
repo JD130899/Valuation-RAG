@@ -139,16 +139,27 @@ for m in st.session_state.messages:
     if "id" not in m:
         m["id"] = _new_id()
 
-# ---- helpers: suggestions / confirmations / query condensation ----
+# ----------- helpers (NEW: cleaning + confirmation routing) -----------
+
+def _clean_heading(text: str) -> str:
+    """
+    Remove Markdown/numbering/bullets like '#', '##', '-', '*', '1)', etc. from the start.
+    Also trim common trailing punctuation.
+    """
+    if not text:
+        return text
+    text = re.sub(r"^[#>\-\*\d\.\)\(]+\s*", "", text).strip()
+    text = text.strip(" :–—-·•")
+    return text
+
 def extract_suggestion(text):
     m = re.search(r"did you mean\s+(.+?)\?", text, flags=re.IGNORECASE)
     if not m:
         return None
-    val = m.group(1).strip()
+    val = _clean_heading(m.group(1).strip())
     if val.lower() == "suggestion":
         return None
     return val
-
 
 def is_confirmation(text: str) -> bool:
     t = text.strip().lower()
@@ -172,49 +183,45 @@ def guess_suggestion(question: str, docs):
     best_line, best_score = None, 0
     for d in docs or []:
         for ln in d.page_content.splitlines():
-            ln = ln.strip()
-            if not ln or len(ln.split()) > 6:
+            raw = ln.strip()
+            if not raw:
                 continue
-            words = set(w.lower() for w in re.findall(r"[A-Za-z]{3,}", ln))
+            # prefer short, title-like lines
+            if len(raw.split()) > 6:
+                continue
+            words = set(w.lower() for w in re.findall(r"[A-Za-z]{3,}", raw))
             score = len(q_terms & words)
             if score > best_score:
-                best_score, best_line = score, ln
-    return best_line or "Valuation Summary"
+                best_score, best_line = score, raw
+    return _clean_heading(best_line or "Valuation Summary")
 
 def sanitize_suggestion(answer: str, question: str, docs):
     """
-    Ensure clarification replies contain a concrete, short suggestion.
-    Replaces a literal 'SUGGESTION' token (case-insensitive) or any [ ... ] with a guessed phrase.
-    If we still don't have a concrete phrase after 'Did you mean', rebuild the line.
+    Ensure clarification replies contain a concrete, short, cleaned suggestion (no leading '#', '-', etc.)
     """
     low = answer.lower().strip()
-    # Only act on clarification-style messages
     if ("sorry i didnt understand the question" not in low
         and "sorry i didn't understand the question" not in low
         and "did you mean" not in low):
         return answer
 
-    sug = guess_suggestion(question, docs)
+    sug = _clean_heading(guess_suggestion(question, docs))
 
-    # 1) Replace a literal SUGGESTION token
+    # Replace literal SUGGESTION tokens
     answer = re.sub(r"\bSUGGESTION\b", sug, answer, flags=re.IGNORECASE)
-
-    # 2) Replace any bracketed placeholder like [X]
+    # Replace [ ... ] placeholders
     answer = re.sub(r"\[.*?\]", sug, answer)
 
-    # 3) If it's still not a concrete suggestion after "Did you mean", rebuild it
+    # Normalize the "Did you mean ..." line
     m = re.search(r"did you mean\s+(.+?)\?", answer, flags=re.IGNORECASE)
-    if not m or m.group(1).strip().lower() in {"", "suggestion"}:
+    cand = _clean_heading(m.group(1).strip()) if m else ""
+    if not cand or cand.lower() == "suggestion":
         return f"Sorry I didnt understand the question. Did you mean {sug}?"
-
-    # 4) Enforce the ≤6 words rule
-    cand = m.group(1).strip()
     if len(cand.split()) > 6:
         cand = " ".join(cand.split()[:6])
         return f"Sorry I didnt understand the question. Did you mean {cand}?"
-
-    return answer
-
+    # Ensure no stray heading symbols remain
+    return re.sub(r"(Did you mean\s+)[#>\-\*\d\.\)\(]+\s*", r"\1", answer, flags=re.IGNORECASE)
 
 def condense_query(chat_history, user_input: str, pdf_name: str) -> str:
     hist = []
@@ -438,8 +445,7 @@ Conversation so far:
 # ================= Input =================
 user_q = st.chat_input("Type your question here…")
 if user_q:
-    if is_confirmation(user_q) and st.session_state.last_suggestion:
-        user_q = st.session_state.last_suggestion
+    # Keep the chat bubble EXACTLY as typed (e.g., "Yes")
     st.session_state.messages.append({"id": _new_id(), "role": "user", "content": user_q})
     st.session_state.pending_input = user_q
     st.session_state.waiting_for_response = True
@@ -464,12 +470,16 @@ if st.session_state.waiting_for_response:
         thinking = st.empty()
         thinking.markdown("<div class='assistant-bubble clearfix'>Thinking…</div>", unsafe_allow_html=True)
 
-        q = st.session_state.pending_input or ""
+        raw_q = st.session_state.pending_input or ""
         history_to_use = st.session_state.messages[-10:]
         pdf_display = os.path.splitext(up.name)[0]
 
+        # If the user confirmed ("Yes"), route the last suggestion internally,
+        # but DO NOT change the visible chat bubble.
+        effective_q = st.session_state.last_suggestion if (is_confirmation(raw_q) and st.session_state.last_suggestion) else raw_q
+
         # Condense for retrieval so follow-ups like “Yes” work
-        query_for_retrieval = condense_query(history_to_use, q, pdf_display)
+        query_for_retrieval = condense_query(history_to_use, effective_q, pdf_display)
 
         ctx, docs = "", []
         try:
@@ -482,13 +492,15 @@ if st.session_state.waiting_for_response:
         full_input = {
             "chat_history": format_chat_history(history_to_use),
             "context":      ctx,
-            "question":     q,
+            "question":     effective_q,  # use the internal effective question
             "pdf_name":     pdf_display,
         }
         answer = llm.invoke(wrapped_prompt.invoke(full_input)).content
-        answer = sanitize_suggestion(answer, q, docs)
+        answer = sanitize_suggestion(answer, effective_q, docs)
 
-        st.session_state.last_suggestion = extract_suggestion(answer)
+        # Save a CLEANED last suggestion for future "Yes"
+        sug = extract_suggestion(answer)
+        st.session_state.last_suggestion = _clean_heading(sug) if sug else None
 
         apology = f"Sorry I can only answer question related to {pdf_display} pdf document"
         is_unrelated = apology.lower() in answer.strip().lower()
@@ -496,8 +508,7 @@ if st.session_state.waiting_for_response:
 
         entry = {"id": _new_id(), "role": "assistant", "content": answer}
 
-        # ---------- TOP-3 LLM PICK (what you asked for) ----------
-        # Start with reranker order; optionally let an LLM pick among top3.
+        # ---------- TOP-3 LLM PICK ----------
         try:
             if docs and not (is_unrelated or is_clarify):
                 top3 = docs[:3]
