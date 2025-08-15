@@ -43,8 +43,12 @@ if "retriever" not in st.session_state:
     st.session_state.retriever = None
 if "page_images" not in st.session_state:
     st.session_state.page_images = {}
+if "page_texts" not in st.session_state:
+    st.session_state.page_texts = {}   # NEW: keep raw text per page number
 if "last_suggestion" not in st.session_state:
     st.session_state.last_suggestion = None  # remember last “Did you mean X?”
+if "special_action" not in st.session_state:
+    st.session_state.special_action = None   # NEW: holds "etran" when chip clicked
 
 # --- Stable IDs for messages ---
 if "next_msg_id" not in st.session_state:
@@ -142,10 +146,7 @@ for m in st.session_state.messages:
 # ----------- helpers (cleaning + suggestion + confirmation routing) -----------
 
 def _clean_heading(text: str) -> str:
-    """
-    Remove Markdown/numbering/bullets like '#', '##', '-', '*', '1)', etc. from the start.
-    Also trim common trailing punctuation.
-    """
+    """Remove Markdown/numbering/bullets like '#', '##', '-', '*', '1)', etc. Also trim trailing punctuation."""
     if not text:
         return text
     text = re.sub(r"^[#>\-\*\d\.\)\(]+\s*", "", text).strip()
@@ -191,9 +192,7 @@ def guess_suggestion(question: str, docs):
     return _clean_heading(best_line or "Valuation Summary")
 
 def sanitize_suggestion(answer: str, question: str, docs):
-    """
-    Ensure clarification replies contain a concrete, short, cleaned suggestion (no leading '#', '-', etc.)
-    """
+    """Ensure clarification replies contain a concrete, short, cleaned suggestion (no leading '#', '-', etc.)."""
     low = answer.lower().strip()
     if ("sorry i didnt understand the question" not in low
         and "sorry i didn't understand the question" not in low
@@ -202,9 +201,8 @@ def sanitize_suggestion(answer: str, question: str, docs):
 
     sug = _clean_heading(guess_suggestion(question, docs))
 
-    # Replace literal SUGGESTION tokens
+    # Replace literal SUGGESTION tokens & [ ... ] placeholders
     answer = re.sub(r"\bSUGGESTION\b", sug, answer, flags=re.IGNORECASE)
-    # Replace [ ... ] placeholders
     answer = re.sub(r"\[.*?\]", sug, answer)
 
     # Normalize the "Did you mean ..." line
@@ -215,7 +213,6 @@ def sanitize_suggestion(answer: str, question: str, docs):
     if len(cand.split()) > 6:
         cand = " ".join(cand.split()[:6])
         return f"Sorry I didnt understand the question. Did you mean {cand}?"
-    # Ensure no stray heading symbols remain
     return re.sub(r"(Did you mean\s+)[#>\-\*\d\.\)\(]+\s*", r"\1", answer, flags=re.IGNORECASE)
 
 # ---------- LLM-based confirmation classifier (GENERALIZES "yes") ----------
@@ -293,10 +290,12 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
     parser = LlamaParse(api_key=os.environ["LLAMA_CLOUD_API_KEY"], num_workers=4)
     result = parser.parse(pdf_path)
     pages = []
+    page_texts = {}  # NEW: collect original text per page
     for pg in result.pages:
-        cleaned = [l for l in pg.md.splitlines() if l.strip() and l.lower() != "null"]
-        text = "\n".join(cleaned)
+        cleaned_lines = [l for l in pg.md.splitlines() if l.strip() and l.lower() != "null"]
+        text = "\n".join(cleaned_lines)
         if text:
+            page_texts[pg.page] = text
             pages.append(Document(page_content=text, metadata={"page_number": pg.page}))
 
     # Chunk
@@ -334,12 +333,18 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
         ),
         base_compressor=reranker
     )
+
+    # Save page assets
+    st.session_state.page_texts = page_texts
     return retriever, page_images
 
 def pil_to_base64(img: Image.Image) -> str:
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return base64.b64encode(buf.getvalue()).decode("ascii")
+
+def get_page_text(n: int) -> str:
+    return st.session_state.page_texts.get(n, "")
 
 # ================= Sidebar: Google Drive loader =================
 service = get_drive_service()
@@ -402,6 +407,7 @@ st.markdown("""
 .user-bubble {background:#007bff;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:right;margin:4px;}
 .assistant-bubble {background:#1e1e1e;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:left;margin:4px;}
 .clearfix::after {content:"";display:table;clear:both;}
+
 .ref{ display:block; width:60%; max-width:900px; margin:6px 0 12px 8px; }
 .ref summary{
   display:inline-flex; align-items:center; gap:8px; cursor:pointer; list-style:none; outline:none;
@@ -415,12 +421,19 @@ st.markdown("""
 }
 .ref .panel img{ width:100%; height:auto; border-radius:8px; display:block; }
 .ref .overlay{ display:none; }
-.ref[open] .overlay{ display:block; position:fixed; inset:0; z-index:998; background:transparent; border:0; padding:0; margin:0; }
+/* FIX: add the dot so overlay shows while open */
+.ref[open] .overlay{
+  display:block; position:fixed; inset:0; z-index:998; background:rgba(0,0,0,0.0); border:0; padding:0; margin:0;
+}
 .ref[open] > .panel{
   position: fixed; z-index: 999; top: 12vh; left: 50%; transform: translateX(-50%);
   width: min(900px, 90vw); max-height: 75vh; overflow: auto; box-shadow:0 20px 60px rgba(0,0,0,.45);
 }
 .ref .close-x{ position:absolute; top:6px; right:10px; border:0; background:transparent; color:#94a3b8; font-size:20px; line-height:1; cursor:pointer; }
+
+/* Quick actions bar (chips) */
+.qa-wrap {margin:8px 0 0 0;}
+.qa-chip button {border-radius:999px; padding:6px 12px; font-size:13px;}
 </style>
 """, unsafe_allow_html=True)
 
@@ -473,6 +486,50 @@ Conversation so far:
     input_variables=["chat_history", "context", "question", "pdf_name"]
 )
 
+# ======== ETRAN extraction prompt (special action) =========
+etran_prompt = PromptTemplate(
+    template = """
+You are preparing an E-TRAN cheatsheet for entering SBA loan details.
+
+From **Context** (text from page 3 of the valuation) extract the fields listed below.
+If a field is missing, leave it blank. Do **not** hallucinate. Return ONLY a compact GitHub-flavored
+markdown table with two columns: **Field** | **Value** in this exact order:
+
+- Appraisal Firm
+- Appraiser
+- Appraiser Certification
+- Concluded Value
+- Purchase Type
+- Fixed Asset Value
+- Other Tangible Assets Value
+- Goodwill Value
+- Free Cash Flow
+
+Static defaults (use these if not contradicted by the Context):
+Appraisal Firm = Value Buddy
+Appraiser = Tim Gbur
+Appraiser Certification = NACVA - Certified Valuation Analyst (CVA)
+
+Context:
+{context}
+
+Answer:
+""",
+    input_variables=["context"]
+)
+
+# ================= Quick Actions (always rendered) =================
+with st.container():
+    st.markdown('<div class="qa-wrap"></div>', unsafe_allow_html=True)
+    c1, _sp, _sp2 = st.columns([1, 4, 4])
+    etran_clicked = c1.button("📄 ETRAN Cheatsheet", key="qa_etran")
+    # If clicked, create a message and set special action
+    if etran_clicked:
+        st.session_state.messages.append({"id": _new_id(), "role": "user", "content": "ETRAN Cheatsheet"})
+        st.session_state.special_action = "etran"
+        st.session_state.pending_input = "ETRAN Cheatsheet"
+        st.session_state.waiting_for_response = True
+
 # ================= Input =================
 user_q = st.chat_input("Type your question here…")
 if user_q:
@@ -495,7 +552,6 @@ for msg in st.session_state.messages:
         )
 
 # ================= Answer =================
-# ================= Answer =================
 if st.session_state.waiting_for_response:
     block = st.empty()
     with block.container():
@@ -506,7 +562,42 @@ if st.session_state.waiting_for_response:
         history_to_use = st.session_state.messages[-10:]
         pdf_display = os.path.splitext(up.name)[0]
 
-        # NEW: classify the short reply (CONFIRM / DENY / NEITHER)
+        # ======= SPECIAL ACTION: ETRAN =======
+        if st.session_state.special_action == "etran":
+            # Build context from page 3 + static defaults at the top
+            page3_text = get_page_text(3)
+            ctx = page3_text
+            llm = ChatOpenAI(model="gpt-4o", temperature=0)
+            answer = llm.invoke(etran_prompt.invoke({"context": ctx})).content
+
+            # Attach reference to Page 3 (if we have an image)
+            entry = {"id": _new_id(), "role": "assistant", "content": answer}
+            img = st.session_state.page_images.get(3)
+            if img:
+                entry["source"] = "Page 3"
+                entry["source_img"] = pil_to_base64(img)
+                entry["source_pdf_b64"] = base64.b64encode(st.session_state.pdf_bytes).decode("ascii")
+                entry["source_page"] = 3
+
+            thinking.empty()
+            with block.container():
+                st.markdown(f"<div class='assistant-bubble clearfix'>{answer}</div>", unsafe_allow_html=True)
+                if entry.get("source_img"):
+                    render_reference_card(
+                        label=entry.get("source"),
+                        img_b64=entry["source_img"],
+                        pdf_b64=entry["source_pdf_b64"],
+                        page=entry["source_page"],
+                        key=entry.get("id", "k0"),
+                    )
+
+            st.session_state.messages.append(entry)
+            st.session_state.pending_input = None
+            st.session_state.waiting_for_response = False
+            st.session_state.special_action = None  # clear action
+            st.stop()
+
+        # ======= NORMAL PIPELINE =======
         intent = classify_reply_intent(raw_q, _last_assistant_text(history_to_use))
         is_deny = (intent == "DENY")
         is_confirm = (intent == "CONFIRM")
@@ -525,7 +616,6 @@ if st.session_state.waiting_for_response:
             st.session_state.pending_input = None
             st.session_state.waiting_for_response = False
             st.stop()  # end early; NO reference card
-        # ---- else continue with normal pipeline ----
 
         # Route confirmations to last suggestion internally, keep visible bubble as typed
         effective_q = st.session_state.last_suggestion if (is_confirm and st.session_state.last_suggestion) else raw_q
@@ -604,7 +694,6 @@ if st.session_state.waiting_for_response:
                         entry["source_img"] = pil_to_base64(img)
                         entry["source_pdf_b64"] = base64.b64encode(st.session_state.pdf_bytes).decode("ascii")
                         entry["source_page"] = ref_page
-                        # draw the card
                         render_reference_card(
                             label=entry["source"],
                             img_b64=entry["source_img"],
