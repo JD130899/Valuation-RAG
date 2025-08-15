@@ -427,20 +427,27 @@ st.markdown("""
 .ref .close-x{ position:absolute; top:6px; right:10px; border:0; background:transparent; color:#94a3b8; font-size:20px; line-height:1; cursor:pointer; }
 
 /* --- Floating "Etran Sheet" button --- */
+
 #etran-anchor + div.stButton > button {
   position: fixed;
   bottom: 22px;
-  right: 80px;
+  right: 0;  /* extreme right */
+  margin-right: 12px; /* small gap from window edge */
   z-index: 9999;
   border-radius: 9999px;
   padding: 12px 16px;
   box-shadow: 0 10px 30px rgba(0,0,0,.35);
 }
-#etran-anchor + div.stButton {  /* remove default block gap */
+#etran-anchor + div.stButton {  
   margin: 0;
 }
 @media (max-width: 640px){
-  #etran-anchor + div.stButton > button { bottom: 18px; right: 18px; padding: 12px 15px; }
+  #etran-anchor + div.stButton > button {
+    bottom: 18px;
+    right: 0;
+    margin-right: 10px;
+    padding: 12px 15px;
+  }
 }
 </style>
 """, unsafe_allow_html=True)
