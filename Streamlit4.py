@@ -403,50 +403,78 @@ if st.session_state.get("last_processed_pdf") != up.name:
 
 st.markdown("""
 <style>
-/* Chat bubbles */
-.user-bubble {background:#007bff;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:right;margin:4px;}
-.assistant-bubble {background:#1e1e1e;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:left;margin:4px;}
-.clearfix::after {content:"";display:table;clear:both;}
+/* ======================= Chat bubbles ======================= */
+.user-bubble {
+  background:#007bff; color:#fff; padding:8px; border-radius:8px;
+  max-width:60%; float:right; margin:4px;
+}
+.assistant-bubble {
+  background:#1e1e1e; color:#fff; padding:8px; border-radius:8px;
+  max-width:60%; float:left; margin:4px;
+}
+.clearfix::after { content:""; display:table; clear:both; }
 
-/* Reference card */
-.ref{ display:block; width:60%; max-width:900px; margin:6px 0 12px 8px; }
-.ref summary{
+/* ======================= Reference card ===================== */
+/* <details class="ref"> … */
+.ref { display:block; width:60%; max-width:900px; margin:6px 0 12px 8px; }
+
+.ref summary {
   display:inline-flex; align-items:center; gap:8px; cursor:pointer; list-style:none; outline:none;
   background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:10px; padding:6px 10px;
 }
-.ref summary::before{ content:"▶"; font-size:12px; line-height:1; }
-.ref[open] summary::before{ content:"▼"; }
-.ref .panel{
+.ref summary::before { content:"▶"; font-size:12px; line-height:1; }
+.ref[open] summary::before { content:"▼"; }
+
+/* the panel that shows the snapshot */
+.ref .panel {
   background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-top:none;
   border-radius:10px; padding:10px; margin-top:0; box-shadow:0 6px 20px rgba(0,0,0,.25);
 }
-.ref .panel img{ width:100%; height:auto; border-radius:8px; display:block; }
+.ref .panel img { width:100%; height:auto; border-radius:8px; display:block; }
 
-/* IMPORTANT: overlay needs the dot on .ref */
-.ref .overlay{ display:none; }
-.ref[open] .overlay{
-  display:block; position:fixed; inset:0; z-index:998; background:transparent; border:0; padding:0; margin:0;
+/* click-anywhere-to-close overlay MUST be on .ref (with the dot) */
+.ref .overlay { display:none; }
+.ref[open] .overlay {
+  display:block; position:fixed; inset:0; z-index:998; background:transparent;
+  border:0; padding:0; margin:0;
 }
-.ref[open] > .panel{
-  position: fixed; z-index: 999; top: 12vh; left: 50%; transform: translateX(-50%);
-  width: min(900px, 90vw); max-height: 75vh; overflow: auto; box-shadow:0 20px 60px rgba(0,0,0,.45);
-}
-.ref .close-x{ position:absolute; top:6px; right:10px; border:0; background:transparent; color:#94a3b8; font-size:20px; line-height:1; cursor:pointer; }
 
-/* Floating ETRAN button (bottom-right) */
-.etran-wrap{ position:fixed; right:24px; bottom:calc(env(safe-area-inset-bottom,0) + 24px); z-index:10000; }
-.etran-wrap > button{
+/* center the panel above the overlay */
+.ref[open] > .panel {
+  position:fixed; z-index:999; top:12vh; left:50%; transform:translateX(-50%);
+  width:min(900px, 90vw); max-height:75vh; overflow:auto; box-shadow:0 20px 60px rgba(0,0,0,.45);
+}
+.ref .close-x {
+  position:absolute; top:6px; right:10px; border:0; background:transparent;
+  color:#94a3b8; font-size:20px; line-height:1; cursor:pointer;
+}
+
+/* ================== Floating ETRAN button =================== */
+/* Wrap your Streamlit button with: <div class="etran-wrap"> … </div> */
+.etran-wrap {
+  position:fixed;
+  right:24px;
+  bottom:calc(env(safe-area-inset-bottom, 0) + 24px);
+  z-index:10000;
+}
+
+/* Style the inner Streamlit button element */
+.etran-wrap .stButton > button {
   display:inline-flex; align-items:center; gap:10px;
   background:#0f172a; color:#e2e8f0; border:1px solid #334155;
   padding:10px 12px; border-radius:10px;
   box-shadow:0 8px 30px rgba(2,6,23,.45);
+  white-space:pre-line; /* keep the 2-line label */
+  line-height:1.15; font-weight:500;
 }
-.etran-wrap > button:hover{ filter:brightness(1.08); transform:translateY(-1px); }
-.etran-wrap svg{ width:18px; height:18px; flex:none; }
+.etran-wrap .stButton > button:hover { filter:brightness(1.08); transform:translateY(-1px); }
+.etran-wrap .stButton > button:active { transform:translateY(0); }
+.etran-wrap svg { width:18px; height:18px; flex:none; }
 
-/* Mobile tweak */
+/* =========================== Mobile ========================= */
 @media (max-width: 640px){
-  .etran-wrap{ right:16px; bottom:calc(env(safe-area-inset-bottom,0) + 80px); }
+  .user-bubble, .assistant-bubble { max-width:85%; }
+  .etran-wrap { right:16px; bottom:calc(env(safe-area-inset-bottom, 0) + 80px); }
 }
 </style>
 """, unsafe_allow_html=True)
@@ -538,16 +566,17 @@ Answer:
 etran_clicked = False
 with st.container():
    # Floating ETRAN bubble (bottom-right)
-    st.markdown("<div id='etran-anchor'>", unsafe_allow_html=True)
-    etran_clicked = st.button("📄 ETRAN\nCheatsheet", key="etran_btn")
-    st.markdown("</div>", unsafe_allow_html=True)
+    # Floating ETRAN bubble (bottom-right)
+    st.markdown('<div class="etran-wrap">', unsafe_allow_html=True)
+    etran_clicked = st.button("📄 ETRAN\nCheatsheet", key="etran_btn", help="Assemble E-TRAN fields from page 3")
+    st.markdown('</div>', unsafe_allow_html=True)
 
 if etran_clicked:
-    # keep your existing behavior:
     st.session_state.messages.append({"id": _new_id(), "role": "user", "content": "ETRAN Cheatsheet"})
     st.session_state.special_action = "etran"
     st.session_state.pending_input = "ETRAN Cheatsheet"
     st.session_state.waiting_for_response = True
+
 
 
 # ================= Input =================
