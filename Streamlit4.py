@@ -489,14 +489,10 @@ if up:  # render only when a PDF is loaded
     etran_clicked = components.html(
         """
         <style>
-          #etran-fab {
-            position: fixed;
-            bottom: 10px;         /* sits above the chat input */
-            right: 16px;          /* hug the right edge */
-            z-index: 10000;
-          }
+        
           #etran-btn {
             border-radius: 9999px;
+            bottom: 10px;
             padding: 10px 16px;
             background: #000;     /* BLACK button */
             color: #fff;
