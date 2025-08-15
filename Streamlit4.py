@@ -1,13 +1,11 @@
 import os, io, pickle, base64
-import re
-import uuid
-
 import streamlit as st
-import streamlit.components.v1 as components
 import fitz  # PyMuPDF
 from PIL import Image
 from dotenv import load_dotenv
 from sklearn.metrics.pairwise import cosine_similarity
+# add at top
+import uuid, hashlib
 
 # LangChain / RAG deps
 from langchain_core.documents import Document
@@ -22,6 +20,7 @@ from langchain_core.prompts import PromptTemplate
 
 import openai
 from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
+import streamlit.components.v1 as components
 
 # ================= Setup =================
 load_dotenv()
@@ -55,7 +54,7 @@ def _new_id():
 
 def file_badge_link(name: str, pdf_bytes: bytes, synced: bool = True):
     base = os.path.splitext(name)[0]  # remove .pdf
-    b64  = base64.b64encode(pdf_bytes).decode("ascii")
+    b64 = base64.b64encode(pdf_bytes).decode("ascii")
     label = "Using synced file:" if synced else "Using file:"
     link_id = f"open-file-{uuid.uuid4().hex[:8]}"
 
@@ -64,8 +63,7 @@ def file_badge_link(name: str, pdf_bytes: bytes, synced: bool = True):
         f'''
         <div style="background:#1f2c3a; padding:8px; border-radius:8px; color:#fff;">
           ✅ <b>{label}</b>
-          <a id="{link_id}" href="#" target="_blank" rel="noopener"
-             style="color:#93c5fd; text-decoration:none;">{base}</a>
+          <a id="{link_id}" href="#" target="_blank" rel="noopener" style="color:#93c5fd; text-decoration:none;">{base}</a>
         </div>
         ''',
         unsafe_allow_html=True
@@ -78,7 +76,7 @@ def file_badge_link(name: str, pdf_bytes: bytes, synced: bool = True):
 <script>(function(){{
   function b64ToUint8Array(s){{var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}}
   var blob = new Blob([b64ToUint8Array("{b64}")], {{type:"application/pdf"}});
-  var url  = URL.createObjectURL(blob);
+  var url = URL.createObjectURL(blob);
   function attach(){{
     var d = window.parent && window.parent.document;
     if(!d) return setTimeout(attach,120);
@@ -92,8 +90,17 @@ def file_badge_link(name: str, pdf_bytes: bytes, synced: bool = True):
         height=0,
     )
 
+# Make a ONE-PAGE PDF (base64) from a given page
+def single_page_pdf_b64(pdf_bytes: bytes, page_number: int) -> str:
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    one = fitz.open()
+    one.insert_pdf(doc, from_page=page_number-1, to_page=page_number-1)
+    b64 = base64.b64encode(one.tobytes()).decode("ascii")
+    one.close(); doc.close()
+    return b64
+
 def render_reference_card(label: str, img_b64: str, pdf_b64: str, page: int, key: str):
-    # Chip + lightbox panel
+    # Markup: chip + overlay + modal panel
     st.markdown(
         f"""
         <details class="ref" id="ref-{key}">
@@ -112,33 +119,30 @@ def render_reference_card(label: str, img_b64: str, pdf_b64: str, page: int, key
         unsafe_allow_html=True,
     )
 
-    # JS: open the FULL PDF at the target page
     components.html(
         f"""<!doctype html><meta charset='utf-8'>
 <style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
 <script>(function(){{
   function b64ToUint8Array(s){{var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}}
   var blob = new Blob([b64ToUint8Array('{pdf_b64}')], {{type:'application/pdf'}});
-  var url  = URL.createObjectURL(blob) + '#page={page}';
+  // Open FULL PDF, jump to the target page:
+  var url = URL.createObjectURL(blob) + '#page={page}';
 
   function attach(){{
     var d = window.parent && window.parent.document;
     if(!d) return setTimeout(attach,120);
     var ref = d.getElementById('ref-{key}');
-    var a   = d.getElementById('open-{key}');
+    var a = d.getElementById('open-{key}');
     var ovl = d.getElementById('overlay-{key}');
     var cls = d.getElementById('close-{key}');
     if(!ref || !a || !ovl || !cls) return setTimeout(attach,120);
-
     a.setAttribute('href', url);
-
     function closeRef(){{ ref.removeAttribute('open'); }}
     ovl.addEventListener('click', closeRef);
     cls.addEventListener('click', closeRef);
     d.addEventListener('keydown', function(e){{ if(e.key==='Escape') closeRef(); }});
   }}
   attach();
-
   var me = window.frameElement; if(me){{me.style.display='none';me.style.height='0';me.style.border='0';}}
 }})();</script>""",
         height=0,
@@ -278,41 +282,47 @@ if st.session_state.get("last_processed_pdf") != up.name:
 # ================= Styles =================
 st.markdown("""
 <style>
-.user-bubble, .assistant-bubble{
-  display:inline-block; box-sizing:border-box; max-width:60%;
-  padding:10px 12px; margin:6px 4px; border-radius:10px; color:#fff; line-height:1.45;
-  white-space:pre-wrap; overflow-wrap:anywhere; word-break:break-word;
-  font-style:normal; font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
-}
-.user-bubble{ background:#007bff; float:right; }
-.assistant-bubble{ background:#1e1e1e; float:left; }
-.clearfix::after { content:""; display:block; clear:both; }
+.user-bubble {background:#007bff;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:right;margin:4px;}
+.assistant-bubble {background:#1e1e1e;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:left;margin:4px;}
+.clearfix::after {content:"";display:table;clear:both;}
 
 /* Reference chip + panel */
 .ref{ display:block; width:60%; max-width:900px; margin:6px 0 12px 8px; }
+/* the chip */
 .ref summary{
   display:inline-flex; align-items:center; gap:8px; cursor:pointer; list-style:none; outline:none;
   background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:10px; padding:6px 10px;
 }
 .ref summary::before{ content:"▶"; font-size:12px; line-height:1; }
 .ref[open] summary::before{ content:"▼"; }
+/* the lightbox panel */
 .ref .panel{
-  background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-top:none;
-  border-radius:10px; padding:10px; margin-top:0; box-shadow:0 6px 20px rgba(0,0,0,.25);
+  background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-top:none; border-radius:10px;
+  padding:10px; margin-top:0; box-shadow:0 6px 20px rgba(0,0,0,.25);
 }
 .ref .panel img{ width:100%; height:auto; border-radius:8px; display:block; }
+/* overlay that closes the lightbox (separate from <summary>) */
 .ref .overlay{ display:none; }
 .ref[open] .overlay{
   display:block; position:fixed; inset:0; z-index:998; background:transparent; border:0; padding:0; margin:0;
 }
+/* float the panel as a modal when open */
 .ref[open] > .panel{
   position: fixed; z-index: 999; top: 12vh; left: 50%; transform: translateX(-50%);
   width: min(900px, 90vw); max-height: 75vh; overflow: auto; box-shadow:0 20px 60px rgba(0,0,0,.45);
 }
+/* optional close X */
 .ref .close-x{
   position:absolute; top:6px; right:10px; border:0; background:transparent;
   color:#94a3b8; font-size:20px; line-height:1; cursor:pointer;
 }
+
+/* (kept from before) small link-chip style if you use it elsewhere */
+.chip{ display:inline-flex;align-items:center;gap:.5rem;
+  background:#0f172a;color:#e2e8f0;border:1px solid #334155;
+  border-radius:10px;padding:.35rem .6rem;font:14px/1.2 system-ui; }
+.chip a{color:#93c5fd;text-decoration:none}
+.chip a:hover{text-decoration:underline}
 </style>
 """, unsafe_allow_html=True)
 
@@ -325,7 +335,7 @@ def format_chat_history(messages):
     return "\n".join(lines)
 
 prompt = PromptTemplate(
-    template = """
+    template="""
 You are a financial-data extraction assistant.
 
 **IMPORTANT CONDITIONAL FOLLOW-UP**
@@ -333,38 +343,37 @@ You are a financial-data extraction assistant.
 “Would you like more detail on [X]?”
 Otherwise, **do not** ask any follow-up.
 
-**HARD RULE (unrelated questions)**
-If the user's question is unrelated to this PDF or requires information outside the Context, reply **exactly**:
-"Sorry I can only answer question related to {pdf_name} pdf document"
-
 **Use ONLY what appears under “Context”.**
 
 ### How to answer
 1. **Single value questions**
-   • Find the row + column that match the user's words.
-   • Return the answer in a **short, clear sentence** using the exact number from the context.
-   • **Do NOT repeat the metric name or company name** unless the user asks.
+• Find the row + column that match the user's words.
+• Return the answer in a **short, clear sentence** using the exact number from the context.
+Example: “The Income (DCF) approach value is $1,150,000.”
+• **Do NOT repeat the metric name or company name** unless the user asks.
 
 2. **Table questions**
-   • Return the full table **with its header row** in GitHub-flavoured markdown.
+• Return the full table **with its header row** in GitHub-flavoured markdown.
 
 3. **Valuation method / theory / reasoning questions**
-   • If the question involves **valuation methods**, **concluded value**, or topics like **Income Approach**, **Market Approach**, or **Valuation Summary**, do the following:
-   - Combine and synthesize relevant information across all chunks.
-   - Pay special attention to how **weights are distributed** (e.g., “50% DCF, 25% EBITDA, 25% SDE”).
-   - Prefer the more detailed breakdowns when available, and include **corresponding dollar values**.
+• If the question involves **valuation methods**, **concluded value**, or topics like **Income Approach**, **Market Approach**, or **Valuation Summary**, do the following:
+- Combine and synthesize relevant information across all chunks.
+- Pay special attention to how **weights are distributed** (e.g., “50% DCF, 25% EBITDA, 25% SDE”).
+- Avoid oversimplifying if more detailed breakdowns (like subcomponents of market approach) are available.
+- If a table gives a simplified view (e.g., "50% Market Approach"), but other parts break it down (e.g., 25% EBITDA + 25% SDE), **prefer the detailed breakdown with percent value**.
+- When describing weights, also mention the **corresponding dollar values** used in the context (e.g., “50% DCF = $3,712,000, 25% EBITDA = $4,087,000...”)
+- **If Market approach is composed of sub-methods like EBITDA and SDE, then explicitly extract and show their individual weights and values, even if not listed together in a single table.**
 
 4. **Theory/textual question**
-   • Try to return an explanation **based on the context**.
-   • If you cannot see the answer, reply **“Sorry, I didnt understand the question. Did you mean [X]”**
-
+• Try to return an explanation **based on the context**.
+If you still cannot see the answer, reply **“Hmm, I am not sure. Are you able to rephrase your question?”**
 ---
 Context:
 {context}
 ---
 Question: {question}
 Answer:""",
-    input_variables=["context", "question", "pdf_name"]
+    input_variables=["context", "question"]
 )
 
 base_text = prompt.template
@@ -373,7 +382,7 @@ wrapped_prompt = PromptTemplate(
 Conversation so far:
 {chat_history}
 """,
-    input_variables=["chat_history", "context", "question", "pdf_name"]
+    input_variables=["chat_history", "context", "question"]
 )
 
 # ================= Input =================
@@ -412,36 +421,21 @@ if st.session_state.waiting_for_response:
             st.warning(f"RAG retrieval error: {e}")
 
         history_to_use = st.session_state.messages[-10:]
-        pdf_display = os.path.splitext(up.name)[0]
 
         # Build the prompt text using your wrapped_prompt
         llm = ChatOpenAI(model="gpt-4o", temperature=0)
         full_input = {
             "chat_history": format_chat_history(history_to_use),
-            "context":      ctx,
-            "question":     q,
-            "pdf_name":     pdf_display,
+            "context": ctx,
+            "question": q
         }
-        answer = llm.invoke(wrapped_prompt.format(**full_input)).content
-
-        # --- classify answer so we can decide whether to show a reference chip ---
-        apology = f"Sorry I can only answer question related to {pdf_display} pdf document"
-        is_unrelated = apology.lower().strip() == answer.strip().lower()
-
-        low_confidence = bool(re.search(
-            r"(?:i\s*(?:do\s*not|don't)\s*have\s*enough\s*(?:info(?:rmation)?|context)|"
-            r"not\s*enough\s*(?:info|information|context)|"
-            r"^sorry[, ]+i\s*(?:didn'?t|did not)\s*understand)",
-            answer,
-            re.IGNORECASE
-        ))
+        answer = llm.invoke(wrapped_prompt.invoke(full_input)).content
 
         entry = {"id": _new_id(), "role": "assistant", "content": answer}
 
-        # Attach a reference chip ONLY for solid, on-topic answers
-        ref_page = None
+        ref_page, ref_img_b64 = None, None
         try:
-            if docs and not (is_unrelated or low_confidence):
+            if docs:
                 texts = [d.page_content for d in docs]
                 embedder = CohereEmbeddings(
                     model="embed-english-v3.0",
@@ -452,17 +446,47 @@ if st.session_state.waiting_for_response:
                 chunk_embs = embedder.embed_documents(texts)
                 sims = cosine_similarity([emb_answer], chunk_embs)[0]
                 ranked = sorted(list(zip(docs, sims)), key=lambda x: x[1], reverse=True)
-                best_doc = ranked[0][0] if ranked else None
+                top3 = [d for d, _ in ranked[:3]]
+                best_doc = top3[0] if top3 else (ranked[0][0] if ranked else None)
+
+                if len(top3) >= 3:
+                    ranking_prompt = PromptTemplate(
+                        template="""Given a user question and 3 candidate context chunks, return the number (1-3) of the chunk that best answers it.
+
+Question:
+{question}
+
+Chunk 1:
+{chunk1}
+
+Chunk 2:
+{chunk2}
+
+Chunk 3:
+{chunk3}
+
+Best Chunk Number:
+""",
+                        input_variables=["question", "chunk1", "chunk2", "chunk3"]
+                    )
+                    pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
+                        ranking_prompt.invoke({
+                            "question": q,
+                            "chunk1": top3[0].page_content,
+                            "chunk2": top3[1].page_content,
+                            "chunk3": top3[2].page_content
+                        })
+                    ).content.strip()
+                    if pick.isdigit() and 1 <= int(pick) <= 3:
+                        best_doc = top3[int(pick) - 1]
 
                 if best_doc is not None:
                     ref_page = best_doc.metadata.get("page_number")
                     img = st.session_state.page_images.get(ref_page)
-                    if img:
+                    ref_img_b64 = pil_to_base64(img) if img else None
+                    if ref_img_b64:
                         entry["source"] = f"Page {ref_page}"
-                        # PIL -> base64 PNG
-                        buf = io.BytesIO()
-                        img.save(buf, format="PNG")
-                        entry["source_img"] = base64.b64encode(buf.getvalue()).decode("ascii")
+                        entry["source_img"] = ref_img_b64
                         entry["source_pdf_b64"] = base64.b64encode(st.session_state.pdf_bytes).decode("ascii")
                         entry["source_page"] = ref_page
         except Exception as e:
@@ -473,6 +497,7 @@ if st.session_state.waiting_for_response:
     # Final render (no rerun)
     with block.container():
         st.markdown(f"<div class='assistant-bubble clearfix'>{answer}</div>", unsafe_allow_html=True)
+        # Register the blob URL for this new message (no white bars; height=0)
         if entry.get("source_img"):
             render_reference_card(
                 label=entry.get("source", f"Page {ref_page}"),
