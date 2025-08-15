@@ -1,3 +1,4 @@
+# app.py (full)
 import os, io, pickle, base64
 import re
 import uuid
@@ -7,6 +8,7 @@ from PIL import Image
 from dotenv import load_dotenv
 from sklearn.metrics.pairwise import cosine_similarity  # kept (not required for ref now)
 import streamlit.components.v1 as components
+from urllib.parse import quote  # <-- added
 
 # LangChain / RAG deps
 from langchain_core.documents import Document
@@ -58,6 +60,13 @@ def _new_id():
     n = st.session_state.next_msg_id
     st.session_state.next_msg_id += 1
     return f"m{n}"
+
+# --- Quick-suggest click handler (via query params) ---
+suggest = st.query_params.get("suggest")
+if suggest:
+    st.session_state.messages.append({"id": _new_id(), "role": "user", "content": suggest})
+    st.query_params.clear()
+    st.rerun()
 
 def file_badge_link(name: str, pdf_bytes: bytes, synced: bool = True):
     base = os.path.splitext(name)[0]
@@ -144,9 +153,7 @@ for m in st.session_state.messages:
         m["id"] = _new_id()
 
 # ----------- helpers (cleaning + suggestion + confirmation routing) -----------
-
 def _clean_heading(text: str) -> str:
-    """Remove Markdown/numbering/bullets like '#', '##', '-', '*', '1)', etc. Also trim trailing punctuation."""
     if not text:
         return text
     text = re.sub(r"^[#>\-\*\d\.\)\(]+\s*", "", text).strip()
@@ -192,20 +199,14 @@ def guess_suggestion(question: str, docs):
     return _clean_heading(best_line or "Valuation Summary")
 
 def sanitize_suggestion(answer: str, question: str, docs):
-    """Ensure clarification replies contain a concrete, short, cleaned suggestion (no leading '#', '-', etc.)."""
     low = answer.lower().strip()
     if ("sorry i didnt understand the question" not in low
         and "sorry i didn't understand the question" not in low
         and "did you mean" not in low):
         return answer
-
     sug = _clean_heading(guess_suggestion(question, docs))
-
-    # Replace literal SUGGESTION tokens & [ ... ] placeholders
     answer = re.sub(r"\bSUGGESTION\b", sug, answer, flags=re.IGNORECASE)
     answer = re.sub(r"\[.*?\]", sug, answer)
-
-    # Normalize the "Did you mean ..." line
     m = re.search(r"did you mean\s+(.+?)\?", answer, flags=re.IGNORECASE)
     cand = _clean_heading(m.group(1).strip()) if m else ""
     if not cand or cand.lower() == "suggestion":
@@ -215,7 +216,7 @@ def sanitize_suggestion(answer: str, question: str, docs):
         return f"Sorry I didnt understand the question. Did you mean {cand}?"
     return re.sub(r"(Did you mean\s+)[#>\-\*\d\.\)\(]+\s*", r"\1", answer, flags=re.IGNORECASE)
 
-# ---------- LLM-based confirmation classifier (GENERALIZES "yes") ----------
+# ---------- LLM-based confirmation classifier ----------
 def _last_assistant_text(history: list) -> str:
     for m in reversed(history):
         if m.get("role") == "assistant":
@@ -223,10 +224,6 @@ def _last_assistant_text(history: list) -> str:
     return ""
 
 def classify_reply_intent(user_reply: str, prev_assistant: str) -> str:
-    """
-    Returns one of: CONFIRM, DENY, NEITHER
-    Uses only the previous assistant message + the user's short reply.
-    """
     judge = PromptTemplate(
         template=(
             "You are a strict intent classifier.\n"
@@ -415,31 +412,23 @@ st.markdown("""
 .clearfix::after { content:""; display:table; clear:both; }
 
 /* ======================= Reference card ===================== */
-/* <details class="ref"> … */
 .ref { display:block; width:60%; max-width:900px; margin:6px 0 12px 8px; }
-
 .ref summary {
   display:inline-flex; align-items:center; gap:8px; cursor:pointer; list-style:none; outline:none;
   background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:10px; padding:6px 10px;
 }
 .ref summary::before { content:"▶"; font-size:12px; line-height:1; }
 .ref[open] summary::before { content:"▼"; }
-
-/* the panel that shows the snapshot */
 .ref .panel {
   background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-top:none;
   border-radius:10px; padding:10px; margin-top:0; box-shadow:0 6px 20px rgba(0,0,0,.25);
 }
 .ref .panel img { width:100%; height:auto; border-radius:8px; display:block; }
-
-/* click-anywhere-to-close overlay MUST be on .ref (with the dot) */
 .ref .overlay { display:none; }
 .ref[open] .overlay {
   display:block; position:fixed; inset:0; z-index:998; background:transparent;
   border:0; padding:0; margin:0;
 }
-
-/* center the panel above the overlay */
 .ref[open] > .panel {
   position:fixed; z-index:999; top:12vh; left:50%; transform:translateX(-50%);
   width:min(900px, 90vw); max-height:75vh; overflow:auto; box-shadow:0 20px 60px rgba(0,0,0,.45);
@@ -450,21 +439,18 @@ st.markdown("""
 }
 
 /* ================== Floating ETRAN button =================== */
-/* Wrap your Streamlit button with: <div class="etran-wrap"> … </div> */
 .etran-wrap {
   position:fixed;
   right:24px;
   bottom:calc(env(safe-area-inset-bottom, 0) + 24px);
   z-index:10000;
 }
-
-/* Style the inner Streamlit button element */
 .etran-wrap .stButton > button {
   display:inline-flex; align-items:center; gap:10px;
   background:#0f172a; color:#e2e8f0; border:1px solid #334155;
   padding:10px 12px; border-radius:10px;
   box-shadow:0 8px 30px rgba(2,6,23,.45);
-  white-space:pre-line; /* keep the 2-line label */
+  white-space:pre-line;
   line-height:1.15; font-weight:500;
 }
 .etran-wrap .stButton > button:hover { filter:brightness(1.08); transform:translateY(-1px); }
@@ -478,7 +464,6 @@ st.markdown("""
 }
 </style>
 """, unsafe_allow_html=True)
-
 
 # ================= Prompt helpers =================
 def format_chat_history(messages):
@@ -562,11 +547,8 @@ Answer:
 )
 
 # ================= Quick Actions (always rendered) =================
-# ================= Quick Action: floating ETRAN bubble =================
 etran_clicked = False
 with st.container():
-   # Floating ETRAN bubble (bottom-right)
-    # Floating ETRAN bubble (bottom-right)
     st.markdown('<div class="etran-wrap">', unsafe_allow_html=True)
     etran_clicked = st.button("📄 ETRAN\nCheatsheet", key="etran_btn", help="Assemble E-TRAN fields from page 3")
     st.markdown('</div>', unsafe_allow_html=True)
@@ -577,12 +559,48 @@ if etran_clicked:
     st.session_state.pending_input = "ETRAN Cheatsheet"
     st.session_state.waiting_for_response = True
 
-
+# ================= Quick-suggest pill bubbles (aligned to chat input, right-aligned) =================
+buttons = ["ETRAN Cheatsheet", "What is the valuation?", "Goodwill value"]
+links_html = "".join(f'<a class="qs-pill" href="?suggest={quote(lbl)}">{lbl}</a>' for lbl in buttons)
+components.html(f"""
+<div id="qs-row" style="position:fixed; display:flex; gap:10px; flex-wrap:wrap; justify-content:flex-end; z-index:10000;">
+  {links_html}
+</div>
+<style>
+  .qs-pill {{
+    text-decoration: none !important;
+    border-radius: 999px;
+    padding: 8px 14px;
+    border: 1px solid rgba(255,255,255,0.2);
+    background: black;
+    color: white !important;
+    font-size: 0.9rem;
+  }}
+  .qs-pill:hover {{ background: #222; }}
+</style>
+<script>
+(function(){{
+  function place(){{
+    const d = window.parent.document;
+    const input = d.querySelector('[data-testid="stChatInput"]');
+    const row   = d.getElementById('qs-row');
+    if(!input || !row) return;
+    const r = input.getBoundingClientRect();
+    row.style.left   = (r.left + window.scrollX) + 'px';
+    row.style.width  = r.width + 'px';
+    row.style.bottom = (window.innerHeight - r.top + 8) + 'px';
+  }}
+  place();
+  window.addEventListener('resize', place);
+  const obs = new ResizeObserver(place);
+  obs.observe(window.parent.document.body);
+})();
+</script>
+""", height=0)
 
 # ================= Input =================
 user_q = st.chat_input("Type your question here…")
 if user_q:
-    # Keep the chat bubble EXACTLY as typed (e.g., "Yes", "ya", 👍)
     st.session_state.messages.append({"id": _new_id(), "role": "user", "content": user_q})
     st.session_state.pending_input = user_q
     st.session_state.waiting_for_response = True
@@ -613,13 +631,11 @@ if st.session_state.waiting_for_response:
 
         # ======= SPECIAL ACTION: ETRAN =======
         if st.session_state.special_action == "etran":
-            # Build context from page 3 + static defaults at the top
             page3_text = get_page_text(3)
             ctx = page3_text
             llm = ChatOpenAI(model="gpt-4o", temperature=0)
             answer = llm.invoke(etran_prompt.invoke({"context": ctx})).content
 
-            # Attach reference to Page 3 (if we have an image)
             entry = {"id": _new_id(), "role": "assistant", "content": answer}
             img = st.session_state.page_images.get(3)
             if img:
@@ -643,7 +659,7 @@ if st.session_state.waiting_for_response:
             st.session_state.messages.append(entry)
             st.session_state.pending_input = None
             st.session_state.waiting_for_response = False
-            st.session_state.special_action = None  # clear action
+            st.session_state.special_action = None
             st.stop()
 
         # ======= NORMAL PIPELINE =======
@@ -651,25 +667,19 @@ if st.session_state.waiting_for_response:
         is_deny = (intent == "DENY")
         is_confirm = (intent == "CONFIRM")
 
-        # If user DENIES the follow-up, don't retrieve, don't reference—just close politely.
         if is_deny:
-            st.session_state.last_suggestion = None  # drop stale suggestion
+            st.session_state.last_suggestion = None
             answer = "Alright, if you have any more questions or need further assistance, feel free to ask!"
             entry = {"id": _new_id(), "role": "assistant", "content": answer}
             thinking.empty()
-
             with block.container():
                 st.markdown(f"<div class='assistant-bubble clearfix'>{answer}</div>", unsafe_allow_html=True)
-
             st.session_state.messages.append(entry)
             st.session_state.pending_input = None
             st.session_state.waiting_for_response = False
-            st.stop()  # end early; NO reference card
+            st.stop()
 
-        # Route confirmations to last suggestion internally, keep visible bubble as typed
         effective_q = st.session_state.last_suggestion if (is_confirm and st.session_state.last_suggestion) else raw_q
-
-        # Condense for retrieval so follow-ups like “Yes/ya/👍” work
         query_for_retrieval = condense_query(history_to_use, effective_q, pdf_display)
 
         ctx, docs = "", []
@@ -689,7 +699,6 @@ if st.session_state.waiting_for_response:
         answer = llm.invoke(wrapped_prompt.invoke(full_input)).content
         answer = sanitize_suggestion(answer, effective_q, docs)
 
-        # Save a CLEANED last suggestion for future confirmations
         sug = extract_suggestion(answer)
         st.session_state.last_suggestion = _clean_heading(sug) if sug else None
 
@@ -700,14 +709,11 @@ if st.session_state.waiting_for_response:
         entry = {"id": _new_id(), "role": "assistant", "content": answer}
         thinking.empty()
 
-    # Render answer
     with block.container():
         st.markdown(f"<div class='assistant-bubble clearfix'>{answer}</div>", unsafe_allow_html=True)
 
-        # Only attach a reference when it's a real, contentful answer
         skip_reference = is_unrelated or is_clarify
         if docs and not skip_reference:
-            # ---------- TOP-3 LLM PICK (reference card) ----------
             try:
                 top3 = docs[:3]
                 best_doc = top3[0] if top3 else None
@@ -753,7 +759,6 @@ if st.session_state.waiting_for_response:
             except Exception as e:
                 st.info(f"ℹ️ Reference selection skipped: {e}")
 
-    # Persist
     st.session_state.messages.append(entry)
     st.session_state.pending_input = None
     st.session_state.waiting_for_response = False
