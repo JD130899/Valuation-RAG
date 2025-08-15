@@ -496,8 +496,8 @@ if up:
     <style>
       #etran-fab {
         position: fixed;
-        right: 18px;     /* horizontal offset */
-        bottom: 18px;    /* vertical offset from bottom */
+        right: 11px;     /* horizontal offset */
+        bottom: 11px;    /* vertical offset from bottom */
         z-index: 9999;
       }
       #etran-btn {
@@ -505,6 +505,8 @@ if up:
         padding: 10px 16px;
         background: #000; color: #fff; border: none;
         box-shadow: 0 10px 30px rgba(0,0,0,.35);
+        right: 11px;     /* horizontal offset */
+        bottom: 11px; 
         cursor: pointer;
       }
       #etran-btn:hover { background: #222; }
