@@ -515,8 +515,7 @@ if up:
           });
         </script>
         """,
-        height=0,
-        key="etran_fab",            # ✅ give it a key so we can reset
+        height=0
     )
 
 # ✅ only treat a real click as True (not a leftover truthy value)
