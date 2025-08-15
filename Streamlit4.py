@@ -426,27 +426,6 @@ st.markdown("""
 }
 .ref .close-x{ position:absolute; top:6px; right:10px; border:0; background:transparent; color:#94a3b8; font-size:20px; line-height:1; cursor:pointer; }
 
-#etran-wrapper{
-  position: fixed !important;
-  bottom: 22px !important;   /* move up/down here */
-  right: 12px !important;    /* hug extreme right */
-  z-index: 10000 !important;
-  margin: 0 !important;
-  pointer-events: none;      /* so only the button catches clicks */
-}
-/* Style the actual Streamlit button inside */
-#etran-wrapper .stButton > button,
-#etran-wrapper [data-testid="baseButton-secondary"] {
-  pointer-events: auto;
-  border-radius: 9999px;
-  padding: 12px 16px;
-  box-shadow: 0 10px 30px rgba(0,0,0,.35);
-}
-@media (max-width: 640px){
-  #etran-wrapper{ bottom: 18px !important; right: 10px !important; }
-  #etran-wrapper .stButton > button,
-  #etran-wrapper [data-testid="baseButton-secondary"]{ padding: 12px 15px; }
-}
 </style>
 """, unsafe_allow_html=True)
 
@@ -503,16 +482,56 @@ Conversation so far:
 # ================= Input =================
 user_q = st.chat_input("Type your question here…")
 
-# ---- Floating "Etran Sheet" quick action (extreme bottom-right) ----
-st.markdown("<div id='etran-wrapper'>", unsafe_allow_html=True)
-etran_clicked = st.button("Etran Sheet", key="etran_sheet_btn")
-st.markdown("</div>", unsafe_allow_html=True)
+# ---- Floating "Etran Sheet" button (works reliably via components.html) ----
+etran_clicked = components.html(
+    """
+    <style>
+      #etran-fab {
+        position: fixed;
+        bottom: 22px;          /* adjust vertical distance from bottom */
+        right: 12px;           /* extreme right, small gap from edge */
+        z-index: 10000;
+      }
+      #etran-btn {
+        border-radius: 9999px;
+        padding: 12px 16px;
+        background: #2563eb;   /* Tailwind blue-600-ish */
+        color: #fff;
+        border: none;
+        font: inherit;
+        box-shadow: 0 10px 30px rgba(0,0,0,.35);
+        cursor: pointer;
+      }
+      #etran-btn:active { transform: translateY(1px); }
+      @media (max-width: 640px){
+        #etran-fab { bottom: 18px; right: 10px; }
+        #etran-btn { padding: 12px 15px; }
+      }
+    </style>
+    <div id="etran-fab">
+      <button id="etran-btn" type="button">Etran Sheet</button>
+    </div>
 
+    <!-- Streamlit component bridge -->
+    <script src="https://unpkg.com/@streamlit/component-lib/dist/index.js"></script>
+    <script>
+      function send(v){ Streamlit.setComponentValue(v); }
+      window.addEventListener("load", function(){
+        const btn = document.getElementById("etran-btn");
+        btn.addEventListener("click", function(){ send(true); });
+        // keep iframe height tiny (no extra space)
+        Streamlit.setFrameHeight(0);
+      });
+    </script>
+    """,
+    height=0,    # keep the iframe invisible
+)
 if etran_clicked:
     payload = "Etran Sheet"
     st.session_state.messages.append({"id": _new_id(), "role": "user", "content": payload})
     st.session_state.pending_input = payload
     st.session_state.waiting_for_response = True
+
 
     
 if user_q:
