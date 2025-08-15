@@ -401,13 +401,14 @@ if st.session_state.get("last_processed_pdf") != up.name:
     ]
     st.session_state.last_processed_pdf = up.name
 
-# ================= Styles =================
 st.markdown("""
 <style>
+/* Chat bubbles */
 .user-bubble {background:#007bff;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:right;margin:4px;}
 .assistant-bubble {background:#1e1e1e;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:left;margin:4px;}
 .clearfix::after {content:"";display:table;clear:both;}
 
+/* Reference card */
 .ref{ display:block; width:60%; max-width:900px; margin:6px 0 12px 8px; }
 .ref summary{
   display:inline-flex; align-items:center; gap:8px; cursor:pointer; list-style:none; outline:none;
@@ -420,10 +421,11 @@ st.markdown("""
   border-radius:10px; padding:10px; margin-top:0; box-shadow:0 6px 20px rgba(0,0,0,.25);
 }
 .ref .panel img{ width:100%; height:auto; border-radius:8px; display:block; }
+
+/* IMPORTANT: overlay needs the dot on .ref */
 .ref .overlay{ display:none; }
-/* FIX: add the dot so overlay shows while open */
 .ref[open] .overlay{
-  display:block; position:fixed; inset:0; z-index:998; background:rgba(0,0,0,0.0); border:0; padding:0; margin:0;
+  display:block; position:fixed; inset:0; z-index:998; background:transparent; border:0; padding:0; margin:0;
 }
 .ref[open] > .panel{
   position: fixed; z-index: 999; top: 12vh; left: 50%; transform: translateX(-50%);
@@ -431,53 +433,20 @@ st.markdown("""
 }
 .ref .close-x{ position:absolute; top:6px; right:10px; border:0; background:transparent; color:#94a3b8; font-size:20px; line-height:1; cursor:pointer; }
 
-/* Quick actions bar (chips) */
-.qa-wrap {margin:8px 0 0 0;}
-.qa-chip button {border-radius:999px; padding:6px 12px; font-size:13px;}
-</style>
-""", unsafe_allow_html=True)
-
-st.markdown("""
-<style>
-/* Floating anchor for the button (fixed to viewport) */
-#etran-anchor{
-  position: fixed;
-  right: 28px;
-  bottom: calc(env(safe-area-inset-bottom,0) + 96px); /* sits above chat input */
-  z-index: 9999;
-  pointer-events: none;               /* let only the button capture clicks */
+/* Floating ETRAN button (bottom-right) */
+.etran-wrap{ position:fixed; right:24px; bottom:calc(env(safe-area-inset-bottom,0) + 24px); z-index:10000; }
+.etran-wrap > button{
+  display:inline-flex; align-items:center; gap:10px;
+  background:#0f172a; color:#e2e8f0; border:1px solid #334155;
+  padding:10px 12px; border-radius:10px;
+  box-shadow:0 8px 30px rgba(2,6,23,.45);
 }
-
-/* Style the real Streamlit button inside the anchor */
-#etran-anchor .stButton > button{
-  pointer-events: auto;
-  background:#1e1e1e;
-  color:#fff;
-  border:1px solid #1e1e1e;
-  border-radius:12px;
-  padding:10px 14px;
-  box-shadow:0 8px 24px rgba(0,0,0,.35);
-  line-height:1.15;
-  font-weight:500;
-  white-space:pre-line;               /* allow two-line label */
-}
-#etran-anchor .stButton > button:hover{ filter:brightness(1.08); }
-#etran-anchor .stButton > button:active{ transform:translateY(1px); }
-
-@media (max-width: 640px){
-  #etran-anchor{ right:16px; bottom: calc(env(safe-area-inset-bottom,0) + 86px); }
-}
-</style>
-""", unsafe_allow_html=True)
-
-
-/* Hover/active states */
-#etran-btn-wrap .stButton>button:hover{ filter:brightness(1.08); }
-#etran-btn-wrap .stButton>button:active{ transform:translateY(1px); }
+.etran-wrap > button:hover{ filter:brightness(1.08); transform:translateY(-1px); }
+.etran-wrap svg{ width:18px; height:18px; flex:none; }
 
 /* Mobile tweak */
 @media (max-width: 640px){
-  #etran-btn-wrap .stButton>button{ right:16px; bottom: 86px; }
+  .etran-wrap{ right:16px; bottom:calc(env(safe-area-inset-bottom,0) + 80px); }
 }
 </style>
 """, unsafe_allow_html=True)
