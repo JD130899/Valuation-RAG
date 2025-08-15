@@ -1,9 +1,12 @@
 import os, io, pickle, base64
 import streamlit as st
+import re
 import fitz  # PyMuPDF
 from PIL import Image
 from dotenv import load_dotenv
 from sklearn.metrics.pairwise import cosine_similarity
+# add at top
+import uuid, hashlib
 
 # LangChain / RAG deps
 from langchain_core.documents import Document
@@ -46,8 +49,7 @@ if "page_images" not in st.session_state:
 if "next_msg_id" not in st.session_state:
     st.session_state.next_msg_id = 0
 
-if "loading_new_pdf" not in st.session_state:
-    st.session_state.loading_new_pdf = False
+
 
 
 
@@ -56,33 +58,42 @@ def _new_id():
     st.session_state.next_msg_id += 1
     return f"m{n}"
 
-def render_pdf_banner(file_name: str, pdf_bytes: bytes, key: str = "hdr"):
-    # Visible banner
+def file_badge_link(name: str, pdf_bytes: bytes, synced: bool = True):
+    base = os.path.splitext(name)[0]          # remove .pdf
+    b64  = base64.b64encode(pdf_bytes).decode("ascii")
+    label = "Using synced file:" if synced else "Using file:"
+    link_id = f"open-file-{uuid.uuid4().hex[:8]}"
+
+    # Visible banner + placeholder link
     st.markdown(
         f'''
         <div style="background:#1f2c3a; padding:8px; border-radius:8px; color:#fff;">
-           <b>Using Uploaded File:</b> {file_name}
-          &nbsp;·&nbsp;<a id="hdr-open-{key}" href="#" target="_blank" rel="noopener" style="color:#93c5fd;">Open PDF ↗</a>
+          ✅ <b>{label}</b>
+          <a id="{link_id}" href="#" target="_blank" rel="noopener"
+             style="color:#93c5fd; text-decoration:none;">{base}</a>
         </div>
-        """,
-        unsafe_allow_html=True,
+        ''',
+        unsafe_allow_html=True
     )
 
-    # Hidden script: make a Blob URL from the PDF bytes and attach it to the link
-    b64 = base64.b64encode(pdf_bytes).decode("ascii")
+    # Create a blob URL for the PDF and attach it to the link (works across browsers)
     components.html(
-        f"""<!doctype html><meta charset='utf-8'>
+        f'''<!doctype html><meta charset='utf-8'>
 <style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
 <script>(function(){{
-  function b64ToU8(s){{var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}}
-  var url = URL.createObjectURL(new Blob([b64ToU8("{b64}")], {{type:"application/pdf"}}));
+  function b64ToUint8Array(s){{var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}}
+  var blob = new Blob([b64ToUint8Array("{b64}")], {{type:"application/pdf"}});
+  var url  = URL.createObjectURL(blob);
+
   function attach(){{
     var d = window.parent && window.parent.document;
-    var a = d && d.getElementById("hdr-open-{key}");
-    if(!a) return setTimeout(attach, 100);
+    if(!d) return setTimeout(attach,120);
+    var a = d.getElementById("{link_id}");
+    if(!a) return setTimeout(attach,120);
     a.setAttribute("href", url);
   }}
   attach();
+
   var me = window.frameElement; if(me){{me.style.display="none";me.style.height="0";me.style.border="0";}}
 }})();</script>''',
         height=0,
@@ -99,7 +110,7 @@ def single_page_pdf_b64(pdf_bytes: bytes, page_number: int) -> str:
     one.close(); doc.close()
     return b64
 
-def render_reference_card(label: str, img_b64: str, page_b64: str, key: str):
+def render_reference_card(label: str, img_b64: str, pdf_b64: str, page: int, key: str):
     # Markup: chip + overlay + modal panel
     st.markdown(
         f"""
@@ -119,14 +130,14 @@ def render_reference_card(label: str, img_b64: str, page_b64: str, key: str):
         unsafe_allow_html=True,
     )
 
-    # JS: attach blob URL to link + closing (overlay, X, Esc). Hidden iframe (height=0) to run script.
     components.html(
         f"""<!doctype html><meta charset='utf-8'>
 <style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
 <script>(function(){{
   function b64ToUint8Array(s){{var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}}
-  var blob = new Blob([b64ToUint8Array('{page_b64}')], {{type:'application/pdf'}});
-  var url  = URL.createObjectURL(blob);
+  var blob = new Blob([b64ToUint8Array('{pdf_b64}')], {{type:'application/pdf'}});
+  // Open FULL PDF, jump to the target page:
+  var url  = URL.createObjectURL(blob) + '#page={page}';
 
   function attach(){{
     var d = window.parent && window.parent.document;
@@ -159,6 +170,46 @@ for m in st.session_state.messages:
     if "id" not in m:
         m["id"] = _new_id()
 
+def guess_suggestion(question: str, docs):
+    """Pick a short (<=6 words) line from the retrieved chunks that overlaps with the question."""
+    q_terms = set(w.lower() for w in re.findall(r"[A-Za-z]{3,}", question))
+    best_line, best_score = None, 0
+    for d in docs or []:
+        for ln in d.page_content.splitlines():
+            ln = ln.strip()
+            if not ln:
+                continue
+            # prefer short, title-like lines
+            if len(ln.split()) > 6:
+                continue
+            words = set(w.lower() for w in re.findall(r"[A-Za-z]{3,}", ln))
+            score = len(q_terms & words)
+            if score > best_score:
+                best_score, best_line = score, ln
+    return best_line or "Valuation Summary"
+
+
+def sanitize_suggestion(answer: str, question: str, docs):
+    """
+    If the model outputs the fallback:
+      - fill any [ ... ] with a guessed suggestion
+      - or, if suggestion is missing/too long, rebuild with a good guess
+    Otherwise, return as-is.
+    """
+    low = answer.lower().strip()
+    if "sorry i didnt understand the question" not in low:
+        return answer
+
+    # Case 1: model left brackets like [X]
+    if "[" in answer and "]" in answer:
+        return re.sub(r"\[.*?\]", guess_suggestion(question, docs), answer)
+
+    # Case 2: ensure 'Did you mean <short>?' exists and is short enough
+    m = re.search(r"Did you mean\s+(.+?)(\?)", answer, flags=re.IGNORECASE)
+    cand = (m.group(1).strip() if m else "")
+    if not cand or len(cand.split()) > 6:
+        return "Sorry I didnt understand the question. Did you mean " + guess_suggestion(question, docs) + "?"
+    return answer
 
 
 # ================= Builder =================
@@ -246,15 +297,11 @@ if pdf_files:
                 st.session_state.uploaded_file_from_drive = open(path, "rb").read()
                 st.session_state.uploaded_file_name = fname
                 st.session_state.last_synced_file_id = fid
-    
-                # <<< wipe chat immediately and mark that we’re building >>>
-                st.session_state.messages = []
-                st.session_state.loading_new_pdf = True
-                # make sure the next block rebuilds
-                st.session_state.last_processed_pdf = None
-    
-                st.rerun()
-
+                # reset convo for new doc
+                st.session_state.messages = [
+                    {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
+                    {"role": "assistant", "content": "What can I help you with?"}
+                ]
 else:
     st.sidebar.warning("📭 No PDFs found in Drive.")
 
@@ -262,116 +309,37 @@ else:
 st.title("Underwriting Agent")
 
 # Source selector (Drive or local upload)
-# ================= Source selector (Drive or local upload) =================
 if "uploaded_file_from_drive" in st.session_state:
-    file_name = st.session_state.uploaded_file_name
-    display_name = os.path.splitext(file_name)[0]  # no ".pdf"
-    pdf_bytes_for_banner = st.session_state.uploaded_file_from_drive
-
-    # Banner: file name is the clickable link
-    st.markdown(
-        f"""
-        <div style="background:#1f2c3a; padding:8px; border-radius:8px; color:#fff;">
-          <b>Using Uploaded File:</b>
-          <a id="hdr-open-drive" href="#" target="_blank" rel="noopener"
-             style="color:#93c5fd; text-decoration:underline;">{display_name}</a>
-        </div>
-        """,
-        unsafe_allow_html=True,
+    file_badge_link(
+    st.session_state.uploaded_file_name,
+    st.session_state.uploaded_file_from_drive,
+    synced=True
     )
+    up = io.BytesIO(st.session_state.uploaded_file_from_drive)
+    up.name = st.session_state.uploaded_file_name
 
-    # Attach a Blob URL to that link
-    _b64 = base64.b64encode(pdf_bytes_for_banner).decode("ascii")
-    components.html(
-        f'''<!doctype html><meta charset='utf-8'>
-<style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
-<script>(function(){{
-  function b64ToU8(s){{var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}}
-  var url = URL.createObjectURL(new Blob([b64ToU8("{_b64}")], {{type:"application/pdf"}}));
-  function attach(){{
-    var d = window.parent && window.parent.document;
-    var a = d && d.getElementById("hdr-open-drive");
-    if(!a) return setTimeout(attach, 100);
-    a.setAttribute("href", url);
-  }}
-  attach();
-  var me = window.frameElement; if(me){{me.style.display="none";me.style.height="0";me.style.border="0";}}
-}})();</script>''',
-        height=0,
-    )
-
-    up = io.BytesIO(pdf_bytes_for_banner)
-    up.name = file_name
-
+  
 else:
     up = st.file_uploader("Upload a valuation report PDF", type="pdf")
+    if up:
+        file_badge_link(up.name, up.getvalue(), synced=False)
 
-    if up is not None:
-        file_name = up.name
-        display_name = os.path.splitext(file_name)[0]  # no ".pdf"
-        pdf_bytes_for_banner = up.getvalue()
-
-        st.markdown(
-            f'''
-            <div style="background:#1f2c3a; padding:8px; border-radius:8px; color:#fff;">
-              <b>Using Uploaded File:</b>
-              <a id="hdr-open-local" href="#" target="_blank" rel="noopener"
-                 style="color:#93c5fd; text-decoration:underline;">{display_name}</a>
-            </div>
-            ''',
-            unsafe_allow_html=True,
-        )
-
-        _b64_local = base64.b64encode(pdf_bytes_for_banner).decode("ascii")
-        components.html(
-            f'''<!doctype html><meta charset='utf-8'>
-<style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
-<script>(function(){{
-  function b64ToU8(s){{var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}}
-  var url = URL.createObjectURL(new Blob([b64ToU8("{_b64_local}")], {{type:"application/pdf"}}));
-  function attach(){{
-    var d = window.parent && window.parent.document;
-    var a = d && d.getElementById("hdr-open-local");
-    if(!a) return setTimeout(attach, 100);
-    a.setAttribute("href", url);
-  }}
-  attach();
-  var me = window.frameElement; if(me){{me.style.display="none";me.style.height="0";me.style.border="0";}}
-}})();</script>''',
-            height=0,
-        )
-
-# Guard if nothing selected yet
 if not up:
     st.warning("Please upload or load a PDF to continue.")
     st.stop()
 
-
 # Rebuild retriever when file changes
-
 if st.session_state.get("last_processed_pdf") != up.name:
-    # First pass after a new selection: clear UI and rerun quickly
-    if not st.session_state.loading_new_pdf:
-        st.session_state.messages = []
-        st.session_state.loading_new_pdf = True
-        st.rerun()
-
-    # Second pass: actually build
     pdf_bytes = up.getvalue()
     st.session_state.pdf_bytes = pdf_bytes
     st.session_state.retriever, st.session_state.page_images = build_retriever_from_pdf(pdf_bytes, up.name)
 
-    # Re-seed greetings only after build completes
+    # reset convo for new doc
     st.session_state.messages = [
         {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
         {"role": "assistant", "content": "What can I help you with?"}
     ]
     st.session_state.last_processed_pdf = up.name
-    st.session_state.loading_new_pdf = False
-
-    # Optional: quick refresh so the new greetings appear instantly
-    st.rerun()
-
 
 # ================= Styles =================
 st.markdown("""
@@ -446,12 +414,13 @@ prompt = PromptTemplate(
           “Would you like more detail on [X]?”  
        Otherwise, **do not** ask any follow-up.
 
+       **HARD RULE (unrelated questions)**
+        If the user's question is unrelated to this PDF or requires information outside the Context, reply **exactly**:
+        "Sorry I can only answer question related to {pdf_name} pdf document"
+        Do not add anything else.
+ 
     **Use ONLY what appears under “Context”.**
-
-    ### Special interpretation rules  
-          • If the question is about **"valuation"** in general (e.g., “What is the valuation?”), answer by giving the Fair Market Value   
-          • If the question is about **risk** (e.g., “How risky is the business?”), use the **risk assessment section**, and include the **risk classification** (e.g., secure, controlled, etc.).
-
+    
     ### How to answer
     1. **Single value questions**  
        • Find the row + column that match the user's words.  
@@ -476,7 +445,12 @@ prompt = PromptTemplate(
     4. **Theory/textual question**  
        • Try to return an explanation **based on the context**.
        
-    If you still cannot see the answer, reply **“Hmm, I am not sure. Are you able to rephrase your question?”**
+    5. **If you cannot find an answer in Context**
+       • Reply **exactly**:
+         "Sorry I didnt understand the question. Did you mean SUGGESTION?"
+       • Where **SUGGESTION** is a short (≤6 words) phrase you pick from **Context** that best matches the user’s words
+         (e.g., a metric name, table heading, or section title). Do **not** use brackets. Do **not** invent terms.
+
     
     ---
     Context:
@@ -485,14 +459,17 @@ prompt = PromptTemplate(
     ---
     Question: {question}
     Answer:""",
-            input_variables=["context", "question"]
+            input_variables=["context", "question","pdf_name"]
         )
-
 
 base_text = prompt.template
 wrapped_prompt = PromptTemplate(
-    template=base_text + "\nConversation so far:\n{chat_history}\n",
-    input_variables=["chat_history", "context", "question"]
+    template=base_text + """
+Conversation so far:
+{chat_history}
+
+""", 
+    input_variables=["chat_history", "context", "question","pdf_name"]
 )
 
 # ================= Input =================
@@ -507,102 +484,113 @@ for msg in st.session_state.messages:
     cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
     st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
 
-    if msg.get("source_img") and msg.get("source_b64"):
+    if msg.get("source_img") and msg.get("source_pdf_b64") and msg.get("source_page"):
         render_reference_card(
-            label=(msg.get("source") or "Page"),  # e.g., "Page 17"
+            label=(msg.get("source") or "Page"),
             img_b64=msg["source_img"],
-            page_b64=msg["source_b64"],
+            pdf_b64=msg["source_pdf_b64"],
+            page=msg["source_page"],
             key=msg.get("id", "k0"),
         )
-
-
 
 # ================= Answer (single-pass, no rerun) =================
 if st.session_state.waiting_for_response:
     block = st.empty()
     with block.container():
-        with st.spinner("Thinking…"):
-            q = st.session_state.pending_input or ""
-            ctx, docs = "", []
-            try:
-                docs = st.session_state.retriever.get_relevant_documents(q)
-                ctx = "\n\n".join(d.page_content for d in docs)
-            except Exception as e:
-                st.warning(f"RAG retrieval error: {e}")
+        thinking = st.empty()
+        thinking.markdown(
+            "<div class='assistant-bubble clearfix'>Thinking…</div>", 
+            unsafe_allow_html=True)
+        q = st.session_state.pending_input or ""
+        ctx, docs = "", []
+        try:
+            docs = st.session_state.retriever.get_relevant_documents(q)
+            ctx = "\n\n".join(d.page_content for d in docs)
+        except Exception as e:
+            st.warning(f"RAG retrieval error: {e}")
 
-            system_prompt = (
-                "You are a helpful assistant. Use ONLY the content under 'Context' to answer. "
-                "If the answer is not in the context, say you don't have enough information.\n\n"
-                f"Context:\n{ctx}"
-            )
+        history_to_use = st.session_state.messages[-10:]
+        pdf_display = os.path.splitext(up.name)[0]
 
-            try:
-                response = openai.chat.completions.create(
-                    model="gpt-3.5-turbo",
-                    messages=[{"role": "system", "content": system_prompt}, *st.session_state.messages],
+        # Build the prompt text using your wrapped_prompt
+        llm = ChatOpenAI(model="gpt-4o", temperature=0)
+        full_input = {
+            "chat_history": format_chat_history(history_to_use),
+            "context":      ctx,
+            "question":     q,
+            "pdf_name":     pdf_display,
+        }
+        answer = llm.invoke(wrapped_prompt.invoke(full_input)).content
+        answer = sanitize_suggestion(answer, q, docs)
+
+        apology = f"Sorry I can only answer question related to {pdf_display} pdf document"
+        is_unrelated = apology.lower() in answer.strip().lower()
+
+        entry = {"id": _new_id(), "role": "assistant", "content": answer}
+        ref_page, ref_img_b64 = None, None
+
+        try:
+            if docs and not is_unrelated:
+                texts = [d.page_content for d in docs]
+                embedder = CohereEmbeddings(
+                    model="embed-english-v3.0",
+                    user_agent="langchain",
+                    cohere_api_key=st.secrets["COHERE_API_KEY"]
                 )
-                answer = response.choices[0].message.content
-            except Exception as e:
-                answer = f"❌ Error: {e}"
+                emb_answer = embedder.embed_query(answer)
+                chunk_embs = embedder.embed_documents(texts)
+                sims = cosine_similarity([emb_answer], chunk_embs)[0]
+                ranked = sorted(list(zip(docs, sims)), key=lambda x: x[1], reverse=True)
+                top3 = [d for d, _ in ranked[:3]]
 
-            entry = {"id": _new_id(), "role": "assistant", "content": answer}
-            ref_page, ref_img_b64 = None, None
+                best_doc = top3[0] if top3 else (ranked[0][0] if ranked else None)
+                if len(top3) >= 3:
+                    ranking_prompt = PromptTemplate(
+                         template="""
+                        Given a user question and 3 candidate context chunks, return the number (1-3) of the chunk that best answers it.
+                        
+                        Question:
+                        {question}
+                        
+                        Chunk 1:
+                        {chunk1}
+                        
+                        Chunk 2:
+                        {chunk2}
+                        
+                        Chunk 3:
+                        {chunk3}
+                        
+                        Best Chunk Number:
+                        """,
+                                    input_variables=["question","chunk1","chunk2","chunk3"]
+                                )
+                    pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
+                        ranking_prompt.invoke({
+                            "question": q,
+                            "chunk1": top3[0].page_content,
+                            "chunk2": top3[1].page_content,
+                            "chunk3": top3[2].page_content
+                        })
+                    ).content.strip()
+                    if pick.isdigit() and 1 <= int(pick) <= 3:
+                        best_doc = top3[int(pick) - 1]
 
-            try:
-                if docs:
-                    texts = [d.page_content for d in docs]
-                    embedder = CohereEmbeddings(
-                        model="embed-english-v3.0",
-                        user_agent="langchain",
-                        cohere_api_key=st.secrets["COHERE_API_KEY"]
-                    )
-                    emb_answer = embedder.embed_query(answer)
-                    chunk_embs = embedder.embed_documents(texts)
-                    sims = cosine_similarity([emb_answer], chunk_embs)[0]
-                    ranked = sorted(list(zip(docs, sims)), key=lambda x: x[1], reverse=True)
-                    top3 = [d for d, _ in ranked[:3]]
+                if best_doc is not None:
+                    ref_page = best_doc.metadata.get("page_number")
+                    img = st.session_state.page_images.get(ref_page)
+                    ref_img_b64 = pil_to_base64(img) if img else None
+                    if ref_img_b64:
+                        entry["source"] = f"Page {ref_page}"
+                        entry["source_img"] = ref_img_b64
+                        entry["source_pdf_b64"] = base64.b64encode(st.session_state.pdf_bytes).decode("ascii")
+                        entry["source_page"] = ref_page
 
-                    best_doc = top3[0] if top3 else (ranked[0][0] if ranked else None)
-                    if len(top3) >= 3:
-                        ranking_prompt = PromptTemplate(
-                           template="""
-                            Given a user question and 3 candidate context chunks, return the number (1-3) of the chunk that best answers it.
-                            Question:
-                            {question}
-                            
-                            Chunk 1:
-                            {chunk1}
-                            
-                            Chunk 2:
-                            {chunk2}
-                            
-                            Chunk 3:
-                            {chunk3}
-                       Best Chunk Number:
-                       """,input_variables=["question","chunk1","chunk2","chunk3"])
-                        pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
-                            ranking_prompt.invoke({
-                                "question": q,
-                                "chunk1": top3[0].page_content,
-                                "chunk2": top3[1].page_content,
-                                "chunk3": top3[2].page_content
-                            })
-                        ).content.strip()
-                        if pick.isdigit() and 1 <= int(pick) <= 3:
-                            best_doc = top3[int(pick) - 1]
 
-                    if best_doc is not None:
-                        ref_page = best_doc.metadata.get("page_number")
-                        img = st.session_state.page_images.get(ref_page)
-                        ref_img_b64 = pil_to_base64(img) if img else None
-                        if ref_img_b64:
-                            entry["source"] = f"Page {ref_page}"
-                            entry["source_img"] = ref_img_b64
-                            # Always open a single-page blob (reliable across Cloud/Drive)
-                            entry["source_b64"] = single_page_pdf_b64(st.session_state.pdf_bytes, ref_page)
-
-            except Exception as e:
-                st.info(f"ℹ️ Reference selection skipped: {e}")
+        except Exception as e:
+            st.info(f"ℹ️ Reference selection skipped: {e}")
+        thinking.empty()
+    
 
     # Final render (no rerun)
     with block.container():
@@ -613,9 +601,11 @@ if st.session_state.waiting_for_response:
             render_reference_card(
                 label=entry.get("source", f"Page {ref_page}"),
                 img_b64=entry["source_img"],
-                page_b64=entry["source_b64"],
+                pdf_b64=entry["source_pdf_b64"],
+                page=entry["source_page"],
                 key=entry.get("id", "k0"),
             )
+
 
 
 
