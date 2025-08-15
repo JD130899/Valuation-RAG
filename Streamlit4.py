@@ -141,8 +141,14 @@ for m in st.session_state.messages:
 
 # ---- helpers: suggestions / confirmations / query condensation ----
 def extract_suggestion(text):
-    m = re.search(r"did you mean\s+(.+?)\?", text, flags=re.I)
-    return m.group(1).strip() if m else None
+    m = re.search(r"did you mean\s+(.+?)\?", text, flags=re.IGNORECASE)
+    if not m:
+        return None
+    val = m.group(1).strip()
+    if val.lower() == "suggestion":
+        return None
+    return val
+
 
 def is_confirmation(text: str) -> bool:
     t = text.strip().lower()
@@ -176,16 +182,39 @@ def guess_suggestion(question: str, docs):
     return best_line or "Valuation Summary"
 
 def sanitize_suggestion(answer: str, question: str, docs):
+    """
+    Ensure clarification replies contain a concrete, short suggestion.
+    Replaces a literal 'SUGGESTION' token (case-insensitive) or any [ ... ] with a guessed phrase.
+    If we still don't have a concrete phrase after 'Did you mean', rebuild the line.
+    """
     low = answer.lower().strip()
-    if "sorry i didnt understand the question" not in low:
+    # Only act on clarification-style messages
+    if ("sorry i didnt understand the question" not in low
+        and "sorry i didn't understand the question" not in low
+        and "did you mean" not in low):
         return answer
-    if "[" in answer and "]" in answer:
-        return re.sub(r"\[.*?\]", guess_suggestion(question, docs), answer)
-    m = re.search(r"Did you mean\s+(.+?)(\?)", answer, flags=re.IGNORECASE)
-    cand = (m.group(1).strip() if m else "")
-    if not cand or len(cand.split()) > 6:
-        return "Sorry I didnt understand the question. Did you mean " + guess_suggestion(question, docs) + "?"
+
+    sug = guess_suggestion(question, docs)
+
+    # 1) Replace a literal SUGGESTION token
+    answer = re.sub(r"\bSUGGESTION\b", sug, answer, flags=re.IGNORECASE)
+
+    # 2) Replace any bracketed placeholder like [X]
+    answer = re.sub(r"\[.*?\]", sug, answer)
+
+    # 3) If it's still not a concrete suggestion after "Did you mean", rebuild it
+    m = re.search(r"did you mean\s+(.+?)\?", answer, flags=re.IGNORECASE)
+    if not m or m.group(1).strip().lower() in {"", "suggestion"}:
+        return f"Sorry I didnt understand the question. Did you mean {sug}?"
+
+    # 4) Enforce the ≤6 words rule
+    cand = m.group(1).strip()
+    if len(cand.split()) > 6:
+        cand = " ".join(cand.split()[:6])
+        return f"Sorry I didnt understand the question. Did you mean {cand}?"
+
     return answer
+
 
 def condense_query(chat_history, user_input: str, pdf_name: str) -> str:
     hist = []
