@@ -386,6 +386,7 @@ if not up:
     st.stop()
 
 # Rebuild retriever when file changes
+# Rebuild retriever when file changes
 if st.session_state.get("last_processed_pdf") != up.name:
     pdf_bytes = up.getvalue()
     st.session_state.pdf_bytes = pdf_bytes
@@ -395,6 +396,9 @@ if st.session_state.get("last_processed_pdf") != up.name:
         {"role": "assistant", "content": "What can I help you with?"}
     ]
     st.session_state.last_processed_pdf = up.name
+
+    # ✅ reset Etran button state so it doesn't auto-fire
+    st.session_state.pop("etran_fab", None)
 
 # ================= Styles =================
 # ================= Styles =================
@@ -483,52 +487,46 @@ Conversation so far:
 user_q = st.chat_input("Type your question here…")
 
 # ---- Floating "Etran Sheet" button (works reliably via components.html) ----
-# ---- Floating "Etran Sheet" button (bottom-right, only after PDF is loaded) ----
+
 etran_clicked = False
-if up:  # render only when a PDF is loaded
+if up:
     etran_clicked = components.html(
         """
         <style>
-        
+          #etran-fab { position: fixed; right: 18px; bottom: 18px; z-index: 9999; }
           #etran-btn {
             border-radius: 9999px;
-            bottom: 10px;
             padding: 10px 16px;
-            background: #000;     /* BLACK button */
-            color: #fff;
-            border: none;
-            font: inherit;
+            background: #000; color: #fff; border: none;
             box-shadow: 0 10px 30px rgba(0,0,0,.35);
             cursor: pointer;
           }
           #etran-btn:hover { background: #222; }
           #etran-btn:active { transform: translateY(1px); }
-          @media (max-width: 640px){
-            #etran-fab { bottom: 64px; right: 12px; }
-          }
+          @media (max-width: 640px){ #etran-fab { bottom: 64px; right: 12px; } }
         </style>
-        <div id="etran-fab">
-          <button id="etran-btn" type="button">Etran Sheet</button>
-        </div>
-
-        <!-- Streamlit component bridge -->
+        <div id="etran-fab"><button id="etran-btn" type="button">Etran Sheet</button></div>
         <script src="https://unpkg.com/@streamlit/component-lib/dist/index.js"></script>
         <script>
           function send(v){ Streamlit.setComponentValue(v); }
           window.addEventListener("load", function(){
             document.getElementById("etran-btn").addEventListener("click", function(){ send(true); });
-            Streamlit.setFrameHeight(0);  // keep iframe invisible
+            Streamlit.setFrameHeight(0);
           });
         </script>
         """,
-        height=0,  # keep the iframe invisible
+        height=0,
+        key="etran_fab",            # ✅ give it a key so we can reset
     )
 
-if etran_clicked:
+# ✅ only treat a real click as True (not a leftover truthy value)
+if etran_clicked is True:
     payload = "Etran Sheet"
     st.session_state.messages.append({"id": _new_id(), "role": "user", "content": payload})
     st.session_state.pending_input = payload
     st.session_state.waiting_for_response = True
+    # optional: immediately clear after consuming
+    st.session_state["etran_fab"] = None
 
 
 
