@@ -397,11 +397,15 @@ if st.session_state.get("last_processed_pdf") != up.name:
     st.session_state.last_processed_pdf = up.name
 
 # ================= Styles =================
+# ================= Styles =================
 st.markdown("""
 <style>
+/* --- Chat bubbles --- */
 .user-bubble {background:#007bff;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:right;margin:4px;}
 .assistant-bubble {background:#1e1e1e;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:left;margin:4px;}
 .clearfix::after {content:"";display:table;clear:both;}
+
+/* --- Reference card --- */
 .ref{ display:block; width:60%; max-width:900px; margin:6px 0 12px 8px; }
 .ref summary{
   display:inline-flex; align-items:center; gap:8px; cursor:pointer; list-style:none; outline:none;
@@ -421,8 +425,26 @@ st.markdown("""
   width: min(900px, 90vw); max-height: 75vh; overflow: auto; box-shadow:0 20px 60px rgba(0,0,0,.45);
 }
 .ref .close-x{ position:absolute; top:6px; right:10px; border:0; background:transparent; color:#94a3b8; font-size:20px; line-height:1; cursor:pointer; }
+
+/* --- Floating "Etran Sheet" button --- */
+#etran-anchor + div.stButton > button {
+  position: fixed;
+  bottom: 22px;
+  right: 22px;
+  z-index: 9999;
+  border-radius: 9999px;
+  padding: 12px 16px;
+  box-shadow: 0 10px 30px rgba(0,0,0,.35);
+}
+#etran-anchor + div.stButton {  /* remove default block gap */
+  margin: 0;
+}
+@media (max-width: 640px){
+  #etran-anchor + div.stButton > button { bottom: 18px; right: 18px; padding: 12px 15px; }
+}
 </style>
 """, unsafe_allow_html=True)
+
 
 # ================= Prompt helpers =================
 def format_chat_history(messages):
@@ -475,6 +497,17 @@ Conversation so far:
 
 # ================= Input =================
 user_q = st.chat_input("Type your question here…")
+
+st.markdown("<div id='etran-anchor'></div>", unsafe_allow_html=True)
+etran_clicked = st.button("Etran Sheet", key="etran_sheet_btn")
+
+if etran_clicked:
+    # Treat as if the user typed "Etran Sheet"
+    payload = "Etran Sheet"
+    st.session_state.messages.append({"id": _new_id(), "role": "user", "content": payload})
+    st.session_state.pending_input = payload
+    st.session_state.waiting_for_response = True
+    
 if user_q:
     # Keep the chat bubble EXACTLY as typed (e.g., "Yes", "ya", 👍)
     st.session_state.messages.append({"id": _new_id(), "role": "user", "content": user_q})
