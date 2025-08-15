@@ -495,7 +495,7 @@ if up:
         <style>
           #etran-fab {
             position: fixed;
-            right: 18px;
+            right: 1px;
             bottom: 84px; /* fallback */
             z-index: 9999;
           }
