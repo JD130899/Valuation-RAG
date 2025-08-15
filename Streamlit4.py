@@ -437,8 +437,8 @@ st.markdown("""
 #etran-anchor + div.stButton,
 #etran-anchor + div[data-testid="stButton"] {
   position: fixed !important;
-  bottom: 22px !important;
-  right: 12px !important;   /* gap from the edge */
+  bottom: 122px !important;
+  right: 0px !important;   /* gap from the edge */
   z-index: 9999 !important;
   margin: 0 !important;
 }
