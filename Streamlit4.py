@@ -54,7 +54,7 @@ def _new_id():
     return f"m{n}"
 
 def file_badge_link(name: str, pdf_bytes: bytes, synced: bool = True):
-    base = os.path.splitext(name)[0]          # remove .pdf
+    base = os.path.splitext(name)[0]  # remove .pdf
     b64  = base64.b64encode(pdf_bytes).decode("ascii")
     label = "Using synced file:" if synced else "Using file:"
     link_id = f"open-file-{uuid.uuid4().hex[:8]}"
@@ -92,15 +92,6 @@ def file_badge_link(name: str, pdf_bytes: bytes, synced: bool = True):
         height=0,
     )
 
-# Make a ONE-PAGE PDF (base64) from a given page
-def single_page_pdf_b64(pdf_bytes: bytes, page_number: int) -> str:
-    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-    one = fitz.open()
-    one.insert_pdf(doc, from_page=page_number-1, to_page=page_number-1)
-    b64 = base64.b64encode(one.tobytes()).decode("ascii")
-    one.close(); doc.close()
-    return b64
-
 def render_reference_card(label: str, img_b64: str, pdf_b64: str, page: int, key: str):
     # Chip + lightbox panel
     st.markdown(
@@ -133,7 +124,6 @@ def render_reference_card(label: str, img_b64: str, pdf_b64: str, page: int, key
   function attach(){{
     var d = window.parent && window.parent.document;
     if(!d) return setTimeout(attach,120);
-
     var ref = d.getElementById('ref-{key}');
     var a   = d.getElementById('open-{key}');
     var ovl = d.getElementById('overlay-{key}');
@@ -153,7 +143,6 @@ def render_reference_card(label: str, img_b64: str, pdf_b64: str, page: int, key
 }})();</script>""",
         height=0,
     )
-
 
 # give IDs to any preloaded messages (greetings)
 for m in st.session_state.messages:
@@ -289,7 +278,6 @@ if st.session_state.get("last_processed_pdf") != up.name:
 # ================= Styles =================
 st.markdown("""
 <style>
-/* Chat bubbles with safe wrapping (no italics) */
 .user-bubble, .assistant-bubble{
   display:inline-block; box-sizing:border-box; max-width:60%;
   padding:10px 12px; margin:6px 4px; border-radius:10px; color:#fff; line-height:1.45;
@@ -325,13 +313,6 @@ st.markdown("""
   position:absolute; top:6px; right:10px; border:0; background:transparent;
   color:#94a3b8; font-size:20px; line-height:1; cursor:pointer;
 }
-
-/* Link chip (optional) */
-.chip{ display:inline-flex;align-items:center;gap:.5rem;
-  background:#0f172a;color:#e2e8f0;border:1px solid #334155;
-  border-radius:10px;padding:.35rem .6rem;font:14px/1.2 system-ui; }
-.chip a{color:#93c5fd;text-decoration:none}
-.chip a:hover{text-decoration:underline}
 </style>
 """, unsafe_allow_html=True)
 
@@ -347,25 +328,52 @@ prompt = PromptTemplate(
     template = """
 You are a financial-data extraction assistant.
 
-Use ONLY what appears under “Context”.
-1) Single value → short sentence with the exact number.
-2) Table questions → return the full table in GitHub-flavoured markdown.
-3) Valuation methods → synthesize across chunks, show weights and corresponding $ values; prefer detailed breakdowns.
-4) Theory/text → explain using context.
-If not enough info: “Hmm, I am not sure. Are you able to rephrase your question?”
+**IMPORTANT CONDITIONAL FOLLOW-UP**
+🛎️ After you answer the user’s question (using steps 1–4), **only if** there is still **unused** relevant report content, **ask**:
+“Would you like more detail on [X]?”
+Otherwise, **do not** ask any follow-up.
+
+**HARD RULE (unrelated questions)**
+If the user's question is unrelated to this PDF or requires information outside the Context, reply **exactly**:
+"Sorry I can only answer question related to {pdf_name} pdf document"
+
+**Use ONLY what appears under “Context”.**
+
+### How to answer
+1. **Single value questions**
+   • Find the row + column that match the user's words.
+   • Return the answer in a **short, clear sentence** using the exact number from the context.
+   • **Do NOT repeat the metric name or company name** unless the user asks.
+
+2. **Table questions**
+   • Return the full table **with its header row** in GitHub-flavoured markdown.
+
+3. **Valuation method / theory / reasoning questions**
+   • If the question involves **valuation methods**, **concluded value**, or topics like **Income Approach**, **Market Approach**, or **Valuation Summary**, do the following:
+   - Combine and synthesize relevant information across all chunks.
+   - Pay special attention to how **weights are distributed** (e.g., “50% DCF, 25% EBITDA, 25% SDE”).
+   - Prefer the more detailed breakdowns when available, and include **corresponding dollar values**.
+
+4. **Theory/textual question**
+   • Try to return an explanation **based on the context**.
+   • If you cannot see the answer, reply **“Sorry, I didnt understand the question. Did you mean [X]”**
+
 ---
 Context:
 {context}
 ---
 Question: {question}
 Answer:""",
-    input_variables=["context", "question"]
+    input_variables=["context", "question", "pdf_name"]
 )
 
 base_text = prompt.template
 wrapped_prompt = PromptTemplate(
-    template=base_text + "\nConversation so far:\n{chat_history}\n",
-    input_variables=["chat_history", "context", "question"]
+    template=base_text + """
+Conversation so far:
+{chat_history}
+""",
+    input_variables=["chat_history", "context", "question", "pdf_name"]
 )
 
 # ================= Input =================
@@ -388,17 +396,12 @@ for msg in st.session_state.messages:
             key=msg.get("id", "k0"),
         )
 
-
-# ================= Answer (single-pass, no rerun) =================
 # ================= Answer (single-pass, no rerun) =================
 if st.session_state.waiting_for_response:
     block = st.empty()
     with block.container():
         thinking = st.empty()
-        thinking.markdown(
-            "<div class='assistant-bubble clearfix'>Thinking…</div>",
-            unsafe_allow_html=True
-        )
+        thinking.markdown("<div class='assistant-bubble clearfix'>Thinking…</div>", unsafe_allow_html=True)
 
         q = st.session_state.pending_input or ""
         ctx, docs = "", []
@@ -408,38 +411,30 @@ if st.session_state.waiting_for_response:
         except Exception as e:
             st.warning(f"RAG retrieval error: {e}")
 
-        system_prompt = (
-            "You are a helpful assistant. Use ONLY the content under 'Context' to answer. "
-            "If the answer is not in the context, say you don't have enough information.\n\n"
-            f"Context:\n{ctx}"
-        )
+        history_to_use = st.session_state.messages[-10:]
+        pdf_display = os.path.splitext(up.name)[0]
 
-        # Only send role/content to OpenAI (strip local keys like `id`, `source_img`, etc.)
-        history_msgs = [{"role": m["role"], "content": m["content"]} for m in st.session_state.messages]
+        # Build the prompt text using your wrapped_prompt
+        llm = ChatOpenAI(model="gpt-4o", temperature=0)
+        full_input = {
+            "chat_history": format_chat_history(history_to_use),
+            "context":      ctx,
+            "question":     q,
+            "pdf_name":     pdf_display,
+        }
+        answer = llm.invoke(wrapped_prompt.format(**full_input)).content
 
-        try:
-            response = openai.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[{"role": "system", "content": system_prompt}, *history_msgs],
-            )
-            answer = response.choices[0].message.content
-        except Exception as e:
-            answer = f"❌ Error: {e}"
+        # --- classify answer so we can decide whether to show a reference chip ---
+        apology = f"Sorry I can only answer question related to {pdf_display} pdf document"
+        is_unrelated = apology.lower().strip() == answer.strip().lower()
 
-        # --- classify the answer so we can decide whether to show a reference chip ---
-        unrelated_re = re.compile(
-            r"^\s*Sorry I can only answer question related to .*?pdf document\s*$",
-            re.IGNORECASE
-        )
-        lowinfo_re = re.compile(
+        low_confidence = bool(re.search(
             r"(?:i\s*(?:do\s*not|don't)\s*have\s*enough\s*(?:info(?:rmation)?|context)|"
-            r"not\s*enough\s*(?:info(?:rmation)?|context)|"
-            r"unable\s*to\s*answer|cannot\s*(?:answer|determine)|"
-            r"i\s*(?:can't|cannot)\s*(?:find|answer|determine))",
+            r"not\s*enough\s*(?:info|information|context)|"
+            r"^sorry[, ]+i\s*(?:didn'?t|did not)\s*understand)",
+            answer,
             re.IGNORECASE
-        )
-        is_unrelated   = bool(unrelated_re.search(answer))
-        low_confidence = bool(lowinfo_re.search(answer))
+        ))
 
         entry = {"id": _new_id(), "role": "assistant", "content": answer}
 
@@ -464,12 +459,10 @@ if st.session_state.waiting_for_response:
                     img = st.session_state.page_images.get(ref_page)
                     if img:
                         entry["source"] = f"Page {ref_page}"
-                        entry["source_img"] = base64.b64encode(
-                            io.BytesIO(img.tobytes()).getvalue()
-                        ).decode("ascii") if False else (
-                            # use your helper for clarity
-                            (lambda im=img: (lambda b=io.BytesIO(): (im.save(b, format="PNG"), base64.b64encode(b.getvalue()).decode("ascii"))[1])()) 
-                        )
+                        # PIL -> base64 PNG
+                        buf = io.BytesIO()
+                        img.save(buf, format="PNG")
+                        entry["source_img"] = base64.b64encode(buf.getvalue()).decode("ascii")
                         entry["source_pdf_b64"] = base64.b64encode(st.session_state.pdf_bytes).decode("ascii")
                         entry["source_page"] = ref_page
         except Exception as e:
@@ -493,4 +486,3 @@ if st.session_state.waiting_for_response:
     st.session_state.messages.append(entry)
     st.session_state.pending_input = None
     st.session_state.waiting_for_response = False
-
