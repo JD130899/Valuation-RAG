@@ -495,6 +495,7 @@ for msg in st.session_state.messages:
         )
 
 # ================= Answer =================
+# ================= Answer =================
 if st.session_state.waiting_for_response:
     block = st.empty()
     with block.container():
@@ -505,10 +506,29 @@ if st.session_state.waiting_for_response:
         history_to_use = st.session_state.messages[-10:]
         pdf_display = os.path.splitext(up.name)[0]
 
-        # If the user confirmed, route the last suggestion internally,
-        # but DO NOT change the visible chat bubble.
-        use_last = is_confirmation(raw_q, history_to_use) and st.session_state.last_suggestion
-        effective_q = st.session_state.last_suggestion if use_last else raw_q
+        # NEW: classify the short reply (CONFIRM / DENY / NEITHER)
+        intent = classify_reply_intent(raw_q, _last_assistant_text(history_to_use))
+        is_deny = (intent == "DENY")
+        is_confirm = (intent == "CONFIRM")
+
+        # If user DENIES the follow-up, don't retrieve, don't reference—just close politely.
+        if is_deny:
+            st.session_state.last_suggestion = None  # drop stale suggestion
+            answer = "Alright, if you have any more questions or need further assistance, feel free to ask!"
+            entry = {"id": _new_id(), "role": "assistant", "content": answer}
+            thinking.empty()
+
+            with block.container():
+                st.markdown(f"<div class='assistant-bubble clearfix'>{answer}</div>", unsafe_allow_html=True)
+
+            st.session_state.messages.append(entry)
+            st.session_state.pending_input = None
+            st.session_state.waiting_for_response = False
+            st.stop()  # end early; NO reference card
+        # ---- else continue with normal pipeline ----
+
+        # Route confirmations to last suggestion internally, keep visible bubble as typed
+        effective_q = st.session_state.last_suggestion if (is_confirm and st.session_state.last_suggestion) else raw_q
 
         # Condense for retrieval so follow-ups like “Yes/ya/👍” work
         query_for_retrieval = condense_query(history_to_use, effective_q, pdf_display)
@@ -524,7 +544,7 @@ if st.session_state.waiting_for_response:
         full_input = {
             "chat_history": format_chat_history(history_to_use),
             "context":      ctx,
-            "question":     effective_q,  # internal effective question
+            "question":     effective_q,
             "pdf_name":     pdf_display,
         }
         answer = llm.invoke(wrapped_prompt.invoke(full_input)).content
@@ -539,10 +559,17 @@ if st.session_state.waiting_for_response:
         is_clarify  = is_clarification(answer)
 
         entry = {"id": _new_id(), "role": "assistant", "content": answer}
+        thinking.empty()
 
-        # ---------- TOP-3 LLM PICK (for the reference card) ----------
-        try:
-            if docs and not (is_unrelated or is_clarify):
+    # Render answer
+    with block.container():
+        st.markdown(f"<div class='assistant-bubble clearfix'>{answer}</div>", unsafe_allow_html=True)
+
+        # Only attach a reference when it's a real, contentful answer
+        skip_reference = is_unrelated or is_clarify
+        if docs and not skip_reference:
+            # ---------- TOP-3 LLM PICK (reference card) ----------
+            try:
                 top3 = docs[:3]
                 best_doc = top3[0] if top3 else None
                 if len(top3) >= 3:
@@ -577,23 +604,18 @@ if st.session_state.waiting_for_response:
                         entry["source_img"] = pil_to_base64(img)
                         entry["source_pdf_b64"] = base64.b64encode(st.session_state.pdf_bytes).decode("ascii")
                         entry["source_page"] = ref_page
+                        # draw the card
+                        render_reference_card(
+                            label=entry["source"],
+                            img_b64=entry["source_img"],
+                            pdf_b64=entry["source_pdf_b64"],
+                            page=entry["source_page"],
+                            key=entry["id"],
+                        )
+            except Exception as e:
+                st.info(f"ℹ️ Reference selection skipped: {e}")
 
-        except Exception as e:
-            st.info(f"ℹ️ Reference selection skipped: {e}")
-
-        thinking.empty()
-
-    with block.container():
-        st.markdown(f"<div class='assistant-bubble clearfix'>{answer}</div>", unsafe_allow_html=True)
-        if entry.get("source_img"):
-            render_reference_card(
-                label=entry.get("source"),
-                img_b64=entry["source_img"],
-                pdf_b64=entry["source_pdf_b64"],
-                page=entry["source_page"],
-                key=entry.get("id", "k0"),
-            )
-
+    # Persist
     st.session_state.messages.append(entry)
     st.session_state.pending_input = None
     st.session_state.waiting_for_response = False
