@@ -430,7 +430,7 @@ st.markdown("""
 #etran-anchor + div.stButton > button {
   position: fixed;
   bottom: 22px;
-  right: 22px;
+  right: 80px;
   z-index: 9999;
   border-radius: 9999px;
   padding: 12px 16px;
