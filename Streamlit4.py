@@ -188,6 +188,21 @@ def guess_suggestion(question: str, docs):
                 best_score, best_line = score, ln
     return best_line or "Valuation Summary"
 
+def is_clarification(answer: str) -> bool:
+    """Return True if the LLM is asking the user to rephrase / clarify."""
+    low = answer.lower().strip()
+    patterns = [
+        "sorry i didnt understand the question",
+        "sorry i didn't understand the question",
+        "hmm, i am not sure",
+        "are you able to rephrase your question",
+        "did you mean",
+        "can you clarify",
+        "could you clarify",
+    ]
+    # Also treat pure clarification-style outputs that end with a question mark
+    return any(p in low for p in patterns)
+
 
 def sanitize_suggestion(answer: str, question: str, docs):
     """
@@ -525,12 +540,12 @@ if st.session_state.waiting_for_response:
 
         apology = f"Sorry I can only answer question related to {pdf_display} pdf document"
         is_unrelated = apology.lower() in answer.strip().lower()
-
+        is_clarify  = is_clarification(answer) 
         entry = {"id": _new_id(), "role": "assistant", "content": answer}
         ref_page, ref_img_b64 = None, None
 
         try:
-            if docs and not is_unrelated:
+            if docs and not (is_unrelated or is_clarify):
                 texts = [d.page_content for d in docs]
                 embedder = CohereEmbeddings(
                     model="embed-english-v3.0",
