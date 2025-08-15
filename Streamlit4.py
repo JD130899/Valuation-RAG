@@ -493,7 +493,7 @@ if up:
     etran_clicked = components.html(
         """
         <style>
-          #etran-fab { position: fixed; right: 18px; bottom: 18px; z-index: 9999; }
+          #etran-fab { position: fixed; right: 18px; bottom: 1px; z-index: 9999; }
           #etran-btn {
             border-radius: 9999px;
             padding: 10px 16px;
