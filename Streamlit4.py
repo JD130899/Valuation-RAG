@@ -134,12 +134,12 @@ def render_reference_card(label: str, img_b64: str, pdf_b64: str, page: int, key
         height=0,
     )
 
-# preloaded message IDs
+# give IDs to any preloaded messages
 for m in st.session_state.messages:
     if "id" not in m:
         m["id"] = _new_id()
 
-# ----------- helpers (NEW: cleaning + confirmation routing) -----------
+# ----------- helpers (cleaning + suggestion + confirmation routing) -----------
 
 def _clean_heading(text: str) -> str:
     """
@@ -160,10 +160,6 @@ def extract_suggestion(text):
     if val.lower() == "suggestion":
         return None
     return val
-
-def is_confirmation(text: str) -> bool:
-    t = text.strip().lower()
-    return t in {"y", "yes", "yeah", "yep", "correct", "right", "sure", "ok", "okay"}
 
 def is_clarification(answer: str) -> bool:
     low = answer.lower().strip()
@@ -186,7 +182,6 @@ def guess_suggestion(question: str, docs):
             raw = ln.strip()
             if not raw:
                 continue
-            # prefer short, title-like lines
             if len(raw.split()) > 6:
                 continue
             words = set(w.lower() for w in re.findall(r"[A-Za-z]{3,}", raw))
@@ -222,6 +217,42 @@ def sanitize_suggestion(answer: str, question: str, docs):
         return f"Sorry I didnt understand the question. Did you mean {cand}?"
     # Ensure no stray heading symbols remain
     return re.sub(r"(Did you mean\s+)[#>\-\*\d\.\)\(]+\s*", r"\1", answer, flags=re.IGNORECASE)
+
+# ---------- LLM-based confirmation classifier (GENERALIZES "yes") ----------
+def _last_assistant_text(history: list) -> str:
+    for m in reversed(history):
+        if m.get("role") == "assistant":
+            return m.get("content", "")
+    return ""
+
+def classify_reply_intent(user_reply: str, prev_assistant: str) -> str:
+    """
+    Returns one of: CONFIRM, DENY, NEITHER
+    Uses only the previous assistant message + the user's short reply.
+    """
+    judge = PromptTemplate(
+        template=(
+            "You are a strict intent classifier.\n"
+            "Assistant just said:\n{assistant}\n\n"
+            "User replied:\n{user}\n\n"
+            "Label the user's intent relative to the assistant's message as exactly one of:\n"
+            "CONFIRM  (agree/accept/yes/affirm)\n"
+            "DENY     (disagree/no/reject)\n"
+            "NEITHER  (anything else: new question, unrelated, unclear)\n\n"
+            "Reply with ONLY one token: CONFIRM or DENY or NEITHER."
+        ),
+        input_variables=["assistant", "user"]
+    )
+    out = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
+        judge.invoke({"assistant": prev_assistant or "", "user": user_reply or ""})
+    ).content.strip().upper()
+    if out not in {"CONFIRM", "DENY", "NEITHER"}:
+        return "NEITHER"
+    return out
+
+def is_confirmation(user_reply: str, history: list) -> bool:
+    prev = _last_assistant_text(history)
+    return classify_reply_intent(user_reply, prev) == "CONFIRM"
 
 def condense_query(chat_history, user_input: str, pdf_name: str) -> str:
     hist = []
@@ -414,7 +445,7 @@ Otherwise, **do not** ask any follow-up.
 If the user's question is unrelated to this PDF or requires information outside the Context, reply **exactly**:
 "Sorry I can only answer question related to {pdf_name} pdf document"
 
-**Use ONLY what appears under “Context”.**
+**Use ONLY what appears under “Context”**.
 
 ### How to answer
 1. Single value → short sentence with the exact number.
@@ -445,7 +476,7 @@ Conversation so far:
 # ================= Input =================
 user_q = st.chat_input("Type your question here…")
 if user_q:
-    # Keep the chat bubble EXACTLY as typed (e.g., "Yes")
+    # Keep the chat bubble EXACTLY as typed (e.g., "Yes", "ya", 👍)
     st.session_state.messages.append({"id": _new_id(), "role": "user", "content": user_q})
     st.session_state.pending_input = user_q
     st.session_state.waiting_for_response = True
@@ -474,11 +505,12 @@ if st.session_state.waiting_for_response:
         history_to_use = st.session_state.messages[-10:]
         pdf_display = os.path.splitext(up.name)[0]
 
-        # If the user confirmed ("Yes"), route the last suggestion internally,
+        # If the user confirmed, route the last suggestion internally,
         # but DO NOT change the visible chat bubble.
-        effective_q = st.session_state.last_suggestion if (is_confirmation(raw_q) and st.session_state.last_suggestion) else raw_q
+        use_last = is_confirmation(raw_q, history_to_use) and st.session_state.last_suggestion
+        effective_q = st.session_state.last_suggestion if use_last else raw_q
 
-        # Condense for retrieval so follow-ups like “Yes” work
+        # Condense for retrieval so follow-ups like “Yes/ya/👍” work
         query_for_retrieval = condense_query(history_to_use, effective_q, pdf_display)
 
         ctx, docs = "", []
@@ -492,13 +524,13 @@ if st.session_state.waiting_for_response:
         full_input = {
             "chat_history": format_chat_history(history_to_use),
             "context":      ctx,
-            "question":     effective_q,  # use the internal effective question
+            "question":     effective_q,  # internal effective question
             "pdf_name":     pdf_display,
         }
         answer = llm.invoke(wrapped_prompt.invoke(full_input)).content
         answer = sanitize_suggestion(answer, effective_q, docs)
 
-        # Save a CLEANED last suggestion for future "Yes"
+        # Save a CLEANED last suggestion for future confirmations
         sug = extract_suggestion(answer)
         st.session_state.last_suggestion = _clean_heading(sug) if sug else None
 
@@ -508,7 +540,7 @@ if st.session_state.waiting_for_response:
 
         entry = {"id": _new_id(), "role": "assistant", "content": answer}
 
-        # ---------- TOP-3 LLM PICK ----------
+        # ---------- TOP-3 LLM PICK (for the reference card) ----------
         try:
             if docs and not (is_unrelated or is_clarify):
                 top3 = docs[:3]
