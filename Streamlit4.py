@@ -504,7 +504,7 @@ if up:
         border-radius: 9999px;
         padding: 10px 16px;
         background: #000; color: #fff; border: none;
-        box-shadow: 0 10px 30px rgba(0,0,0,.35);
+
         right: 11px;     /* horizontal offset */
         bottom: 11px; 
         cursor: pointer;
