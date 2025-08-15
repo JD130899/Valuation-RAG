@@ -488,12 +488,18 @@ user_q = st.chat_input("Type your question here…")
 
 # ---- Floating "Etran Sheet" button (works reliably via components.html) ----
 
+# ---- Floating "Etran Sheet" button: bottom-right just above chat input ----
 etran_clicked = False
 if up:
     etran_clicked = components.html(
         """
         <style>
-          #etran-fab { position: fixed; right: 18px; bottom: 1px; z-index: 9999; }
+          #etran-fab {
+            position: fixed;
+            right: 18px;
+            bottom: 12px;          /* fallback if we can't find chat input */
+            z-index: 9999;
+          }
           #etran-btn {
             border-radius: 9999px;
             padding: 10px 16px;
@@ -503,29 +509,56 @@ if up:
           }
           #etran-btn:hover { background: #222; }
           #etran-btn:active { transform: translateY(1px); }
-          @media (max-width: 640px){ #etran-fab { bottom: 64px; right: 12px; } }
         </style>
+
         <div id="etran-fab"><button id="etran-btn" type="button">Etran Sheet</button></div>
+
         <script src="https://unpkg.com/@streamlit/component-lib/dist/index.js"></script>
         <script>
           function send(v){ Streamlit.setComponentValue(v); }
+
+          // Position FAB just above the chat input
+          function positionFab(){
+            const fab = document.getElementById("etran-fab");
+            if(!fab) return;
+
+            // Streamlit chat input container (stable testid)
+            const chat = window.parent?.document?.querySelector('[data-testid="stChatInput"]');
+            if (chat){
+              const r = chat.getBoundingClientRect();
+              const distFromBottom = Math.max(16, window.innerHeight - r.top + 12); // 12px above input
+              fab.style.bottom = distFromBottom + "px";
+            } else {
+              fab.style.bottom = "84px"; // fallback
+            }
+          }
+
+          // Reposition on load, resize, and DOM changes
+          window.addEventListener("load", positionFab, {once:true});
+          window.addEventListener("resize", positionFab);
+          const obs = new MutationObserver(positionFab);
+          obs.observe(window.parent?.document?.body || document.body, {subtree:true, childList:true, attributes:true});
+
+          // Click → send True once
           window.addEventListener("load", function(){
             document.getElementById("etran-btn").addEventListener("click", function(){ send(true); });
-            Streamlit.setFrameHeight(0);
+            Streamlit.setFrameHeight(0); // keep iframe collapsed
+            positionFab();
           });
         </script>
         """,
-        height=0
+        height=0,
+        key="etran_fab",   # important: stable key so we can clear its value
     )
 
-# ✅ only treat a real click as True (not a leftover truthy value)
+# Only act on a real click
 if etran_clicked is True:
     payload = "Etran Sheet"
     st.session_state.messages.append({"id": _new_id(), "role": "user", "content": payload})
     st.session_state.pending_input = payload
     st.session_state.waiting_for_response = True
-    # optional: immediately clear after consuming
-    st.session_state["etran_fab"] = None
+    st.session_state["etran_fab"] = None  # clear consumed click
+
 
 
 
