@@ -28,13 +28,7 @@ from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
 load_dotenv()
 st.set_page_config(page_title="Underwriting Agent", layout="wide")
 # Kill any legacy query params like ?qs=... from old builds
-try:
-    qp = st.query_params  # dict-like
-    if "qs" in qp:
-        # remove just 'qs' so you don't blow away other params
-        del qp["qs"]        # same as: st.query_params.pop("qs", None")
-except Exception:
-    pass
+
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
@@ -452,6 +446,17 @@ def queue_question(q: str):
     # append user message immediately (so it shows in same run)
     st.session_state.messages.append({"id": _new_id(), "role": "user", "content": q})
 
+# --- consume quick-suggest clicks coming via ?qs=... ---
+qs = st.query_params.get("qs")
+if qs:
+    queue_question(qs)
+    # clear it so it doesn't re-trigger on rerun
+    try:
+        del st.query_params["qs"]
+    except Exception:
+        pass
+
+
 # ================= Prompt helpers =================
 def format_chat_history(messages):
     lines = []
@@ -529,6 +534,21 @@ with c3:
     st.button("Goodwill value", key="btn_gw", type="secondary",
               on_click=queue_question, args=("Goodwill value",))
 st.markdown('</div></div>', unsafe_allow_html=True)
+
+# ---------------- Fixed quick-suggest buttons (bottom-right) ----------------
+st.markdown(
+    """
+    <div class="qs-fixed">
+      <div class="qs-flex">
+        <a href="?qs=ETRAN%20Cheatsheet"><button kind="secondary" type="button">ETRAN Cheatsheet</button></a>
+        <a href="?qs=What%20is%20the%20valuation%3F"><button kind="secondary" type="button">What is the valuation?</button></a>
+        <a href="?qs=Goodwill%20value"><button kind="secondary" type="button">Goodwill value</button></a>
+      </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
 
 # Chat input (one instance only; keep this AFTER the floating buttons)
 user_q = st.chat_input("Type your question here…", key="main_chat_input")
