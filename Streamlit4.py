@@ -6,7 +6,7 @@ import fitz  # PyMuPDF
 from PIL import Image
 from dotenv import load_dotenv
 import streamlit.components.v1 as components
-from urllib.parse import quote
+
 # LangChain / RAG deps
 from langchain_core.documents import Document
 from llama_cloud_services import LlamaParse
@@ -45,7 +45,7 @@ if "last_suggestion" not in st.session_state:
 if "next_msg_id" not in st.session_state:
     st.session_state.next_msg_id = 0
 
-# ---------- styles (full-width, floating pill row above chat input) ----------
+# ---------- styles (floating pill row above chat input) ----------
 st.markdown("""
 <style>
 .block-container { padding-bottom: 140px; }
@@ -55,19 +55,19 @@ st.markdown("""
   position: fixed;
   bottom: 110px;                 /* just above input */
   left: 81%;
-  transform: translateX(-50%);  /* center the container itself */
+  transform: translateX(-50%);   /* center the container itself */
   width: 100%;
-  max-width: 720px;             /* match your chat input max width */
+  max-width: 720px;              /* match your chat input max width */
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
-  justify-content: flex-end;    /* <-- right-align within the bar */
+  justify-content: flex-end;     /* right-align within the bar */
   padding: 0 12px;
   box-sizing: border-box;
   z-index: 9999;
 }
 
-/* pills (unchanged) */
+/* pills */
 .qs-pill{
   text-decoration:none!important;
   border-radius:999px;
@@ -76,6 +76,7 @@ st.markdown("""
   background:black;
   color:white!important;
   font-size:0.9rem;
+  cursor:pointer;
 }
 .qs-pill:hover{ background:#222; }
 
@@ -86,16 +87,11 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-buttons = [
+SUGGESTION_BUTTONS = [
     "ETRAN Cheatsheet",
     "What is the valuation?",
     "Goodwill value",
 ]
-links = "".join(
-    f'<a class="qs-pill" href="?suggest={quote(lbl)}">{lbl}</a>'
-    for lbl in buttons
-)
-st.markdown(f'<div class="qs-row">{links}</div>', unsafe_allow_html=True)
 
 def _new_id():
     n = st.session_state.next_msg_id
@@ -187,7 +183,6 @@ for m in st.session_state.messages:
         m["id"] = _new_id()
 
 # ----------- helpers (cleaning + suggestion + confirmation routing) -----------
-
 def _clean_heading(text: str) -> str:
     if not text:
         return text
@@ -260,9 +255,6 @@ def _last_assistant_text(history: list) -> str:
     return ""
 
 def classify_reply_intent(user_reply: str, prev_assistant: str) -> str:
-    """
-    Returns: CONFIRM | DENY | NEITHER
-    """
     judge = PromptTemplate(
         template=(
             "You are a strict intent classifier.\n"
@@ -425,7 +417,44 @@ if st.session_state.get("last_processed_pdf") != up.name:
     ]
     st.session_state.last_processed_pdf = up.name
 
-# ================= Styles =================
+# ---------- QUICK SUGGESTION PILLS (only when a PDF is loaded) ----------
+pill_clicked = None
+if up:
+    # Render the row in the parent DOM
+    links_html = "".join(
+        f'<a class="qs-pill" href="#" data-q="{lbl}">{lbl}</a>'
+        for lbl in SUGGESTION_BUTTONS
+    )
+    st.markdown(f'<div class="qs-row">{links_html}</div>', unsafe_allow_html=True)
+
+    # Attach click handlers from an invisible iframe and send value to Streamlit (no reload)
+    pill_clicked = components.html(
+        """<!doctype html><meta charset='utf-8'>
+<style>html,body{background:transparent;margin:0;height:0;overflow:hidden}</style>
+<script src="https://unpkg.com/@streamlit/component-lib/dist/index.js"></script>
+<script>(function(){
+  function attach(){
+    var d = window.parent && window.parent.document;
+    if(!d) return setTimeout(attach,120);
+    var pills = d.querySelectorAll('.qs-row .qs-pill');
+    if(!pills.length) return setTimeout(attach,120);
+    function send(v){ Streamlit.setComponentValue(v); }
+    pills.forEach(function(el){
+      el.addEventListener('click', function(e){
+        e.preventDefault();               // prevent page reload
+        var q = el.getAttribute('data-q') || el.textContent.trim();
+        send(q);                          // send label as question
+      });
+    });
+  }
+  attach();
+  var me = window.frameElement; if(me){me.style.display='none';me.style.height='0';me.style.border='0';}
+})();</script>
+""",
+        height=0
+    )
+
+# ================= Styles (chat + references) =================
 st.markdown("""
 <style>
 /* --- Chat bubbles --- */
@@ -453,7 +482,6 @@ st.markdown("""
   width: min(900px, 90vw); max-height: 75vh; overflow: auto; box-shadow:0 20px 60px rgba(0,0,0,.45);
 }
 .ref .close-x{ position:absolute; top:6px; right:10px; border:0; background:transparent; color:#94a3b8; font-size:20px; line-height:1; cursor:pointer; }
-
 </style>
 """, unsafe_allow_html=True)
 
@@ -509,6 +537,13 @@ Conversation so far:
 # ================= Input =================
 user_q = st.chat_input("Type your question here…")
 
+# Handle pill clicks (send as question)
+if isinstance(pill_clicked, str) and pill_clicked:
+    st.session_state.messages.append({"id": _new_id(), "role": "user", "content": pill_clicked})
+    st.session_state.pending_input = pill_clicked
+    st.session_state.waiting_for_response = True
+
+# Handle manual chat input
 if user_q:
     st.session_state.messages.append({"id": _new_id(), "role": "user", "content": user_q})
     st.session_state.pending_input = user_q
