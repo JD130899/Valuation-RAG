@@ -466,7 +466,7 @@ etran_clicked = components.html(
       #etran-fab {
         position: fixed;
         right: 20px;
-        bottom: 20px;
+        bottom: 80px;
         z-index: 10000; /* Increased z-index to ensure it stays on top */
         display: block; /* Ensure it displays */
       }
