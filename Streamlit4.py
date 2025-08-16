@@ -462,8 +462,8 @@ etran_clicked = components.html(
     <style>
       #etran-fab {
         position: fixed;
-        right: 40px; /* Increased from 20px to account for sidebar or edge */
-        bottom: 40px; /* Increased from 20px to avoid overlap with chat input */
+        right: 20px; /* Reset to original to test alignment */
+        bottom: 60px; /* Increased to clear the chat input area */
         z-index: 10000;
         display: block;
       }
@@ -484,7 +484,7 @@ etran_clicked = components.html(
     <script>
       function send(v) { Streamlit.setComponentValue(v); }
       document.getElementById("etran-btn").addEventListener("click", function() { send(true); });
-      Streamlit.setFrameHeight(0); /* Keep at 0 to avoid disappearance */
+      Streamlit.setFrameHeight(0);
     </script>
     """,
     height=0
