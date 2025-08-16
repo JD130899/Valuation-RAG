@@ -515,6 +515,7 @@ for msg in st.session_state.messages:
         )
 
 # ---------------- Fixed quick-suggest buttons (bottom-right) ----------------
+"""
 st.markdown(
     """
     <div class="qs-fixed">
@@ -527,6 +528,7 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+"""
 
 
 # Chat input (one instance only; keep this AFTER the floating buttons)
