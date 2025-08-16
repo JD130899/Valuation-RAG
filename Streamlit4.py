@@ -539,7 +539,7 @@ Conversation so far:
 user_q = st.chat_input("Type your question here…")
 
 # Handle quick-suggestion clicks via query param ?qs=...
-_qp = st.experimental_get_query_params()          # <-- consistent API
+_qp = st.query_params         # <-- consistent API
 _qs_vals = _qp.get("qs", [])
 pill_clicked = _qs_vals[0] if _qs_vals else None
 
