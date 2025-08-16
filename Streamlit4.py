@@ -60,18 +60,19 @@ st.markdown("""
 /* Give space so fixed buttons don't overlap chat input */
 .block-container { padding-bottom: 140px; }
 
-/* Pin the Streamlit block that CONTAINS our sentinel to bottom-right */
-div[data-testid="stVerticalBlock"]:has(#qs_sentinel) {
+
+/* Pin ONLY the block that directly contains the sentinel */
+div[data-testid="stVerticalBlock"]:has(> #qs_sentinel) {
   position: fixed;
   right: 20px;
-  bottom: 12px;           /* adjust to sit just above chat input */
+  bottom: 12px;   /* tweak as you like */
   z-index: 1000;
   background: transparent;
   padding: 0;
 }
 
-/* Make inner layout tidy & horizontal */
-div[data-testid="stVerticalBlock"]:has(#qs_sentinel)
+/* Layout the columns inside that pinned block */
+div[data-testid="stVerticalBlock"]:has(> #qs_sentinel)
   > div[data-testid="stHorizontalBlock"] {
   display: flex;
   gap: 10px;
@@ -79,12 +80,6 @@ div[data-testid="stVerticalBlock"]:has(#qs_sentinel)
   justify-content: flex-end;
 }
 
-/* Optional: pill styling */
-div[data-testid="stVerticalBlock"]:has(#qs_sentinel) button[kind="secondary"]{
-  border-radius: 999px !important;
-  height: 40px !important;
-  padding: 8px 14px !important;
-}
 
 /* inner flex so buttons line up nicely */
 .qs-flex { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
