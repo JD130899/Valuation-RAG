@@ -65,11 +65,10 @@ st.markdown("""
 /* fixed bottom-right container */
 .qs-fixed {
   position: fixed;
-  bottom: 20px;   /* just above the chat input */
+  bottom: 110px;   /* just above the chat input */
   right: 20px;
   z-index: 1000;
-  display: flex;
-  gap: 10px;
+
 }
 
 /* Button style */
@@ -517,22 +516,25 @@ for msg in st.session_state.messages:
         )
 # ---------------- Bottom-right quick-suggest buttons (sit just above the input) ----------------
 # fixed-position suggestion buttons
-st.markdown('<div class="qs-fixed">', unsafe_allow_html=True)
-
+# ---------------- Floating quick-suggest buttons (fixed at bottom-right) ----------------
+st.markdown('<div class="qs-fixed"><div class="qs-flex">', unsafe_allow_html=True)
 c1, c2, c3 = st.columns(3)
 with c1:
-    st.button("ETRAN Cheatsheet", key="btn_et", on_click=queue_question, args=("ETRAN Cheatsheet",))
+    st.button("ETRAN Cheatsheet", key="btn_et", type="secondary",
+              on_click=queue_question, args=("ETRAN Cheatsheet",))
 with c2:
-    st.button("What is the valuation?", key="btn_val", on_click=queue_question, args=("What is the valuation?",))
+    st.button("What is the valuation?", key="btn_val", type="secondary",
+              on_click=queue_question, args=("What is the valuation?",))
 with c3:
-    st.button("Goodwill value", key="btn_gw", on_click=queue_question, args=("Goodwill value",))
+    st.button("Goodwill value", key="btn_gw", type="secondary",
+              on_click=queue_question, args=("Goodwill value",))
+st.markdown('</div></div>', unsafe_allow_html=True)
 
-st.markdown('</div>', unsafe_allow_html=True)
-
-# Chat input (must come AFTER the buttons to keep them above it)
+# Chat input (one instance only; keep this AFTER the floating buttons)
 user_q = st.chat_input("Type your question here…", key="main_chat_input")
 if user_q:
     queue_question(user_q)
+
         
 
 # ========================== ANSWER (same run; smooth) ==========================
