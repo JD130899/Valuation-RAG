@@ -459,6 +459,7 @@ user_q = st.chat_input("Type your question here…")
 
 # ---- Floating "Etran Sheet" button just above chat input (bottom-right, black) ----
 # ---- Floating "Etran Sheet" button at bottom right ----
+# ---- Floating "Etran Sheet" button at bottom right ----
 etran_clicked = components.html(
     """
     <style>
@@ -466,7 +467,8 @@ etran_clicked = components.html(
         position: fixed;
         right: 20px;
         bottom: 20px;
-        z-index: 9999;
+        z-index: 10000; /* Increased z-index to ensure it stays on top */
+        display: block; /* Ensure it displays */
       }
       #etran-btn {
         border-radius: 9999px;
@@ -475,6 +477,7 @@ etran_clicked = components.html(
         color: #fff;
         border: none;
         cursor: pointer;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.2); /* Slight shadow for visibility */
       }
       #etran-btn:hover { background: #222; }
       #etran-btn:active { transform: translateY(1px); }
@@ -484,10 +487,11 @@ etran_clicked = components.html(
     <script>
       function send(v) { Streamlit.setComponentValue(v); }
       document.getElementById("etran-btn").addEventListener("click", function() { send(true); });
-      Streamlit.setFrameHeight(0);
+      console.log("Etran button loaded"); // Debugging log
+      Streamlit.setFrameHeight(20); // Set a small height to ensure visibility
     </script>
     """,
-    height=0
+    height=20  # Changed from 0 to 20 to ensure the component renders
 )
 
 # Only act on a real click
