@@ -54,32 +54,26 @@ if "next_msg_id" not in st.session_state:
 # ---------- styles (floating pill row above chat input; buttons now, no URL params) ----------
 st.markdown("""
 <style>
-.block-container { padding-bottom: 140px; }
+.block-container { padding-bottom: 140px; }  /* space for fixed buttons */
 
-/* fixed bottom-right container */
 .qs-fixed {
   position: fixed;
-  bottom: 110px;   /* just above the chat input */
-  right: 20px;
-  z-index: 1000;
-
+  bottom: 18px;   /* move closer/farther from bottom as you like */
+  right: 24px;    /* distance from right edge */
+  z-index: 1000;  /* above other UI */
 }
 
-/* Button style */
-.qs-fixed button {
+.qs-flex { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+
+button[kind="secondary"] {
   border-radius: 999px !important;
-  padding: 8px 16px !important;
-  height: 10px !important;  /* consistent height */
+  padding: 8px 14px !important;
+  height: 40px !important;  /* keeps button height consistent */
 }
 
 /* inner flex so buttons line up nicely */
 .qs-flex { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
 
-/* make Streamlit buttons pill-ish */
-button[kind="secondary"] {
-  border-radius: 999px !important;
-  padding: 16px 14px !important;
-}
 
 /* Chat bubbles */
 .user-bubble {background:#007bff;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:right;margin:4px;}
@@ -519,21 +513,6 @@ for msg in st.session_state.messages:
             page=msg["source_page"],
             key=msg.get("id", "k0"),
         )
-# ---------------- Bottom-right quick-suggest buttons (sit just above the input) ----------------
-# fixed-position suggestion buttons
-# ---------------- Floating quick-suggest buttons (fixed at bottom-right) ----------------
-st.markdown('<div class="qs-fixed"><div class="qs-flex">', unsafe_allow_html=True)
-c1, c2, c3 = st.columns(3)
-with c1:
-    st.button("ETRAN Cheatsheet", key="btn_et", type="secondary",
-              on_click=queue_question, args=("ETRAN Cheatsheet",))
-with c2:
-    st.button("What is the valuation?", key="btn_val", type="secondary",
-              on_click=queue_question, args=("What is the valuation?",))
-with c3:
-    st.button("Goodwill value", key="btn_gw", type="secondary",
-              on_click=queue_question, args=("Goodwill value",))
-st.markdown('</div></div>', unsafe_allow_html=True)
 
 # ---------------- Fixed quick-suggest buttons (bottom-right) ----------------
 st.markdown(
@@ -552,6 +531,23 @@ st.markdown(
 
 # Chat input (one instance only; keep this AFTER the floating buttons)
 user_q = st.chat_input("Type your question here…", key="main_chat_input")
+# ---- fixed bottom-right quick-suggest buttons (REPLACES the old columns block) ----
+st.markdown('<div class="qs-fixed"><div class="qs-flex">', unsafe_allow_html=True)
+
+b1, b2, b3 = st.columns(3)
+with b1:
+    st.button("ETRAN Cheatsheet", key="qs_btn_et", type="secondary",
+              on_click=queue_question, args=("ETRAN Cheatsheet",))
+with b2:
+    st.button("What is the valuation?", key="qs_btn_val", type="secondary",
+              on_click=queue_question, args=("What is the valuation?",))
+with b3:
+    st.button("Goodwill value", key="qs_btn_gw", type="secondary",
+              on_click=queue_question, args=("Goodwill value",))
+
+st.markdown('</div></div>', unsafe_allow_html=True)
+
+
 if user_q:
     queue_question(user_q)
 
