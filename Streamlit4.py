@@ -57,19 +57,33 @@ st.markdown("""
 .block-container { padding-bottom: 140px; }
 
 /* fixed bottom-right container */
-.qs-fixed {
-  position: fixed;
-  bottom: 110px;   /* just above the chat input */
-  right: 20px;
-  z-index: 1000;
+/* Give space so fixed buttons don't overlap chat input */
+.block-container { padding-bottom: 140px; }
 
+/* Pin the Streamlit block that CONTAINS our sentinel to bottom-right */
+div[data-testid="stVerticalBlock"]:has(#qs_sentinel) {
+  position: fixed;
+  right: 20px;
+  bottom: 12px;           /* adjust to sit just above chat input */
+  z-index: 1000;
+  background: transparent;
+  padding: 0;
 }
 
-/* Button style */
-.qs-fixed button {
+/* Make inner layout tidy & horizontal */
+div[data-testid="stVerticalBlock"]:has(#qs_sentinel)
+  > div[data-testid="stHorizontalBlock"] {
+  display: flex;
+  gap: 10px;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+}
+
+/* Optional: pill styling */
+div[data-testid="stVerticalBlock"]:has(#qs_sentinel) button[kind="secondary"]{
   border-radius: 999px !important;
-  padding: 8px 16px !important;
-  height: 10px !important;  /* consistent height */
+  height: 40px !important;
+  padding: 8px 14px !important;
 }
 
 /* inner flex so buttons line up nicely */
@@ -519,23 +533,22 @@ for msg in st.session_state.messages:
             page=msg["source_page"],
             key=msg.get("id", "k0"),
         )
-# ---------------- Bottom-right quick-suggest buttons (sit just above the input) ----------------
-# fixed-position suggestion buttons
-# ---------------- Floating quick-suggest buttons (fixed at bottom-right) ----------------
-st.markdown('<div class="qs-fixed"><div class="qs-flex">', unsafe_allow_html=True)
-c1, c2, c3 = st.columns(3)
-with c1:
-    st.button("ETRAN Cheatsheet", key="btn_et", type="secondary",
-              on_click=queue_question, args=("ETRAN Cheatsheet",))
-with c2:
-    st.button("What is the valuation?", key="btn_val", type="secondary",
-              on_click=queue_question, args=("What is the valuation?",))
-with c3:
-    st.button("Goodwill value", key="btn_gw", type="secondary",
-              on_click=queue_question, args=("Goodwill value",))
-st.markdown('</div></div>', unsafe_allow_html=True)
+# --- Quick-suggest buttons (normal Streamlit widgets) ---
+qs_host = st.container()
+with qs_host:
+    st.markdown('<div id="qs_sentinel"></div>', unsafe_allow_html=True)  # marker for CSS
 
-# ---------------- Fixed quick-suggest buttons (bottom-right) ----------------
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.button("ETRAN Cheatsheet", key="btn_et", type="secondary",
+                  on_click=queue_question, args=("ETRAN Cheatsheet",))
+    with c2:
+        st.button("What is the valuation?", key="btn_val", type="secondary",
+                  on_click=queue_question, args=("What is the valuation?",))
+    with c3:
+        st.button("Goodwill value", key="btn_gw", type="secondary",
+                  on_click=queue_question, args=("Goodwill value",))
+
 
 
 
