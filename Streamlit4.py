@@ -466,9 +466,9 @@ etran_clicked = components.html(
       #etran-fab {
         position: fixed;
         right: 20px;
-        bottom: 80px;
-        z-index: 10000; /* Increased z-index to ensure it stays on top */
-        display: block; /* Ensure it displays */
+        bottom: 20px;
+        z-index: 10000;
+        display: block;
       }
       #etran-btn {
         border-radius: 9999px;
@@ -477,7 +477,7 @@ etran_clicked = components.html(
         color: #fff;
         border: none;
         cursor: pointer;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.2); /* Slight shadow for visibility */
+        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
       }
       #etran-btn:hover { background: #222; }
       #etran-btn:active { transform: translateY(1px); }
@@ -487,11 +487,10 @@ etran_clicked = components.html(
     <script>
       function send(v) { Streamlit.setComponentValue(v); }
       document.getElementById("etran-btn").addEventListener("click", function() { send(true); });
-      console.log("Etran button loaded"); // Debugging log
-      Streamlit.setFrameHeight(20); // Set a small height to ensure visibility
+      Streamlit.setFrameHeight(20);
     </script>
     """,
-    height=20  # Changed from 0 to 20 to ensure the component renders
+    height=20
 )
 
 # Only act on a real click
