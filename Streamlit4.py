@@ -76,7 +76,7 @@ st.markdown("""
 /* make Streamlit buttons pill-ish */
 button[kind="secondary"] {
   border-radius: 999px !important;
-  padding: 8px 14px !important;
+  padding: 16px 14px !important;
 }
 
 /* Chat bubbles */
