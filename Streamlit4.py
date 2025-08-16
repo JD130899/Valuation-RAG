@@ -465,9 +465,9 @@ etran_clicked = components.html(
     <style>
       #etran-fab {
         position: fixed;
-        right: 20px;
-        bottom: 20px;
-        z-index: 10000;
+        right: 9px;
+        bottom: 80px;
+        z-index: 9999;
         display: block;
       }
       #etran-btn {
@@ -490,7 +490,7 @@ etran_clicked = components.html(
       Streamlit.setFrameHeight(20);
     </script>
     """,
-    height=20
+    height=0
 )
 
 # Only act on a real click
