@@ -467,7 +467,7 @@ etran_clicked = components.html(
         position: fixed;
         right: 20px;
         bottom: 20px;
-        z-index: 10000;
+        z-index: 9999;
         display: block;
       }
       #etran-btn {
