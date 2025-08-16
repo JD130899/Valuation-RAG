@@ -572,18 +572,6 @@ for msg in st.session_state.messages:
 # Chat input (one instance only; keep this AFTER the floating buttons)
 user_q = st.chat_input("Type your question here…", key="main_chat_input")
 # --- Quick-suggest bubble (real Streamlit buttons, no navigation) ---
-qs_host = st.container()
-with qs_host:
-    # invisible marker so CSS can find this block
-    st.markdown('<div id="qs_sentinel"></div>', unsafe_allow_html=True)
-
-    c1, c2 = st.columns(2)
-    with c1:
-        st.button("What is the valuation?", key="qs_btn_val", type="secondary",
-                  on_click=queue_question, args=("What is the valuation?",))
-    with c2:
-        st.button("Goodwill value", key="qs_btn_gw", type="secondary",
-                  on_click=queue_question, args=("Goodwill value",))
 
 
 
