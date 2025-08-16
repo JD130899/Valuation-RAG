@@ -539,7 +539,7 @@ Conversation so far:
 # ================= Input =================
 user_q = st.chat_input("Type your question here…")
 
-_qp = st.experimental_get_query_params()
+_qp = st.query_params
 if "qs" in _qp and _qp["qs"]:
     pill_clicked = _qp["qs"][0]  # the label we put in the URL
     # push into the normal flow
