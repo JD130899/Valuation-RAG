@@ -45,6 +45,58 @@ if "last_suggestion" not in st.session_state:
 if "next_msg_id" not in st.session_state:
     st.session_state.next_msg_id = 0
 
+# ---------- styles (full-width, floating pill row above chat input) ----------
+st.markdown("""
+<style>
+.block-container { padding-bottom: 140px; }
+
+/* same width/position as chat input, but content aligned to the RIGHT */
+.qs-row{
+  position: fixed;
+  bottom: 110px;                 /* just above input */
+  left: 81%;
+  transform: translateX(-50%);  /* center the container itself */
+  width: 100%;
+  max-width: 720px;             /* match your chat input max width */
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;    /* <-- right-align within the bar */
+  padding: 0 12px;
+  box-sizing: border-box;
+  z-index: 9999;
+}
+
+/* pills (unchanged) */
+.qs-pill{
+  text-decoration:none!important;
+  border-radius:999px;
+  padding:8px 14px;
+  border:1px solid rgba(255,255,255,0.2);
+  background:black;
+  color:white!important;
+  font-size:0.9rem;
+}
+.qs-pill:hover{ background:#222; }
+
+/* optional: on very small screens, left-align to avoid overflow */
+@media (max-width: 760px){
+  .qs-row{ justify-content:flex-start; }
+}
+</style>
+""", unsafe_allow_html=True)
+
+buttons = [
+    "ETRAN Cheatsheet",
+    "What is the valuation?",
+    "Goodwill value",
+]
+links = "".join(
+    f'<a class="qs-pill" href="?suggest={quote(lbl)}">{lbl}</a>'
+    for lbl in buttons
+)
+st.markdown(f'<div class="qs-row">{links}</div>', unsafe_allow_html=True)
+
 def _new_id():
     n = st.session_state.next_msg_id
     st.session_state.next_msg_id += 1
