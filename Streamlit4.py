@@ -55,6 +55,33 @@ if "next_msg_id" not in st.session_state:
 st.markdown("""
 <style>
 .block-container { padding-bottom: 140px; }  /* space for fixed buttons */
+/* Pin the Streamlit block that CONTAINS #qs_sentinel */
+div[data-testid="stVerticalBlock"]:has(#qs_sentinel) {
+  position: fixed;
+  right: 24px;
+  bottom: 10px;
+  z-index: 1000;
+  background: transparent;
+  padding: 0;
+}
+
+/* Make inner layout horizontal & tidy */
+div[data-testid="stVerticalBlock"]:has(#qs_sentinel) > div[data-testid="stHorizontalBlock"] {
+  display: flex;
+  gap: 10px;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+}
+
+/* Optional: black pills */
+div[data-testid="stVerticalBlock"]:has(#qs_sentinel) button[kind="secondary"]{
+  background:#000 !important;
+  color:#fff !important;
+  border:0 !important;
+  border-radius:999px !important;
+  height:40px !important;
+  padding:8px 14px !important;
+}
 
 .qs-fixed {
   position: fixed;
@@ -544,57 +571,19 @@ for msg in st.session_state.messages:
 
 # Chat input (one instance only; keep this AFTER the floating buttons)
 user_q = st.chat_input("Type your question here…", key="main_chat_input")
-# ---- fixed bottom-right quick-suggest buttons (REPLACES the old columns block) ----
-# Fixed quick-suggest bubble (pure HTML inside the fixed div)
-# --- create Streamlit buttons (normal widgets, trigger queue_question directly) ---
-c1, c2 = st.columns(2)
-with c1:
-    st.button("What is the valuation?", key="qs_btn_val", type="secondary",
-              on_click=queue_question, args=("What is the valuation?",))
-with c2:
-    st.button("Goodwill value", key="qs_btn_gw", type="secondary",
-              on_click=queue_question, args=("Goodwill value",))
+# --- Quick-suggest bubble (real Streamlit buttons, no navigation) ---
+qs_host = st.container()
+with qs_host:
+    # invisible marker so CSS can find this block
+    st.markdown('<div id="qs_sentinel"></div>', unsafe_allow_html=True)
 
-# --- JS snippet to move those real buttons into the fixed bottom-right bubble ---
-components.html(
-    """
-    <script>
-    (function () {
-      const LABELS = ["What is the valuation?", "Goodwill value"];
-
-      function ensureHost(doc){
-        let host = doc.getElementById("qs-fixed");
-        if (!host) {
-          host = doc.createElement("div");
-          host.id = "qs-fixed";
-          host.className = "qs-fixed";
-          host.innerHTML = '<div class="qs-flex"></div>';
-          doc.body.appendChild(host);
-        }
-        return host.querySelector(".qs-flex");
-      }
-
-      function moveButtons(){
-        const doc = window.parent && window.parent.document;
-        if (!doc) return;
-        const flex = ensureHost(doc);
-
-        // find actual Streamlit buttons by visible text
-        const btns = Array.from(doc.querySelectorAll("button"))
-          .filter(b => LABELS.includes((b.innerText || "").trim()));
-
-        btns.forEach(b => { try { flex.appendChild(b); } catch(e){} });
-      }
-
-      let tries = 0, h = setInterval(() => {
-        moveButtons();
-        if (++tries > 20) clearInterval(h);
-      }, 150);
-    })();
-    </script>
-    """,
-    height=0,
-)
+    c1, c2 = st.columns(2)
+    with c1:
+        st.button("What is the valuation?", key="qs_btn_val", type="secondary",
+                  on_click=queue_question, args=("What is the valuation?",))
+    with c2:
+        st.button("Goodwill value", key="qs_btn_gw", type="secondary",
+                  on_click=queue_question, args=("Goodwill value",))
 
 
 
