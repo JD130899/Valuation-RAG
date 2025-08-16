@@ -5,7 +5,6 @@ import streamlit as st
 import fitz  # PyMuPDF
 from PIL import Image
 from dotenv import load_dotenv
-from sklearn.metrics.pairwise import cosine_similarity  # kept (not required for ref now)
 import streamlit.components.v1 as components
 
 # LangChain / RAG deps
@@ -39,14 +38,10 @@ if "pending_input" not in st.session_state:
     st.session_state.pending_input = None
 if "waiting_for_response" not in st.session_state:
     st.session_state.waiting_for_response = False
-if "retriever" not in st.session_state:
-    st.session_state.retriever = None
 if "page_images" not in st.session_state:
     st.session_state.page_images = {}
 if "last_suggestion" not in st.session_state:
     st.session_state.last_suggestion = None  # remember last “Did you mean X?”
-
-# --- Stable IDs for messages ---
 if "next_msg_id" not in st.session_state:
     st.session_state.next_msg_id = 0
 
@@ -142,10 +137,6 @@ for m in st.session_state.messages:
 # ----------- helpers (cleaning + suggestion + confirmation routing) -----------
 
 def _clean_heading(text: str) -> str:
-    """
-    Remove Markdown/numbering/bullets like '#', '##', '-', '*', '1)', etc. from the start.
-    Also trim common trailing punctuation.
-    """
     if not text:
         return text
     text = re.sub(r"^[#>\-\*\d\.\)\(]+\s*", "", text).strip()
@@ -191,9 +182,6 @@ def guess_suggestion(question: str, docs):
     return _clean_heading(best_line or "Valuation Summary")
 
 def sanitize_suggestion(answer: str, question: str, docs):
-    """
-    Ensure clarification replies contain a concrete, short, cleaned suggestion (no leading '#', '-', etc.)
-    """
     low = answer.lower().strip()
     if ("sorry i didnt understand the question" not in low
         and "sorry i didn't understand the question" not in low
@@ -201,13 +189,9 @@ def sanitize_suggestion(answer: str, question: str, docs):
         return answer
 
     sug = _clean_heading(guess_suggestion(question, docs))
-
-    # Replace literal SUGGESTION tokens
     answer = re.sub(r"\bSUGGESTION\b", sug, answer, flags=re.IGNORECASE)
-    # Replace [ ... ] placeholders
     answer = re.sub(r"\[.*?\]", sug, answer)
 
-    # Normalize the "Did you mean ..." line
     m = re.search(r"did you mean\s+(.+?)\?", answer, flags=re.IGNORECASE)
     cand = _clean_heading(m.group(1).strip()) if m else ""
     if not cand or cand.lower() == "suggestion":
@@ -215,10 +199,8 @@ def sanitize_suggestion(answer: str, question: str, docs):
     if len(cand.split()) > 6:
         cand = " ".join(cand.split()[:6])
         return f"Sorry I didnt understand the question. Did you mean {cand}?"
-    # Ensure no stray heading symbols remain
     return re.sub(r"(Did you mean\s+)[#>\-\*\d\.\)\(]+\s*", r"\1", answer, flags=re.IGNORECASE)
 
-# ---------- LLM-based confirmation classifier (GENERALIZES "yes") ----------
 def _last_assistant_text(history: list) -> str:
     for m in reversed(history):
         if m.get("role") == "assistant":
@@ -227,8 +209,7 @@ def _last_assistant_text(history: list) -> str:
 
 def classify_reply_intent(user_reply: str, prev_assistant: str) -> str:
     """
-    Returns one of: CONFIRM, DENY, NEITHER
-    Uses only the previous assistant message + the user's short reply.
+    Returns: CONFIRM | DENY | NEITHER
     """
     judge = PromptTemplate(
         template=(
@@ -249,10 +230,6 @@ def classify_reply_intent(user_reply: str, prev_assistant: str) -> str:
     if out not in {"CONFIRM", "DENY", "NEITHER"}:
         return "NEITHER"
     return out
-
-def is_confirmation(user_reply: str, history: list) -> bool:
-    prev = _last_assistant_text(history)
-    return classify_reply_intent(user_reply, prev) == "CONFIRM"
 
 def condense_query(chat_history, user_input: str, pdf_name: str) -> str:
     hist = []
@@ -386,7 +363,6 @@ if not up:
     st.stop()
 
 # Rebuild retriever when file changes
-# Rebuild retriever when file changes
 if st.session_state.get("last_processed_pdf") != up.name:
     pdf_bytes = up.getvalue()
     st.session_state.pdf_bytes = pdf_bytes
@@ -397,10 +373,6 @@ if st.session_state.get("last_processed_pdf") != up.name:
     ]
     st.session_state.last_processed_pdf = up.name
 
-    # ✅ reset Etran button state so it doesn't auto-fire
-    st.session_state.pop("etran_fab", None)
-
-# ================= Styles =================
 # ================= Styles =================
 st.markdown("""
 <style>
@@ -432,7 +404,6 @@ st.markdown("""
 
 </style>
 """, unsafe_allow_html=True)
-
 
 # ================= Prompt helpers =================
 def format_chat_history(messages):
@@ -486,27 +457,20 @@ Conversation so far:
 # ================= Input =================
 user_q = st.chat_input("Type your question here…")
 
-# ---- Floating "Etran Sheet" button (works reliably via components.html) ----
-# ---- Floating "Etran Sheet" button just above chat input ----
-etran_clicked = False
-if up:
-    
-    etran_clicked = components.html(
+# ---- Floating "Etran Sheet" button just above chat input (bottom-right, black) ----
+etran_clicked = components.html(
     """
     <style>
       #etran-fab {
         position: fixed;
-        right: 11px;     /* horizontal offset */
-        bottom: 11px;    /* vertical offset from bottom */
+        right: 11px;
+        bottom: 11px;
         z-index: 9999;
       }
       #etran-btn {
         border-radius: 9999px;
         padding: 10px 16px;
         background: #000; color: #fff; border: none;
-
-        right: 11px;     /* horizontal offset */
-        bottom: 11px; 
         cursor: pointer;
       }
       #etran-btn:hover { background: #222; }
@@ -525,16 +489,14 @@ if up:
     height=0
 )
 
-
 # Only act on a real click
 if etran_clicked is True:
     payload = "Etran Sheet"
     st.session_state.messages.append({"id": _new_id(), "role": "user", "content": payload})
     st.session_state.pending_input = payload
     st.session_state.waiting_for_response = True
-    
+
 if user_q:
-    # Keep the chat bubble EXACTLY as typed (e.g., "Yes", "ya", 👍)
     st.session_state.messages.append({"id": _new_id(), "role": "user", "content": user_q})
     st.session_state.pending_input = user_q
     st.session_state.waiting_for_response = True
@@ -553,7 +515,6 @@ for msg in st.session_state.messages:
         )
 
 # ================= Answer =================
-# ================= Answer =================
 if st.session_state.waiting_for_response:
     block = st.empty()
     with block.container():
@@ -564,31 +525,23 @@ if st.session_state.waiting_for_response:
         history_to_use = st.session_state.messages[-10:]
         pdf_display = os.path.splitext(up.name)[0]
 
-        # NEW: classify the short reply (CONFIRM / DENY / NEITHER)
         intent = classify_reply_intent(raw_q, _last_assistant_text(history_to_use))
         is_deny = (intent == "DENY")
         is_confirm = (intent == "CONFIRM")
 
-        # If user DENIES the follow-up, don't retrieve, don't reference—just close politely.
         if is_deny:
-            st.session_state.last_suggestion = None  # drop stale suggestion
+            st.session_state.last_suggestion = None
             answer = "Alright, if you have any more questions or need further assistance, feel free to ask!"
             entry = {"id": _new_id(), "role": "assistant", "content": answer}
             thinking.empty()
-
             with block.container():
                 st.markdown(f"<div class='assistant-bubble clearfix'>{answer}</div>", unsafe_allow_html=True)
-
             st.session_state.messages.append(entry)
             st.session_state.pending_input = None
             st.session_state.waiting_for_response = False
-            st.stop()  # end early; NO reference card
-        # ---- else continue with normal pipeline ----
+            st.stop()
 
-        # Route confirmations to last suggestion internally, keep visible bubble as typed
         effective_q = st.session_state.last_suggestion if (is_confirm and st.session_state.last_suggestion) else raw_q
-
-        # Condense for retrieval so follow-ups like “Yes/ya/👍” work
         query_for_retrieval = condense_query(history_to_use, effective_q, pdf_display)
 
         ctx, docs = "", []
