@@ -65,7 +65,7 @@ st.markdown("""
 div[data-testid="stVerticalBlock"]:has(> #qs_sentinel) {
   position: fixed;
   right: 20px;
-  bottom: 12px;   /* tweak as you like */
+  bottom: 2px;   /* tweak as you like */
   z-index: 1000;
   background: transparent;
   padding: 0;
