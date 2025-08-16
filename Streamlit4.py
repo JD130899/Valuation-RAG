@@ -462,8 +462,8 @@ etran_clicked = components.html(
     <style>
       #etran-fab {
         position: fixed;
-        right: 20px;
-        bottom: 20px;
+        right: 40px; /* Increased from 20px to account for sidebar or edge */
+        bottom: 40px; /* Increased from 20px to avoid overlap with chat input */
         z-index: 10000;
         display: block;
       }
@@ -484,7 +484,7 @@ etran_clicked = components.html(
     <script>
       function send(v) { Streamlit.setComponentValue(v); }
       document.getElementById("etran-btn").addEventListener("click", function() { send(true); });
-      Streamlit.setFrameHeight(20);
+      Streamlit.setFrameHeight(0); /* Keep at 0 to avoid disappearance */
     </script>
     """,
     height=0
