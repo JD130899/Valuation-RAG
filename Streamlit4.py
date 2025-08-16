@@ -457,9 +457,6 @@ Conversation so far:
 # ================= Input =================
 user_q = st.chat_input("Type your question here…")
 
-# ---- Floating "Etran Sheet" button just above chat input (bottom-right, black) ----
-# ---- Floating "Etran Sheet" button at bottom right ----
-# ---- Floating "Etran Sheet" button at bottom right ----
 etran_clicked = components.html(
     """
     <style>
@@ -467,7 +464,7 @@ etran_clicked = components.html(
         position: fixed;
         right: 20px;
         bottom: 20px;
-        z-index: 9999;
+        z-index: 10000;
         display: block;
       }
       #etran-btn {
@@ -490,7 +487,7 @@ etran_clicked = components.html(
       Streamlit.setFrameHeight(20);
     </script>
     """,
-    height=20
+    height=0
 )
 
 # Only act on a real click
