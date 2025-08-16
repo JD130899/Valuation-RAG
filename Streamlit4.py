@@ -420,42 +420,12 @@ if st.session_state.get("last_processed_pdf") != up.name:
 
 # ---------- QUICK SUGGESTION PILLS (only when a PDF is loaded) ----------
 pill_clicked = None
-# ---------- QUICK SUGGESTION PILLS (only when a PDF is loaded) ----------
 if up and not st.session_state.waiting_for_response:
     links_html = "".join(
-        f'<a class="qs-pill" href="#" data-q="{lbl}">{lbl}</a>'
+        f'<a class="qs-pill" href="?qs={quote(lbl)}">{lbl}</a>'
         for lbl in SUGGESTION_BUTTONS
     )
     st.markdown(f'<div class="qs-row">{links_html}</div>', unsafe_allow_html=True)
-
-    # Bridge: send clicked label back to Python as the component value
-    pill_clicked = components.html(
-        """<!doctype html><meta charset='utf-8'>
-<style>html,body{background:transparent;margin:0;height:0;overflow:hidden}</style>
-<script src="https://unpkg.com/@streamlit/component-lib/dist/index.js"></script>
-<script>(function(){
-  function attach(){
-    var d = window.parent && window.parent.document;
-    if(!d) return setTimeout(attach,120);
-    var pills = d.querySelectorAll('.qs-row .qs-pill');
-    if(!pills.length) return setTimeout(attach,120);
-    function send(v){ Streamlit.setComponentValue(v); }
-    pills.forEach(function(el){
-      el.addEventListener('click', function(e){
-        e.preventDefault();
-        var q = el.getAttribute('data-q') || el.textContent.trim();
-        send(q);
-      });
-    });
-  }
-  attach();
-  var me = window.frameElement; if(me){me.style.display='none';me.style.height='0';me.style.border='0';}
-})();</script>
-""",
-        height=0,
-    )
-else:
-    pill_clicked = None
 
 
 
@@ -542,14 +512,15 @@ Conversation so far:
 
 # ================= Input =================
 user_q = st.chat_input("Type your question here…")
+_qp = st.query_params()
+pill_clicked = (_qp.get("qs") or [None])[0]
 
-# Handle quick-suggestion clicks via query param ?qs=...
-# Handle pill clicks returned from the component
-if isinstance(pill_clicked, str) and pill_clicked:
+if pill_clicked:
     st.session_state.messages.append({"id": _new_id(), "role": "user", "content": pill_clicked})
     st.session_state.pending_input = pill_clicked
     st.session_state.waiting_for_response = True
-
+    # clear the param so it doesn't retrigger on rerun
+    st.experimental_set_query_params()
     
 
 # Handle manual chat input
