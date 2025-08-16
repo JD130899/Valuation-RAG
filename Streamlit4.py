@@ -65,9 +65,18 @@ st.markdown("""
 /* fixed bottom-right container */
 .qs-fixed {
   position: fixed;
-  bottom: 110px;            /* just above chat input */
-  right: 24px;              /* bottom-right corner */
-  z-index: 9999;
+  bottom: 70px;   /* just above the chat input */
+  right: 20px;
+  z-index: 1000;
+  display: flex;
+  gap: 10px;
+}
+
+/* Button style */
+.qs-fixed button {
+  border-radius: 999px !important;
+  padding: 8px 16px !important;
+  height: 40px !important;  /* consistent height */
 }
 
 /* inner flex so buttons line up nicely */
@@ -507,21 +516,18 @@ for msg in st.session_state.messages:
             key=msg.get("id", "k0"),
         )
 # ---------------- Bottom-right quick-suggest buttons (sit just above the input) ----------------
-st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-spacer, c1, c2, c3 = st.columns([8, 1.1, 1.1, 1.1])  # big left spacer -> right aligned
+# fixed-position suggestion buttons
+st.markdown('<div class="qs-fixed">', unsafe_allow_html=True)
+
+c1, c2, c3 = st.columns(3)
 with c1:
-    st.button("ETRAN Cheatsheet", key="btn_et", type="secondary",
-              use_container_width=True,
-              on_click=queue_question, args=("ETRAN Cheatsheet",))
+    st.button("ETRAN Cheatsheet", key="btn_et", on_click=queue_question, args=("ETRAN Cheatsheet",))
 with c2:
-    st.button("What is the valuation?", key="btn_val", type="secondary",
-              use_container_width=True,
-              on_click=queue_question, args=("What is the valuation?",))
+    st.button("What is the valuation?", key="btn_val", on_click=queue_question, args=("What is the valuation?",))
 with c3:
-    st.button("Goodwill value", key="btn_gw", type="secondary",
-              use_container_width=True,
-              on_click=queue_question, args=("Goodwill value",))
-st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+    st.button("Goodwill value", key="btn_gw", on_click=queue_question, args=("Goodwill value",))
+
+st.markdown('</div>', unsafe_allow_html=True)
 
 # Chat input (must come AFTER the buttons to keep them above it)
 user_q = st.chat_input("Type your question here…", key="main_chat_input")
