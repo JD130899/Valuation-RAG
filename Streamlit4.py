@@ -109,10 +109,29 @@ SUGGESTION_BUTTONS = [
     "Goodwill value",
 ]
 
+# ---------- Session state ----------  (keep your existing init here)
+# ... your session_state init ...
+
 def _new_id():
     n = st.session_state.next_msg_id
     st.session_state.next_msg_id += 1
     return f"m{n}"
+
+def queue_question(q: str):
+    st.session_state.pending_input = q
+    st.session_state.waiting_for_response = True
+    st.session_state.messages.append({"id": _new_id(), "role": "user", "content": q})
+
+# ---- consume quick-suggest clicks coming via ?qs=... (RUN THIS EARLY) ----
+qs = st.query_params.get("qs")
+if qs:
+    queue_question(qs)
+    # clear it so it doesn't re-trigger on rerun
+    try:
+        del st.query_params["qs"]
+    except Exception:
+        pass
+
 
 def file_badge_link(name: str, pdf_bytes: bytes, synced: bool = True):
     base = os.path.splitext(name)[0]
@@ -418,6 +437,11 @@ else:
     if up:
         file_badge_link(up.name, up.getvalue(), synced=False)
 
+# If a question is queued but no PDF yet, let the user know it’s queued
+if st.session_state.waiting_for_response and "uploaded_file_from_drive" not in st.session_state and "pdf_bytes" not in st.session_state:
+    st.info("✅ Your question is queued. Load a PDF and I’ll answer it.")
+
+
 if not up:
     st.warning("Please upload or load a PDF to continue.")
     st.stop()
@@ -433,22 +457,9 @@ if st.session_state.get("last_processed_pdf") != up.name:
     ]
     st.session_state.last_processed_pdf = up.name
 
-# ==================== INTERACTIONS FIRST (no query params, no manual rerun) ====================
-def queue_question(q: str):
-    st.session_state.pending_input = q
-    st.session_state.waiting_for_response = True
-    # append user message immediately (so it shows in same run)
-    st.session_state.messages.append({"id": _new_id(), "role": "user", "content": q})
+
 
 # --- consume quick-suggest clicks coming via ?qs=... ---
-qs = st.query_params.get("qs")
-if qs:
-    queue_question(qs)
-    # clear it so it doesn't re-trigger on rerun
-    try:
-        del st.query_params["qs"]
-    except Exception:
-        pass
 
 
 # ================= Prompt helpers =================
