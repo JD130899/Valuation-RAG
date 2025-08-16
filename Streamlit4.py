@@ -444,16 +444,6 @@ def queue_question(q: str):
     # append user message immediately (so it shows in same run)
     st.session_state.messages.append({"id": _new_id(), "role": "user", "content": q})
 
-
-
-
-# Chat input (also before rendering history)
-user_q = st.chat_input("Type your question here…", key="main_chat_input")
-if user_q:
-    queue_question(user_q)
-
-# ================= Styles for references already injected above =================
-
 # ================= Prompt helpers =================
 def format_chat_history(messages):
     lines = []
