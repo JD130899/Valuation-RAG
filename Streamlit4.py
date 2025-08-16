@@ -54,53 +54,32 @@ if "next_msg_id" not in st.session_state:
 # ---------- styles (floating pill row above chat input; buttons now, no URL params) ----------
 st.markdown("""
 <style>
-.block-container { padding-bottom: 140px; }  /* space for fixed buttons */
-/* Pin the Streamlit block that CONTAINS #qs_sentinel */
-div[data-testid="stVerticalBlock"]:has(#qs_sentinel) {
-  position: fixed;
-  right: 44px;
-  bottom: 30px;
-  z-index: 1000;
-  background: transparent;
-  padding: 0;
-}
+.block-container { padding-bottom: 140px; }
 
-/* Make inner layout horizontal & tidy */
-div[data-testid="stVerticalBlock"]:has(#qs_sentinel) > div[data-testid="stHorizontalBlock"] {
-  display: flex;
-  gap: 10px;
-  flex-wrap: nowrap;
-  justify-content: flex-end;
-}
-
-/* Optional: black pills */
-div[data-testid="stVerticalBlock"]:has(#qs_sentinel) button[kind="secondary"]{
-  background:#000 !important;
-  color:#fff !important;
-  border:0 !important;
-  border-radius:999px !important;
-  height:40px !important;
-  padding:8px 14px !important;
-}
-
+/* fixed bottom-right container */
 .qs-fixed {
   position: fixed;
-  bottom: 1px;   /* move closer/farther from bottom as you like */
-  right: 24px;    /* distance from right edge */
-  z-index: 1000;  /* above other UI */
+  bottom: 110px;   /* just above the chat input */
+  right: 20px;
+  z-index: 1000;
+
 }
 
-.qs-flex { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
-
-button[kind="secondary"] {
+/* Button style */
+.qs-fixed button {
   border-radius: 999px !important;
-  padding: 8px 14px !important;
-  height: 40px !important;  /* keeps button height consistent */
+  padding: 8px 16px !important;
+  height: 10px !important;  /* consistent height */
 }
 
 /* inner flex so buttons line up nicely */
 .qs-flex { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
 
+/* make Streamlit buttons pill-ish */
+button[kind="secondary"] {
+  border-radius: 999px !important;
+  padding: 16px 14px !important;
+}
 
 /* Chat bubbles */
 .user-bubble {background:#007bff;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:right;margin:4px;}
@@ -136,29 +115,10 @@ SUGGESTION_BUTTONS = [
     "Goodwill value",
 ]
 
-# ---------- Session state ----------  (keep your existing init here)
-# ... your session_state init ...
-
 def _new_id():
     n = st.session_state.next_msg_id
     st.session_state.next_msg_id += 1
     return f"m{n}"
-
-def queue_question(q: str):
-    st.session_state.pending_input = q
-    st.session_state.waiting_for_response = True
-    st.session_state.messages.append({"id": _new_id(), "role": "user", "content": q})
-
-# ---- consume quick-suggest clicks coming via ?qs=... (RUN THIS EARLY) ----
-qs = st.query_params.get("qs")
-if qs:
-    queue_question(qs)
-    # clear it so it doesn't re-trigger on rerun
-    try:
-        del st.query_params["qs"]
-    except Exception:
-        pass
-
 
 def file_badge_link(name: str, pdf_bytes: bytes, synced: bool = True):
     base = os.path.splitext(name)[0]
@@ -464,11 +424,6 @@ else:
     if up:
         file_badge_link(up.name, up.getvalue(), synced=False)
 
-# If a question is queued but no PDF yet, let the user know it’s queued
-if st.session_state.waiting_for_response and "uploaded_file_from_drive" not in st.session_state and "pdf_bytes" not in st.session_state:
-    st.info("✅ Your question is queued. Load a PDF and I’ll answer it.")
-
-
 if not up:
     st.warning("Please upload or load a PDF to continue.")
     st.stop()
@@ -484,9 +439,22 @@ if st.session_state.get("last_processed_pdf") != up.name:
     ]
     st.session_state.last_processed_pdf = up.name
 
-
+# ==================== INTERACTIONS FIRST (no query params, no manual rerun) ====================
+def queue_question(q: str):
+    st.session_state.pending_input = q
+    st.session_state.waiting_for_response = True
+    # append user message immediately (so it shows in same run)
+    st.session_state.messages.append({"id": _new_id(), "role": "user", "content": q})
 
 # --- consume quick-suggest clicks coming via ?qs=... ---
+qs = st.query_params.get("qs")
+if qs:
+    queue_question(qs)
+    # clear it so it doesn't re-trigger on rerun
+    try:
+        del st.query_params["qs"]
+    except Exception:
+        pass
 
 
 # ================= Prompt helpers =================
@@ -551,33 +519,39 @@ for msg in st.session_state.messages:
             page=msg["source_page"],
             key=msg.get("id", "k0"),
         )
+# ---------------- Bottom-right quick-suggest buttons (sit just above the input) ----------------
+# fixed-position suggestion buttons
+# ---------------- Floating quick-suggest buttons (fixed at bottom-right) ----------------
+st.markdown('<div class="qs-fixed"><div class="qs-flex">', unsafe_allow_html=True)
+c1, c2, c3 = st.columns(3)
+with c1:
+    st.button("ETRAN Cheatsheet", key="btn_et", type="secondary",
+              on_click=queue_question, args=("ETRAN Cheatsheet",))
+with c2:
+    st.button("What is the valuation?", key="btn_val", type="secondary",
+              on_click=queue_question, args=("What is the valuation?",))
+with c3:
+    st.button("Goodwill value", key="btn_gw", type="secondary",
+              on_click=queue_question, args=("Goodwill value",))
+st.markdown('</div></div>', unsafe_allow_html=True)
 
 # ---------------- Fixed quick-suggest buttons (bottom-right) ----------------
-
-#st.markdown(
-    #"""
-    #<div class="qs-fixed">
-      #<div class="qs-flex">
-        #<a href="?qs=ETRAN%20Cheatsheet"><button kind="secondary" type="button">ETRAN Cheatsheet</button></a>
-        #<a href="?qs=What%20is%20the%20valuation%3F"><button kind="secondary" type="button">What is the valuation?</button></a>
-        #<a href="?qs=Goodwill%20value"><button kind="secondary" type="button">Goodwill value</button></a>
-      #</div>
-    #</div>
-    #""",
-    #unsafe_allow_html=True,
-#)
-#"""
+st.markdown(
+    """
+    <div class="qs-fixed">
+      <div class="qs-flex">
+        <a href="?qs=ETRAN%20Cheatsheet"><button kind="secondary" type="button">ETRAN Cheatsheet</button></a>
+        <a href="?qs=What%20is%20the%20valuation%3F"><button kind="secondary" type="button">What is the valuation?</button></a>
+        <a href="?qs=Goodwill%20value"><button kind="secondary" type="button">Goodwill value</button></a>
+      </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 
 # Chat input (one instance only; keep this AFTER the floating buttons)
 user_q = st.chat_input("Type your question here…", key="main_chat_input")
-# --- Quick-suggest bubble (real Streamlit buttons, no navigation) ---
-
-
-
-
-
-
 if user_q:
     queue_question(user_q)
 
