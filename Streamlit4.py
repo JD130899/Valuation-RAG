@@ -1,3 +1,4 @@
+# app.py
 import os, io, pickle, base64
 import re
 import uuid
@@ -6,6 +7,7 @@ import fitz  # PyMuPDF
 from PIL import Image
 from dotenv import load_dotenv
 import streamlit.components.v1 as components
+
 from urllib.parse import quote
 
 # LangChain / RAG deps
@@ -46,45 +48,53 @@ if "last_suggestion" not in st.session_state:
 if "next_msg_id" not in st.session_state:
     st.session_state.next_msg_id = 0
 
-# ---------- styles (floating pill row above chat input) ----------
+# ---------- styles (floating pill row above chat input; buttons now, no URL params) ----------
 st.markdown("""
 <style>
 .block-container { padding-bottom: 140px; }
 
-/* same width/position as chat input, but content aligned to the RIGHT */
-.qs-row{
+/* fixed bottom-right container */
+.qs-fixed {
   position: fixed;
-  bottom: 110px;                 /* just above input */
-  left: 81%;
-  transform: translateX(-50%);   /* center the container itself */
-  width: 100%;
-  max-width: 720px;              /* match your chat input max width */
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-  justify-content: flex-end;     /* right-align within the bar */
-  padding: 0 12px;
-  box-sizing: border-box;
+  bottom: 110px;            /* just above chat input */
+  right: 24px;              /* bottom-right corner */
   z-index: 9999;
 }
 
-/* pills */
-.qs-pill{
-  text-decoration:none!important;
-  border-radius:999px;
-  padding:8px 14px;
-  border:1px solid rgba(255,255,255,0.2);
-  background:black;
-  color:white!important;
-  font-size:0.9rem;
-  cursor:pointer;
-}
-.qs-pill:hover{ background:#222; }
+/* inner flex so buttons line up nicely */
+.qs-flex { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
 
-/* optional: on very small screens, left-align to avoid overflow */
-@media (max-width: 760px){
-  .qs-row{ justify-content:flex-start; }
+/* make Streamlit buttons pill-ish */
+button[kind="secondary"] {
+  border-radius: 999px !important;
+  padding: 8px 14px !important;
 }
+
+/* Chat bubbles */
+.user-bubble {background:#007bff;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:right;margin:4px;}
+.assistant-bubble {background:#1e1e1e;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:left;margin:4px;}
+.clearfix::after {content:"";display:table;clear:both;}
+
+/* Reference card */
+.ref{ display:block; width:60%; max-width:900px; margin:6px 0 12px 8px; }
+.ref summary{
+  display:inline-flex; align-items:center; gap:8px; cursor:pointer; list-style:none; outline:none;
+  background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:10px; padding:6px 10px;
+}
+.ref summary::before{ content:"▶"; font-size:12px; line-height:1; }
+.ref[open] summary::before{ content:"▼"; }
+.ref .panel{
+  background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-top:none;
+  border-radius:10px; padding:10px; margin-top:0; box-shadow:0 6px 20px rgba(0,0,0,.25);
+}
+.ref .panel img{ width:100%; height:auto; border-radius:8px; display:block; }
+.ref .overlay{ display:none; }
+.ref[open] .overlay{ display:block; position:fixed; inset:0; z-index:998; background:transparent; border:0; padding:0; margin:0; }
+.ref[open] > .panel{
+  position: fixed; z-index: 999; top: 12vh; left: 50%; transform: translateX(-50%);
+  width: min(900px, 90vw); max-height: 75vh; overflow: auto; box-shadow:0 20px 60px rgba(0,0,0,.45);
+}
+.ref .close-x{ position:absolute; top:6px; right:10px; border:0; background:transparent; color:#94a3b8; font-size:20px; line-height:1; cursor:pointer; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -418,48 +428,33 @@ if st.session_state.get("last_processed_pdf") != up.name:
     ]
     st.session_state.last_processed_pdf = up.name
 
-# ---------- QUICK SUGGESTION PILLS (only when a PDF is loaded) ----------
-pill_clicked = None
-if up and not st.session_state.waiting_for_response:
-    links_html = "".join(
-        f'<a class="qs-pill" href="?qs={quote(lbl)}">{lbl}</a>'
-        for lbl in SUGGESTION_BUTTONS
-    )
-    st.markdown(f'<div class="qs-row">{links_html}</div>', unsafe_allow_html=True)
+# ==================== INTERACTIONS FIRST (no query params, no manual rerun) ====================
+def queue_question(q: str):
+    st.session_state.pending_input = q
+    st.session_state.waiting_for_response = True
+    # append user message immediately (so it shows in same run)
+    st.session_state.messages.append({"id": _new_id(), "role": "user", "content": q})
 
+# Floating quick-suggest buttons (fixed position)
+st.markdown('<div class="qs-fixed"><div class="qs-flex">', unsafe_allow_html=True)
+c1, c2, c3 = st.columns(3)
+with c1:
+    st.button("ETRAN Cheatsheet", key="btn_et", type="secondary",
+              on_click=queue_question, args=("ETRAN Cheatsheet",))
+with c2:
+    st.button("What is the valuation?", key="btn_val", type="secondary",
+              on_click=queue_question, args=("What is the valuation?",))
+with c3:
+    st.button("Goodwill value", key="btn_gw", type="secondary",
+              on_click=queue_question, args=("Goodwill value",))
+st.markdown('</div></div>', unsafe_allow_html=True)
 
+# Chat input (also before rendering history)
+user_q = st.chat_input("Type your question here…", key="main_chat_input")
+if user_q:
+    queue_question(user_q)
 
-
-# ================= Styles (chat + references) =================
-st.markdown("""
-<style>
-/* --- Chat bubbles --- */
-.user-bubble {background:#007bff;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:right;margin:4px;}
-.assistant-bubble {background:#1e1e1e;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:left;margin:4px;}
-.clearfix::after {content:"";display:table;clear:both;}
-
-/* --- Reference card --- */
-.ref{ display:block; width:60%; max-width:900px; margin:6px 0 12px 8px; }
-.ref summary{
-  display:inline-flex; align-items:center; gap:8px; cursor:pointer; list-style:none; outline:none;
-  background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:10px; padding:6px 10px;
-}
-.ref summary::before{ content:"▶"; font-size:12px; line-height:1; }
-.ref[open] summary::before{ content:"▼"; }
-.ref .panel{
-  background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-top:none;
-  border-radius:10px; padding:10px; margin-top:0; box-shadow:0 6px 20px rgba(0,0,0,.25);
-}
-.ref .panel img{ width:100%; height:auto; border-radius:8px; display:block; }
-.ref .overlay{ display:none; }
-.ref[open] .overlay{ display:block; position:fixed; inset:0; z-index:998; background:transparent; border:0; padding:0; margin:0; }
-.ref[open] > .panel{
-  position: fixed; z-index: 999; top: 12vh; left: 50%; transform: translateX(-50%);
-  width: min(900px, 90vw); max-height: 75vh; overflow: auto; box-shadow:0 20px 60px rgba(0,0,0,.45);
-}
-.ref .close-x{ position:absolute; top:6px; right:10px; border:0; background:transparent; color:#94a3b8; font-size:20px; line-height:1; cursor:pointer; }
-</style>
-""", unsafe_allow_html=True)
+# ================= Styles for references already injected above =================
 
 # ================= Prompt helpers =================
 def format_chat_history(messages):
@@ -510,26 +505,7 @@ Conversation so far:
     input_variables=["chat_history", "context", "question", "pdf_name"]
 )
 
-# ================= Input =================
-user_q = st.chat_input("Type your question here…")
-_qp = st.query_params()
-pill_clicked = (_qp.get("qs") or [None])[0]
-
-if pill_clicked:
-    st.session_state.messages.append({"id": _new_id(), "role": "user", "content": pill_clicked})
-    st.session_state.pending_input = pill_clicked
-    st.session_state.waiting_for_response = True
-    # clear the param so it doesn't retrigger on rerun
-    st.experimental_set_query_params()
-    
-
-# Handle manual chat input
-if user_q:
-    st.session_state.messages.append({"id": _new_id(), "role": "user", "content": user_q})
-    st.session_state.pending_input = user_q
-    st.session_state.waiting_for_response = True
-
-# ================= History =================
+# ========================== RENDER HISTORY ==========================
 for msg in st.session_state.messages:
     cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
     st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
@@ -542,8 +518,8 @@ for msg in st.session_state.messages:
             key=msg.get("id", "k0"),
         )
 
-# ================= Answer =================
-if st.session_state.waiting_for_response:
+# ========================== ANSWER (same run; smooth) ==========================
+if st.session_state.waiting_for_response and st.session_state.pending_input:
     block = st.empty()
     with block.container():
         thinking = st.empty()
@@ -567,94 +543,94 @@ if st.session_state.waiting_for_response:
             st.session_state.messages.append(entry)
             st.session_state.pending_input = None
             st.session_state.waiting_for_response = False
-            st.stop()
 
-        effective_q = st.session_state.last_suggestion if (is_confirm and st.session_state.last_suggestion) else raw_q
-        query_for_retrieval = condense_query(history_to_use, effective_q, pdf_display)
+        else:
+            effective_q = st.session_state.last_suggestion if (is_confirm and st.session_state.last_suggestion) else raw_q
+            query_for_retrieval = condense_query(history_to_use, effective_q, pdf_display)
 
-        ctx, docs = "", []
-        try:
-            docs = st.session_state.retriever.get_relevant_documents(query_for_retrieval)
-            ctx = "\n\n".join(d.page_content for d in docs)
-        except Exception as e:
-            st.warning(f"RAG retrieval error: {e}")
-
-        llm = ChatOpenAI(model="gpt-4o", temperature=0)
-        full_input = {
-            "chat_history": format_chat_history(history_to_use),
-            "context":      ctx,
-            "question":     effective_q,
-            "pdf_name":     pdf_display,
-        }
-        answer = llm.invoke(wrapped_prompt.invoke(full_input)).content
-        answer = sanitize_suggestion(answer, effective_q, docs)
-
-        # Save a CLEANED last suggestion for future confirmations
-        sug = extract_suggestion(answer)
-        st.session_state.last_suggestion = _clean_heading(sug) if sug else None
-
-        apology = f"Sorry I can only answer question related to {pdf_display} pdf document"
-        is_unrelated = apology.lower() in answer.strip().lower()
-        is_clarify  = is_clarification(answer)
-
-        entry = {"id": _new_id(), "role": "assistant", "content": answer}
-        thinking.empty()
-
-    # Render answer
-    with block.container():
-        st.markdown(f"<div class='assistant-bubble clearfix'>{answer}</div>", unsafe_allow_html=True)
-
-        # Only attach a reference when it's a real, contentful answer
-        skip_reference = is_unrelated or is_clarify
-        if docs and not skip_reference:
-            # ---------- TOP-3 LLM PICK (reference card) ----------
+            ctx, docs = "", []
             try:
-                top3 = docs[:3]
-                best_doc = top3[0] if top3 else None
-                if len(top3) >= 3:
-                    ranking_prompt = PromptTemplate(
-                        template=(
-                            "Given the user's question and 3 candidate context chunks, "
-                            "reply with only the number (1, 2, or 3) of the chunk that best answers it.\n\n"
-                            "Question:\n{question}\n\n"
-                            "Chunk 1:\n{chunk1}\n\n"
-                            "Chunk 2:\n{chunk2}\n\n"
-                            "Chunk 3:\n{chunk3}\n\n"
-                            "Best Chunk Number:"
-                        ),
-                        input_variables=["question", "chunk1", "chunk2", "chunk3"]
-                    )
-                    pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
-                        ranking_prompt.invoke({
-                            "question": query_for_retrieval,
-                            "chunk1": top3[0].page_content,
-                            "chunk2": top3[1].page_content,
-                            "chunk3": top3[2].page_content
-                        })
-                    ).content.strip()
-                    if pick.isdigit() and 1 <= int(pick) <= 3:
-                        best_doc = top3[int(pick) - 1]
-
-                if best_doc is not None:
-                    ref_page = best_doc.metadata.get("page_number")
-                    img = st.session_state.page_images.get(ref_page)
-                    if img:
-                        entry["source"] = f"Page {ref_page}"
-                        entry["source_img"] = pil_to_base64(img)
-                        entry["source_pdf_b64"] = base64.b64encode(st.session_state.pdf_bytes).decode("ascii")
-                        entry["source_page"] = ref_page
-                        # draw the card
-                        render_reference_card(
-                            label=entry["source"],
-                            img_b64=entry["source_img"],
-                            pdf_b64=entry["source_pdf_b64"],
-                            page=entry["source_page"],
-                            key=entry["id"],
-                        )
+                docs = st.session_state.retriever.get_relevant_documents(query_for_retrieval)
+                ctx = "\n\n".join(d.page_content for d in docs)
             except Exception as e:
-                st.info(f"ℹ️ Reference selection skipped: {e}")
+                st.warning(f"RAG retrieval error: {e}")
 
-    # Persist
-    st.session_state.messages.append(entry)
-    st.session_state.pending_input = None
-    st.session_state.waiting_for_response = False
+            llm = ChatOpenAI(model="gpt-4o", temperature=0)
+            full_input = {
+                "chat_history": format_chat_history(history_to_use),
+                "context":      ctx,
+                "question":     effective_q,
+                "pdf_name":     pdf_display,
+            }
+            answer = llm.invoke(wrapped_prompt.invoke(full_input)).content
+            answer = sanitize_suggestion(answer, effective_q, docs)
+
+            # Save a CLEANED last suggestion for future confirmations
+            sug = extract_suggestion(answer)
+            st.session_state.last_suggestion = _clean_heading(sug) if sug else None
+
+            apology = f"Sorry I can only answer question related to {pdf_display} pdf document"
+            is_unrelated = apology.lower() in answer.strip().lower()
+            is_clarify  = is_clarification(answer)
+
+            entry = {"id": _new_id(), "role": "assistant", "content": answer}
+            thinking.empty()
+
+            # Render answer
+            with block.container():
+                st.markdown(f"<div class='assistant-bubble clearfix'>{answer}</div>", unsafe_allow_html=True)
+
+                # Only attach a reference when it's a real, contentful answer
+                skip_reference = is_unrelated or is_clarify
+                if docs and not skip_reference:
+                    # ---------- TOP-3 LLM PICK (reference card) ----------
+                    try:
+                        top3 = docs[:3]
+                        best_doc = top3[0] if top3 else None
+                        if len(top3) >= 3:
+                            ranking_prompt = PromptTemplate(
+                                template=(
+                                    "Given the user's question and 3 candidate context chunks, "
+                                    "reply with only the number (1, 2, or 3) of the chunk that best answers it.\n\n"
+                                    "Question:\n{question}\n\n"
+                                    "Chunk 1:\n{chunk1}\n\n"
+                                    "Chunk 2:\n{chunk2}\n\n"
+                                    "Chunk 3:\n{chunk3}\n\n"
+                                    "Best Chunk Number:"
+                                ),
+                                input_variables=["question", "chunk1", "chunk2", "chunk3"]
+                            )
+                            pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
+                                ranking_prompt.invoke({
+                                    "question": query_for_retrieval,
+                                    "chunk1": top3[0].page_content,
+                                    "chunk2": top3[1].page_content,
+                                    "chunk3": top3[2].page_content
+                                })
+                            ).content.strip()
+                            if pick.isdigit() and 1 <= int(pick) <= 3:
+                                best_doc = top3[int(pick) - 1]
+
+                        if best_doc is not None:
+                            ref_page = best_doc.metadata.get("page_number")
+                            img = st.session_state.page_images.get(ref_page)
+                            if img:
+                                entry["source"] = f"Page {ref_page}"
+                                entry["source_img"] = pil_to_base64(img)
+                                entry["source_pdf_b64"] = base64.b64encode(st.session_state.pdf_bytes).decode("ascii")
+                                entry["source_page"] = ref_page
+                                # draw the card
+                                render_reference_card(
+                                    label=entry["source"],
+                                    img_b64=entry["source_img"],
+                                    pdf_b64=entry["source_pdf_b64"],
+                                    page=entry["source_page"],
+                                    key=entry["id"],
+                                )
+                    except Exception as e:
+                        st.info(f"ℹ️ Reference selection skipped: {e}")
+
+            # Persist
+            st.session_state.messages.append(entry)
+            st.session_state.pending_input = None
+            st.session_state.waiting_for_response = False
