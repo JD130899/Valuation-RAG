@@ -58,7 +58,7 @@ st.markdown("""
 
 .qs-fixed {
   position: fixed;
-  bottom: 18px;   /* move closer/farther from bottom as you like */
+  bottom: 1px;   /* move closer/farther from bottom as you like */
   right: 24px;    /* distance from right edge */
   z-index: 1000;  /* above other UI */
 }
