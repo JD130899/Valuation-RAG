@@ -420,15 +420,15 @@ if st.session_state.get("last_processed_pdf") != up.name:
 
 # ---------- QUICK SUGGESTION PILLS (only when a PDF is loaded) ----------
 pill_clicked = None
+# ---------- QUICK SUGGESTION PILLS (only when a PDF is loaded) ----------
 if up and not st.session_state.waiting_for_response:
     links_html = "".join(
-        f'<a class="qs-pill" href="?qs={quote(lbl)}">{lbl}</a>'
+        f'<a class="qs-pill" href="#" data-q="{lbl}">{lbl}</a>'
         for lbl in SUGGESTION_BUTTONS
     )
     st.markdown(f'<div class="qs-row">{links_html}</div>', unsafe_allow_html=True)
 
-
-    # Attach click handlers from an invisible iframe and send value to Streamlit (no reload)
+    # Bridge: send clicked label back to Python as the component value
     pill_clicked = components.html(
         """<!doctype html><meta charset='utf-8'>
 <style>html,body{background:transparent;margin:0;height:0;overflow:hidden}</style>
@@ -442,9 +442,9 @@ if up and not st.session_state.waiting_for_response:
     function send(v){ Streamlit.setComponentValue(v); }
     pills.forEach(function(el){
       el.addEventListener('click', function(e){
-        e.preventDefault();               // prevent page reload
+        e.preventDefault();
         var q = el.getAttribute('data-q') || el.textContent.trim();
-        send(q);                          // send label as question
+        send(q);
       });
     });
   }
@@ -452,8 +452,14 @@ if up and not st.session_state.waiting_for_response:
   var me = window.frameElement; if(me){me.style.display='none';me.style.height='0';me.style.border='0';}
 })();</script>
 """,
-        height=0
+        height=0,
+        key="qs_bridge"
     )
+else:
+    pill_clicked = None
+
+
+
 
 # ================= Styles (chat + references) =================
 st.markdown("""
@@ -539,16 +545,11 @@ Conversation so far:
 user_q = st.chat_input("Type your question here…")
 
 # Handle quick-suggestion clicks via query param ?qs=...
-_qp = st.query_params         # <-- consistent API
-_qs_vals = _qp.get("qs", [])
-pill_clicked = _qs_vals[0] if _qs_vals else None
-
-if pill_clicked:
+# Handle pill clicks returned from the component
+if isinstance(pill_clicked, str) and pill_clicked:
     st.session_state.messages.append({"id": _new_id(), "role": "user", "content": pill_clicked})
     st.session_state.pending_input = pill_clicked
     st.session_state.waiting_for_response = True
-    # clear the query params so it doesn't re-trigger on rerun (and removes it from the URL bar)
-    st.experimental_set_query_params()
 
     
 
