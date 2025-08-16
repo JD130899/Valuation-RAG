@@ -65,7 +65,7 @@ st.markdown("""
 /* fixed bottom-right container */
 .qs-fixed {
   position: fixed;
-  bottom: 70px;   /* just above the chat input */
+  bottom: 20px;   /* just above the chat input */
   right: 20px;
   z-index: 1000;
   display: flex;
