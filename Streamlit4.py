@@ -445,18 +445,24 @@ def queue_question(q: str):
     st.session_state.messages.append({"id": _new_id(), "role": "user", "content": q})
 
 # Floating quick-suggest buttons (fixed position)
-st.markdown('<div class="qs-fixed"><div class="qs-flex">', unsafe_allow_html=True)
-c1, c2, c3 = st.columns(3)
+# ---------------- Bottom-right quick-suggest buttons (above chat input) ----------------
+# Put these right before the st.chat_input() block
+st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+spacer, c1, c2, c3 = st.columns([8, 1.1, 1.1, 1.1])  # big left spacer -> right-aligned buttons
 with c1:
     st.button("ETRAN Cheatsheet", key="btn_et", type="secondary",
+              use_container_width=True,
               on_click=queue_question, args=("ETRAN Cheatsheet",))
 with c2:
     st.button("What is the valuation?", key="btn_val", type="secondary",
+              use_container_width=True,
               on_click=queue_question, args=("What is the valuation?",))
 with c3:
     st.button("Goodwill value", key="btn_gw", type="secondary",
+              use_container_width=True,
               on_click=queue_question, args=("Goodwill value",))
-st.markdown('</div></div>', unsafe_allow_html=True)
+st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
 
 # Chat input (also before rendering history)
 user_q = st.chat_input("Type your question here…", key="main_chat_input")
