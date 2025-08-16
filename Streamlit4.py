@@ -536,18 +536,7 @@ with c3:
 st.markdown('</div></div>', unsafe_allow_html=True)
 
 # ---------------- Fixed quick-suggest buttons (bottom-right) ----------------
-st.markdown(
-    """
-    <div class="qs-fixed">
-      <div class="qs-flex">
-        <a href="?qs=ETRAN%20Cheatsheet"><button kind="secondary" type="button">ETRAN Cheatsheet</button></a>
-        <a href="?qs=What%20is%20the%20valuation%3F"><button kind="secondary" type="button">What is the valuation?</button></a>
-        <a href="?qs=Goodwill%20value"><button kind="secondary" type="button">Goodwill value</button></a>
-      </div>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
+
 
 
 # Chat input (one instance only; keep this AFTER the floating buttons)
