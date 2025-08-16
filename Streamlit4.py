@@ -509,46 +509,6 @@ Conversation so far:
 # ================= Input =================
 user_q = st.chat_input("Type your question here…")
 
-etran_clicked = components.html(
-    """
-    <style>
-      #etran-fab {
-        position: fixed;
-        right: 20px; /* Reset to original to test alignment */
-        bottom: 60px; /* Increased to clear the chat input area */
-        z-index: 10000;
-        display: block;
-      }
-      #etran-btn {
-        border-radius: 9999px;
-        padding: 10px 16px;
-        background: #000;
-        color: #fff;
-        border: none;
-        cursor: pointer;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-      }
-      #etran-btn:hover { background: #222; }
-      #etran-btn:active { transform: translateY(1px); }
-    </style>
-    <div id="etran-fab"><button id="etran-btn" type="button">Etran Sheet</button></div>
-    <script src="https://unpkg.com/@streamlit/component-lib/dist/index.js"></script>
-    <script>
-      function send(v) { Streamlit.setComponentValue(v); }
-      document.getElementById("etran-btn").addEventListener("click", function() { send(true); });
-      Streamlit.setFrameHeight(0);
-    </script>
-    """,
-    height=0
-)
-
-# Only act on a real click
-if etran_clicked is True:
-    payload = "Etran Sheet"
-    st.session_state.messages.append({"id": _new_id(), "role": "user", "content": payload})
-    st.session_state.pending_input = payload
-    st.session_state.waiting_for_response = True
-
 if user_q:
     st.session_state.messages.append({"id": _new_id(), "role": "user", "content": user_q})
     st.session_state.pending_input = user_q
