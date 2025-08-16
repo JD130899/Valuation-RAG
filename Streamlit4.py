@@ -444,24 +444,7 @@ def queue_question(q: str):
     # append user message immediately (so it shows in same run)
     st.session_state.messages.append({"id": _new_id(), "role": "user", "content": q})
 
-# Floating quick-suggest buttons (fixed position)
-# ---------------- Bottom-right quick-suggest buttons (above chat input) ----------------
-# Put these right before the st.chat_input() block
-st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
-spacer, c1, c2, c3 = st.columns([8, 1.1, 1.1, 1.1])  # big left spacer -> right-aligned buttons
-with c1:
-    st.button("ETRAN Cheatsheet", key="btn_et", type="secondary",
-              use_container_width=True,
-              on_click=queue_question, args=("ETRAN Cheatsheet",))
-with c2:
-    st.button("What is the valuation?", key="btn_val", type="secondary",
-              use_container_width=True,
-              on_click=queue_question, args=("What is the valuation?",))
-with c3:
-    st.button("Goodwill value", key="btn_gw", type="secondary",
-              use_container_width=True,
-              on_click=queue_question, args=("Goodwill value",))
-st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
 
 
 # Chat input (also before rendering history)
@@ -522,6 +505,7 @@ Conversation so far:
 
 # ========================== RENDER HISTORY ==========================
 for msg in st.session_state.messages:
+    
     cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
     st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
     if msg.get("source_img") and msg.get("source_pdf_b64") and msg.get("source_page"):
@@ -532,6 +516,28 @@ for msg in st.session_state.messages:
             page=msg["source_page"],
             key=msg.get("id", "k0"),
         )
+# ---------------- Bottom-right quick-suggest buttons (sit just above the input) ----------------
+st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+spacer, c1, c2, c3 = st.columns([8, 1.1, 1.1, 1.1])  # big left spacer -> right aligned
+with c1:
+    st.button("ETRAN Cheatsheet", key="btn_et", type="secondary",
+              use_container_width=True,
+              on_click=queue_question, args=("ETRAN Cheatsheet",))
+with c2:
+    st.button("What is the valuation?", key="btn_val", type="secondary",
+              use_container_width=True,
+              on_click=queue_question, args=("What is the valuation?",))
+with c3:
+    st.button("Goodwill value", key="btn_gw", type="secondary",
+              use_container_width=True,
+              on_click=queue_question, args=("Goodwill value",))
+st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+
+# Chat input (must come AFTER the buttons to keep them above it)
+user_q = st.chat_input("Type your question here…", key="main_chat_input")
+if user_q:
+    queue_question(user_q)
+        
 
 # ========================== ANSWER (same run; smooth) ==========================
 if st.session_state.waiting_for_response and st.session_state.pending_input:
