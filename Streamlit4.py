@@ -534,21 +534,25 @@ for msg in st.session_state.messages:
 # Chat input (one instance only; keep this AFTER the floating buttons)
 user_q = st.chat_input("Type your question here…", key="main_chat_input")
 # ---- fixed bottom-right quick-suggest buttons (REPLACES the old columns block) ----
-st.markdown('<div class="qs-fixed"><div class="qs-flex">', unsafe_allow_html=True)
+# Fixed quick-suggest bubble (pure HTML inside the fixed div)
+st.markdown(
+    """
+    <div class="qs-fixed">
+      <div class="qs-flex">
+        <a href="?qs=What%20is%20the%20valuation%3F">
+          <button kind="secondary" type="button">What is the valuation?</button>
+        </a>
+        <a href="?qs=Goodwill%20value">
+          <button kind="secondary" type="button">Goodwill value</button>
+        </a>
+      </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
-b1, b2, b3 = st.columns(3)
-with b1:
-    pass
-    #st.button("ETRAN Cheatsheet", key="qs_btn_et", type="secondary",
-              #on_click=queue_question, args=("ETRAN Cheatsheet",))
-with b2:
-    st.button("What is the valuation?", key="qs_btn_val", type="secondary",
-              on_click=queue_question, args=("What is the valuation?",))
-with b3:
-    st.button("Goodwill value", key="qs_btn_gw", type="secondary",
-              on_click=queue_question, args=("Goodwill value",))
 
-st.markdown('</div></div>', unsafe_allow_html=True)
+
 
 
 if user_q:
