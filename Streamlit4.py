@@ -421,12 +421,14 @@ if st.session_state.get("last_processed_pdf") != up.name:
 # ---------- QUICK SUGGESTION PILLS (only when a PDF is loaded) ----------
 pill_clicked = None
 # ---------- QUICK SUGGESTION PILLS (only when a PDF is loaded) ----------
-if up:
+# ---------- QUICK SUGGESTION PILLS (only when a PDF is loaded, and not while answering) ----------
+if up and not st.session_state.waiting_for_response:
     links_html = "".join(
         f'<a class="qs-pill" href="?qs={quote(lbl)}">{lbl}</a>'
         for lbl in SUGGESTION_BUTTONS
     )
     st.markdown(f'<div class="qs-row">{links_html}</div>', unsafe_allow_html=True)
+
 
 
     # Attach click handlers from an invisible iframe and send value to Streamlit (no reload)
@@ -539,15 +541,16 @@ Conversation so far:
 # ================= Input =================
 user_q = st.chat_input("Type your question here…")
 
-_qp = st.query_params
+# Handle quick-suggestion clicks via query param ?qs=...
+_qp = st.query_params()
 if "qs" in _qp and _qp["qs"]:
-    pill_clicked = _qp["qs"][0]  # the label we put in the URL
-    # push into the normal flow
+    pill_clicked = _qp["qs"][0]  # label placed in the URL
     st.session_state.messages.append({"id": _new_id(), "role": "user", "content": pill_clicked})
     st.session_state.pending_input = pill_clicked
     st.session_state.waiting_for_response = True
-    # clear the query params so it doesn't re-trigger on rerun
+    # Clear the query params so it doesn't re-trigger on rerun
     st.experimental_set_query_params()
+
     
 
 # Handle manual chat input
