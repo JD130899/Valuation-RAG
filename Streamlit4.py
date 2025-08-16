@@ -537,7 +537,7 @@ st.markdown('<div class="qs-fixed"><div class="qs-flex">', unsafe_allow_html=Tru
 b1, b2, b3 = st.columns(3)
 with b1:
     #st.button("ETRAN Cheatsheet", key="qs_btn_et", type="secondary",
-              on_click=queue_question, args=("ETRAN Cheatsheet",))
+              #on_click=queue_question, args=("ETRAN Cheatsheet",))
 with b2:
     st.button("What is the valuation?", key="qs_btn_val", type="secondary",
               on_click=queue_question, args=("What is the valuation?",))
