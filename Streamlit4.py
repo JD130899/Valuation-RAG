@@ -458,31 +458,32 @@ Conversation so far:
 user_q = st.chat_input("Type your question here…")
 
 # ---- Floating "Etran Sheet" button just above chat input (bottom-right, black) ----
+# ---- Floating "Etran Sheet" button at bottom right ----
 etran_clicked = components.html(
     """
     <style>
       #etran-fab {
-    position: fixed;
-    right: 20px;
-    bottom: 20px;
-    z-index: 9999; /* Keep if layering is needed */
-  }
-  #etran-btn {
-    border-radius: 9999px;
-    padding: 10px 16px;
-    background: #000; color: #fff; border: none;
-    cursor: pointer;
-  }
-  #etran-btn:hover { background: #222; }
-  #etran-btn:active { transform: translateY(1px); }
+        position: fixed;
+        right: 20px;
+        bottom: 20px;
+        z-index: 9999;
+      }
+      #etran-btn {
+        border-radius: 9999px;
+        padding: 10px 16px;
+        background: #000;
+        color: #fff;
+        border: none;
+        cursor: pointer;
+      }
+      #etran-btn:hover { background: #222; }
+      #etran-btn:active { transform: translateY(1px); }
     </style>
-
     <div id="etran-fab"><button id="etran-btn" type="button">Etran Sheet</button></div>
-
     <script src="https://unpkg.com/@streamlit/component-lib/dist/index.js"></script>
     <script>
-      function send(v){ Streamlit.setComponentValue(v); }
-      document.getElementById("etran-btn").addEventListener("click", function(){ send(true); });
+      function send(v) { Streamlit.setComponentValue(v); }
+      document.getElementById("etran-btn").addEventListener("click", function() { send(true); });
       Streamlit.setFrameHeight(0);
     </script>
     """,
