@@ -6,7 +6,7 @@ import fitz  # PyMuPDF
 from PIL import Image
 from dotenv import load_dotenv
 import streamlit.components.v1 as components
-
+from urllib.parse import quote
 # LangChain / RAG deps
 from langchain_core.documents import Document
 from llama_cloud_services import LlamaParse
