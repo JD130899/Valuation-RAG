@@ -490,7 +490,7 @@ etran_clicked = components.html(
       Streamlit.setFrameHeight(20);
     </script>
     """,
-    height=0
+    height=10
 )
 
 # Only act on a real click
