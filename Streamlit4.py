@@ -27,6 +27,15 @@ from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
 # ================= Setup =================
 load_dotenv()
 st.set_page_config(page_title="Underwriting Agent", layout="wide")
+# Kill any legacy query params like ?qs=... from old builds
+try:
+    qp = st.query_params  # dict-like
+    if "qs" in qp:
+        # remove just 'qs' so you don't blow away other params
+        del qp["qs"]        # same as: st.query_params.pop("qs", None")
+except Exception:
+    pass
+
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 # ---------- Session state ----------
