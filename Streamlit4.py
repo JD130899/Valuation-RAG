@@ -453,7 +453,6 @@ if up and not st.session_state.waiting_for_response:
 })();</script>
 """,
         height=0,
-        key="qs_bridge"
     )
 else:
     pill_clicked = None
