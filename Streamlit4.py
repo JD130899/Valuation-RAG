@@ -58,8 +58,8 @@ st.markdown("""
 /* Pin the Streamlit block that CONTAINS #qs_sentinel */
 div[data-testid="stVerticalBlock"]:has(#qs_sentinel) {
   position: fixed;
-  right: 24px;
-  bottom: 10px;
+  right: 44px;
+  bottom: 30px;
   z-index: 1000;
   background: transparent;
   padding: 0;
