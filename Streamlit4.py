@@ -76,7 +76,7 @@ st.markdown("""
 .qs-fixed button {
   border-radius: 999px !important;
   padding: 8px 16px !important;
-  height: 40px !important;  /* consistent height */
+  height: 10px !important;  /* consistent height */
 }
 
 /* inner flex so buttons line up nicely */
