@@ -546,21 +546,56 @@ for msg in st.session_state.messages:
 user_q = st.chat_input("Type your question here…", key="main_chat_input")
 # ---- fixed bottom-right quick-suggest buttons (REPLACES the old columns block) ----
 # Fixed quick-suggest bubble (pure HTML inside the fixed div)
-st.markdown(
+# --- create Streamlit buttons (normal widgets, trigger queue_question directly) ---
+c1, c2 = st.columns(2)
+with c1:
+    st.button("What is the valuation?", key="qs_btn_val", type="secondary",
+              on_click=queue_question, args=("What is the valuation?",))
+with c2:
+    st.button("Goodwill value", key="qs_btn_gw", type="secondary",
+              on_click=queue_question, args=("Goodwill value",))
+
+# --- JS snippet to move those real buttons into the fixed bottom-right bubble ---
+components.html(
     """
-    <div class="qs-fixed">
-      <div class="qs-flex">
-        <a href="?qs=What%20is%20the%20valuation%3F">
-          <button kind="secondary" type="button">What is the valuation?</button>
-        </a>
-        <a href="?qs=Goodwill%20value">
-          <button kind="secondary" type="button">Goodwill value</button>
-        </a>
-      </div>
-    </div>
+    <script>
+    (function () {
+      const LABELS = ["What is the valuation?", "Goodwill value"];
+
+      function ensureHost(doc){
+        let host = doc.getElementById("qs-fixed");
+        if (!host) {
+          host = doc.createElement("div");
+          host.id = "qs-fixed";
+          host.className = "qs-fixed";
+          host.innerHTML = '<div class="qs-flex"></div>';
+          doc.body.appendChild(host);
+        }
+        return host.querySelector(".qs-flex");
+      }
+
+      function moveButtons(){
+        const doc = window.parent && window.parent.document;
+        if (!doc) return;
+        const flex = ensureHost(doc);
+
+        // find actual Streamlit buttons by visible text
+        const btns = Array.from(doc.querySelectorAll("button"))
+          .filter(b => LABELS.includes((b.innerText || "").trim()));
+
+        btns.forEach(b => { try { flex.appendChild(b); } catch(e){} });
+      }
+
+      let tries = 0, h = setInterval(() => {
+        moveButtons();
+        if (++tries > 20) clearInterval(h);
+      }, 150);
+    })();
+    </script>
     """,
-    unsafe_allow_html=True,
+    height=0,
 )
+
 
 
 
