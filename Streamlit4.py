@@ -28,29 +28,17 @@ st.set_page_config(page_title="Underwriting Agent", layout="wide")
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 def type_bubble(text: str, *, base_delay: float = 0.012, cutoff_chars: int = 2000):
-    """
-    Render an assistant bubble with a left-to-right 'typing' effect.
-    Streams per character for the first `cutoff_chars`, then dumps the rest
-    instantly so very long answers don't feel slow.
-    """
     placeholder = st.empty()
     buf = []
     count = 0
-
     for ch in text:
-        buf.append(ch)
-        count += 1
-
-        # Update the bubble
+        buf.append(ch); count += 1
         placeholder.markdown(
             f"<div class='assistant-bubble clearfix'>{''.join(buf)}</div>",
             unsafe_allow_html=True,
         )
-
-        # Only keep the small delay for the first N characters
         if count <= cutoff_chars:
             time.sleep(base_delay)
-
     return placeholder
 
 def _reset_chat():
@@ -61,7 +49,6 @@ def _reset_chat():
     st.session_state.pending_input = None
     st.session_state.waiting_for_response = False
     st.session_state.last_suggestion = None
-
 
 # ---------- Session state ----------
 if "last_synced_file_id" not in st.session_state:
@@ -78,11 +65,11 @@ if "waiting_for_response" not in st.session_state:
 if "page_images" not in st.session_state:
     st.session_state.page_images = {}
 if "last_suggestion" not in st.session_state:
-    st.session_state.last_suggestion = None  # remember last “Did you mean X?”
+    st.session_state.last_suggestion = None
 if "next_msg_id" not in st.session_state:
     st.session_state.next_msg_id = 0
 
-# ---------- styles (keep only chat + reference styles; remove button/pin CSS) ----------
+# ---------- styles (chat + reference styles) ----------
 st.markdown("""
 <style>
 .block-container { padding-bottom: 32px; }
@@ -112,6 +99,23 @@ st.markdown("""
   width: min(900px, 90vw); max-height: 75vh; overflow: auto; box-shadow:0 20px 60px rgba(0,0,0,.45);
 }
 .ref .close-x{ position:absolute; top:6px; right:10px; border:0; background:transparent; color:#94a3b8; font-size:20px; line-height:1; cursor:pointer; }
+
+/* ======= ADDED: fixed bottom-right dual buttons ======= */
+.fab-anchor { height: 0; }
+.fab-anchor + div[data-testid="stHorizontalBlock"]{
+  position: fixed !important;
+  right: 24px;
+  bottom: 88px;              /* sits above st.chat_input */
+  z-index: 1000;
+  display: flex; gap: 10px;
+  width: auto !important;
+}
+.fab-anchor + div[data-testid="stHorizontalBlock"] > div{ width: auto !important; }
+.fab-anchor + div[data-testid="stHorizontalBlock"] button{
+  background:#000 !important; color:#fff !important;
+  border:none !important; border-radius:9999px !important;
+  padding:10px 18px !important; font-weight:600 !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -204,21 +208,18 @@ for m in st.session_state.messages:
     if "id" not in m:
         m["id"] = _new_id()
 
-# ----------- helpers (cleaning + suggestion + confirmation routing) -----------
+# ----------- helpers -----------
 def _clean_heading(text: str) -> str:
-    if not text:
-        return text
+    if not text: return text
     text = re.sub(r"^[#>\-\*\d\.\)\(]+\s*", "", text).strip()
     text = text.strip(" :–—-·•")
     return text
 
 def extract_suggestion(text):
     m = re.search(r"did you mean\s+(.+?)\?", text, flags=re.IGNORECASE)
-    if not m:
-        return None
+    if not m: return None
     val = _clean_heading(m.group(1).strip())
-    if val.lower() == "suggestion":
-        return None
+    if val.lower() == "suggestion": return None
     return val
 
 def is_clarification(answer: str) -> bool:
@@ -240,10 +241,8 @@ def guess_suggestion(question: str, docs):
     for d in docs or []:
         for ln in d.page_content.splitlines():
             raw = ln.strip()
-            if not raw:
-                continue
-            if len(raw.split()) > 6:
-                continue
+            if not raw: continue
+            if len(raw.split()) > 6: continue
             words = set(w.lower() for w in re.findall(r"[A-Za-z]{3,}", raw))
             score = len(q_terms & words)
             if score > best_score:
@@ -256,11 +255,9 @@ def sanitize_suggestion(answer: str, question: str, docs):
         and "sorry i didn't understand the question" not in low
         and "did you mean" not in low):
         return answer
-
     sug = _clean_heading(guess_suggestion(question, docs))
     answer = re.sub(r"\bSUGGESTION\b", sug, answer, flags=re.IGNORECASE)
     answer = re.sub(r"\[.*?\]", sug, answer)
-
     m = re.search(r"did you mean\s+(.+?)\?", answer, flags=re.IGNORECASE)
     cand = _clean_heading(m.group(1).strip()) if m else ""
     if not cand or cand.lower() == "suggestion":
@@ -324,7 +321,6 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
     with open(pdf_path, "wb") as f:
         f.write(pdf_bytes)
 
-    # Page images
     doc = fitz.open(pdf_path)
     page_images = {
         i + 1: Image.open(io.BytesIO(page.get_pixmap(dpi=180).tobytes("png")))
@@ -332,7 +328,6 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
     }
     doc.close()
 
-    # Parse
     parser = LlamaParse(api_key=os.environ["LLAMA_CLOUD_API_KEY"], num_workers=4)
     result = parser.parse(pdf_path)
     pages = []
@@ -342,13 +337,11 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
         if text:
             pages.append(Document(page_content=text, metadata={"page_number": pg.page}))
 
-    # Chunk
     splitter = RecursiveCharacterTextSplitter(chunk_size=3300, chunk_overlap=0)
     chunks = splitter.split_documents(pages)
     for idx, c in enumerate(chunks):
         c.metadata["chunk_id"] = idx + 1
 
-    # Embed + FAISS
     embedder = CohereEmbeddings(
         model="embed-english-v3.0",
         user_agent="langchain",
@@ -356,14 +349,12 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
     )
     vs = FAISS.from_documents(chunks, embedder)
 
-    # Persist (optional)
     store = os.path.join("vectorstore", file_name)
     os.makedirs(store, exist_ok=True)
     vs.save_local(store, index_name="faiss")
     with open(os.path.join(store, "metadata.pkl"), "wb") as mf:
         pickle.dump([c.metadata for c in chunks], mf)
 
-    # Retriever + reranker
     reranker = CohereRerank(
         model="rerank-english-v3.0",
         user_agent="langchain",
@@ -445,7 +436,7 @@ def queue_question(q: str):
     st.session_state.waiting_for_response = True
     st.session_state.messages.append({"id": _new_id(), "role": "user", "content": q})
 
-# Chat input (only input; quick-suggest buttons removed)
+# Chat input
 user_q = st.chat_input("Type your question here…", key="main_chat_input")
 if user_q:
     queue_question(user_q)
@@ -463,7 +454,7 @@ for msg in st.session_state.messages:
             key=msg.get("id", "k0"),
         )
 
-# ========================== ANSWER (same run; smooth) ==========================
+# ========================== ANSWER ==========================
 if st.session_state.waiting_for_response and st.session_state.pending_input:
     block = st.empty()
     with block.container():
@@ -549,7 +540,6 @@ Conversation so far:
 
             answer = sanitize_suggestion(answer, effective_q, docs)
 
-            # Save a CLEANED last suggestion for future confirmations
             sug = extract_suggestion(answer)
             st.session_state.last_suggestion = _clean_heading(sug) if sug else None
 
@@ -560,14 +550,10 @@ Conversation so far:
             entry = {"id": _new_id(), "role": "assistant", "content": answer}
             thinking.empty()
 
-            # Render answer
             with block.container():
                 type_bubble(answer)
-
-                # Only attach a reference when it's a real, contentful answer
                 skip_reference = is_unrelated or is_clarify
                 if docs and not skip_reference:
-                    # ---------- TOP-3 LLM PICK (reference card) ----------
                     try:
                         top3 = docs[:3]
                         best_doc = top3[0] if top3 else None
@@ -613,7 +599,18 @@ Conversation so far:
                     except Exception as e:
                         st.info(f"ℹ️ Reference selection skipped: {e}")
 
-            # Persist
             st.session_state.messages.append(entry)
             st.session_state.pending_input = None
             st.session_state.waiting_for_response = False
+
+# ===================== ADDED: Fixed bottom-right action buttons =====================
+# Rendered LAST so CSS pins this exact block. Clicking enqueues a question using your existing flow.
+st.markdown('<div class="fab-anchor"></div>', unsafe_allow_html=True)
+c1, c2 = st.columns([1, 1])
+with c1:
+    if st.button("Valuation", key="fab_val"):
+        queue_question("Valuation")
+        # No st.rerun() needed; processing block runs below in same script run.
+with c2:
+    if st.button("Good will", key="fab_gw"):
+        queue_question("Good will")
