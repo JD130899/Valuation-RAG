@@ -421,8 +421,8 @@ else:
     if up:
         file_badge_link(up.name, up.getvalue(), synced=False)
         if up.name != st.session_state.get("last_selected_upload"):
-        st.session_state.last_selected_upload = up.name
-        _reset_chat()
+            st.session_state.last_selected_upload = up.name
+            _reset_chat()
 
 if not up:
     st.warning("Please upload or load a PDF to continue.")
