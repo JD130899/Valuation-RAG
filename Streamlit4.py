@@ -7,7 +7,7 @@ import fitz  # PyMuPDF
 from PIL import Image
 from dotenv import load_dotenv
 import streamlit.components.v1 as components
-
+import time
 # LangChain / RAG deps
 from langchain_core.documents import Document
 from llama_cloud_services import LlamaParse
@@ -26,6 +26,25 @@ from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
 load_dotenv()
 st.set_page_config(page_title="Underwriting Agent", layout="wide")
 openai.api_key = os.getenv("OPENAI_API_KEY")
+
+def type_bubble(text: str, *, max_delay_chars: int = 2000, base_delay: float = 0.015):
+    """
+    Gradually renders `text` inside an assistant bubble, left-to-right.
+    - max_delay_chars: for long answers we stop delaying after this many chars
+    - base_delay: ~15ms per token chunk gives a nice feel without being slow
+    """
+    placeholder = st.empty()
+    buf = []
+    # Split on whitespace to avoid flicker and keep speed reasonable
+    for i, tok in enumerate(re.split(r'(\s+)', text)):
+        buf.append(tok)
+        html = f"<div class='assistant-bubble clearfix'>{''.join(buf)}</div>"
+        placeholder.markdown(html, unsafe_allow_html=True)
+        # keep small delay only for the first N chars, then stop delaying
+        if sum(len(t) for t in buf) < max_delay_chars:
+            time.sleep(base_delay)
+    return placeholder  # so you can place something below if you want
+
 
 # ---------- Session state ----------
 if "last_synced_file_id" not in st.session_state:
@@ -526,7 +545,7 @@ Conversation so far:
 
             # Render answer
             with block.container():
-                st.markdown(f"<div class='assistant-bubble clearfix'>{answer}</div>", unsafe_allow_html=True)
+                type_bubble(answer)
 
                 # Only attach a reference when it's a real, contentful answer
                 skip_reference = is_unrelated or is_clarify
