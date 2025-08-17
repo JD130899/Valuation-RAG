@@ -119,6 +119,30 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+st.markdown("""
+<style>
+  /* Fixed, bottom-right action bar using a sentinel + :has() */
+  div[data-testid="stVerticalBlock"]:has(> #fab-sentinel) {
+    position: fixed !important;
+    right: 24px;
+    bottom: calc(env(safe-area-inset-bottom) + 120px);  /* keep above chat/footer */
+    z-index: 2147483647;  /* stay above everything */
+    display: flex; gap: 10px;
+    width: auto !important;
+  }
+  /* Shrink Streamlit column wrappers to content */
+  div[data-testid="stVerticalBlock"]:has(> #fab-sentinel) > div { width: auto !important; }
+
+  /* Button look */
+  div[data-testid="stVerticalBlock"]:has(> #fab-sentinel) button {
+    background:#000 !important; color:#fff !important;
+    border:none !important; border-radius:9999px !important;
+    padding:10px 18px !important; font-weight:600 !important;
+  }
+</style>
+""", unsafe_allow_html=True)
+
+
 def _new_id():
     n = st.session_state.next_msg_id
     st.session_state.next_msg_id += 1
@@ -605,12 +629,17 @@ Conversation so far:
 
 # ===================== ADDED: Fixed bottom-right action buttons =====================
 # Rendered LAST so CSS pins this exact block. Clicking enqueues a question using your existing flow.
-st.markdown('<div class="fab-anchor"></div>', unsafe_allow_html=True)
-c1, c2 = st.columns([1, 1])
-with c1:
-    if st.button("Valuation", key="fab_val"):
-        queue_question("Valuation")
-        # No st.rerun() needed; processing block runs below in same script run.
-with c2:
-    if st.button("Good will", key="fab_gw"):
-        queue_question("Good will")
+# ==== Fixed bottom-right buttons (render LAST) ====
+fab = st.container()
+with fab:
+    # sentinel so our CSS can find this exact container
+    st.markdown('<span id="fab-sentinel"></span>', unsafe_allow_html=True)
+
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        if st.button("Valuation", key="fab_val"):
+            queue_question("Valuation")  # uses your existing RAG flow & typing, etc.
+    with c2:
+        if st.button("Good will", key="fab_gw"):
+            queue_question("Good will")
+
