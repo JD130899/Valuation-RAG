@@ -8,8 +8,6 @@ from PIL import Image
 from dotenv import load_dotenv
 import streamlit.components.v1 as components
 
-from urllib.parse import quote
-
 # LangChain / RAG deps
 from langchain_core.documents import Document
 from llama_cloud_services import LlamaParse
@@ -27,9 +25,6 @@ from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
 # ================= Setup =================
 load_dotenv()
 st.set_page_config(page_title="Underwriting Agent", layout="wide")
-# Kill any legacy query params like ?qs=... from old builds
-
-
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 # ---------- Session state ----------
@@ -51,44 +46,10 @@ if "last_suggestion" not in st.session_state:
 if "next_msg_id" not in st.session_state:
     st.session_state.next_msg_id = 0
 
-# ---------- styles (floating pill row above chat input; buttons now, no URL params) ----------
+# ---------- styles (keep only chat + reference styles; remove button/pin CSS) ----------
 st.markdown("""
 <style>
-.block-container { padding-bottom: 140px; }
-
-/* fixed bottom-right container */
-/* Give space so fixed buttons don't overlap chat input */
-.block-container { padding-bottom: 140px; }
-
-
-/* Pin ONLY the block that directly contains the sentinel */
-div[data-testid="stVerticalBlock"]:has(> #qs_sentinel) {
-  position: fixed;
-  right: 20px;
-  bottom: 2px;   /* tweak as you like */
-  z-index: 1000;
-  background: transparent;
-  padding: 0;
-}
-
-/* Layout the columns inside that pinned block */
-div[data-testid="stVerticalBlock"]:has(> #qs_sentinel)
-  > div[data-testid="stHorizontalBlock"] {
-  display: flex;
-  gap: 10px;
-  flex-wrap: nowrap;
-  justify-content: flex-end;
-}
-
-
-/* inner flex so buttons line up nicely */
-.qs-flex { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
-
-/* make Streamlit buttons pill-ish */
-button[kind="secondary"] {
-  border-radius: 999px !important;
-  padding: 16px 14px !important;
-}
+.block-container { padding-bottom: 32px; }
 
 /* Chat bubbles */
 .user-bubble {background:#007bff;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:right;margin:4px;}
@@ -117,12 +78,6 @@ button[kind="secondary"] {
 .ref .close-x{ position:absolute; top:6px; right:10px; border:0; background:transparent; color:#94a3b8; font-size:20px; line-height:1; cursor:pointer; }
 </style>
 """, unsafe_allow_html=True)
-
-SUGGESTION_BUTTONS = [
-    "ETRAN Cheatsheet",
-    "What is the valuation?",
-    "Goodwill value",
-]
 
 def _new_id():
     n = st.session_state.next_msg_id
@@ -448,76 +403,19 @@ if st.session_state.get("last_processed_pdf") != up.name:
     ]
     st.session_state.last_processed_pdf = up.name
 
-# ==================== INTERACTIONS FIRST (no query params, no manual rerun) ====================
+# ==================== INTERACTIONS ====================
 def queue_question(q: str):
     st.session_state.pending_input = q
     st.session_state.waiting_for_response = True
-    # append user message immediately (so it shows in same run)
     st.session_state.messages.append({"id": _new_id(), "role": "user", "content": q})
 
-# --- consume quick-suggest clicks coming via ?qs=... ---
-qs = st.query_params.get("qs")
-if qs:
-    queue_question(qs)
-    # clear it so it doesn't re-trigger on rerun
-    try:
-        del st.query_params["qs"]
-    except Exception:
-        pass
-
-
-# ================= Prompt helpers =================
-def format_chat_history(messages):
-    lines = []
-    for m in messages:
-        speaker = "User" if m["role"] == "user" else "Assistant"
-        lines.append(f"{speaker}: {m['content']}")
-    return "\n".join(lines)
-
-prompt = PromptTemplate(
-    template = """
-You are a financial-data extraction assistant.
-
-**IMPORTANT CONDITIONAL FOLLOW-UP**
-🛎️ After you answer the user’s question (using steps 1–4), **only if** there is still **unused** relevant report content, **ask**:
-“Would you like more detail on [X]?”
-Otherwise, **do not** ask any follow-up.
-
-**HARD RULE (unrelated questions)**
-If the user's question is unrelated to this PDF or requires information outside the Context, reply **exactly**:
-"Sorry I can only answer question related to {pdf_name} pdf document"
-
-**Use ONLY what appears under “Context”**.
-
-### How to answer
-1. Single value → short sentence with the exact number.
-2. Table questions → return the full table in GitHub-flavoured markdown.
-3. Valuation methods → synthesize across chunks; show weights and $ values; prefer detailed breakdowns.
-4. Theory/text → explain using context.
-5. If you cannot find an answer in Context → reply exactly:
-   "Sorry I didnt understand the question. Did you mean SUGGESTION?"
-
----
-Context:
-{context}
----
-Question: {question}
-Answer:""",
-    input_variables=["context", "question", "pdf_name"]
-)
-
-base_text = prompt.template
-wrapped_prompt = PromptTemplate(
-    template=base_text + """
-Conversation so far:
-{chat_history}
-""",
-    input_variables=["chat_history", "context", "question", "pdf_name"]
-)
+# Chat input (only input; quick-suggest buttons removed)
+user_q = st.chat_input("Type your question here…", key="main_chat_input")
+if user_q:
+    queue_question(user_q)
 
 # ========================== RENDER HISTORY ==========================
 for msg in st.session_state.messages:
-    
     cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
     st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
     if msg.get("source_img") and msg.get("source_pdf_b64") and msg.get("source_page"):
@@ -528,31 +426,6 @@ for msg in st.session_state.messages:
             page=msg["source_page"],
             key=msg.get("id", "k0"),
         )
-# --- Quick-suggest buttons (normal Streamlit widgets) ---
-qs_host = st.container()
-with qs_host:
-    st.markdown('<div id="qs_sentinel"></div>', unsafe_allow_html=True)  # marker for CSS
-
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.button("ETRAN Cheatsheet", key="btn_et", type="secondary",
-                  on_click=queue_question, args=("ETRAN Cheatsheet",))
-    with c2:
-        st.button("What is the valuation?", key="btn_val", type="secondary",
-                  on_click=queue_question, args=("What is the valuation?",))
-    with c3:
-        st.button("Goodwill value", key="btn_gw", type="secondary",
-                  on_click=queue_question, args=("Goodwill value",))
-
-
-
-
-# Chat input (one instance only; keep this AFTER the floating buttons)
-user_q = st.chat_input("Type your question here…", key="main_chat_input")
-if user_q:
-    queue_question(user_q)
-
-        
 
 # ========================== ANSWER (same run; smooth) ==========================
 if st.session_state.waiting_for_response and st.session_state.pending_input:
@@ -593,12 +466,51 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
 
             llm = ChatOpenAI(model="gpt-4o", temperature=0)
             full_input = {
-                "chat_history": format_chat_history(history_to_use),
+                "chat_history": "\n".join(
+                    f"{'User' if m['role']=='user' else 'Assistant'}: {m['content']}"
+                    for m in history_to_use
+                ),
                 "context":      ctx,
                 "question":     effective_q,
                 "pdf_name":     pdf_display,
             }
-            answer = llm.invoke(wrapped_prompt.invoke(full_input)).content
+            answer = llm.invoke(
+                PromptTemplate(
+                    template = """
+You are a financial-data extraction assistant.
+
+**IMPORTANT CONDITIONAL FOLLOW-UP**
+🛎️ After you answer the user’s question (using steps 1–4), **only if** there is still **unused** relevant report content, **ask**:
+“Would you like more detail on [X]?”
+Otherwise, **do not** ask any follow-up.
+
+**HARD RULE (unrelated questions)**
+If the user's question is unrelated to this PDF or requires information outside the Context, reply **exactly**:
+"Sorry I can only answer question related to {pdf_name} pdf document"
+
+**Use ONLY what appears under “Context”**.
+
+### How to answer
+1. Single value → short sentence with the exact number.
+2. Table questions → return the full table in GitHub-flavoured markdown.
+3. Valuation methods → synthesize across chunks; show weights and $ values; prefer detailed breakdowns.
+4. Theory/text → explain using context.
+5. If you cannot find an answer in Context → reply exactly:
+   "Sorry I didnt understand the question. Did you mean SUGGESTION?"
+
+---
+Context:
+{context}
+---
+Question: {question}
+Answer:
+Conversation so far:
+{chat_history}
+""",
+                    input_variables=["chat_history", "context", "question", "pdf_name"]
+                ).invoke(full_input)
+            ).content
+
             answer = sanitize_suggestion(answer, effective_q, docs)
 
             # Save a CLEANED last suggestion for future confirmations
@@ -655,7 +567,6 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
                                 entry["source_img"] = pil_to_base64(img)
                                 entry["source_pdf_b64"] = base64.b64encode(st.session_state.pdf_bytes).decode("ascii")
                                 entry["source_page"] = ref_page
-                                # draw the card
                                 render_reference_card(
                                     label=entry["source"],
                                     img_b64=entry["source_img"],
