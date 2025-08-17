@@ -1,19 +1,15 @@
 # custom_fab_bottom_right.py
-import os, io, base64, uuid, time
+import os
+import time
 import streamlit as st
+
+# ===== extra imports to match the reference sidebar =====
 from dotenv import load_dotenv
-import streamlit.components.v1 as components
-
-# If you use these elsewhere later, they’re safe to import now:
-# import fitz  # PyMuPDF
-# from PIL import Image
-
-# ---- Your Drive helpers (already in your repo) ----
 from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
 
 # ================= Setup =================
 load_dotenv()
-st.set_page_config(page_title="Underwriting Agent", layout="wide")
+st.set_page_config(page_title="Underwriting Agent (Demo)", layout="wide")
 
 # ---------- Global store so history survives reloads ----------
 @st.cache_resource
@@ -22,14 +18,7 @@ def _store():
 
 store = _store()
 
-# ---------------- Session state ----------------
-def _new_id():
-    st.session_state.next_id += 1
-    return f"m{st.session_state.next_id}"
-
-def _sync_store():
-    store["messages"] = st.session_state.messages
-
+# ---------- helpers (match reference welcome) ----------
 def _reset_chat():
     st.session_state.messages = [
         {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
@@ -38,8 +27,9 @@ def _reset_chat():
     st.session_state.pending_input = None
     st.session_state.waiting_for_response = False
 
+# ---------------- Session state ----------------
 if "messages" not in st.session_state:
-    # prefer saved store if present; otherwise use welcome pair
+    # initialize using reference welcome (not the single-line one)
     st.session_state.messages = store["messages"] or [
         {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
         {"role": "assistant", "content": "What can I help you with?"}
@@ -50,16 +40,19 @@ if "waiting_for_response" not in st.session_state:
     st.session_state.waiting_for_response = False
 if "next_id" not in st.session_state:
     st.session_state.next_id = 0
-
-# Track Drive selection/file so we can reset chat when a NEW file is loaded
 if "last_synced_file_id" not in st.session_state:
     st.session_state.last_synced_file_id = None
 if "uploaded_file_from_drive" not in st.session_state:
     st.session_state.uploaded_file_from_drive = None
 if "uploaded_file_name" not in st.session_state:
     st.session_state.uploaded_file_name = None
-if "last_selected_upload" not in st.session_state:
-    st.session_state.last_selected_upload = None
+
+def _new_id():
+    st.session_state.next_id += 1
+    return f"m{st.session_state.next_id}"
+
+def _sync_store():
+    store["messages"] = st.session_state.messages
 
 def queue_question(q: str):
     if not q:
@@ -78,41 +71,6 @@ def answer_pending():
     st.session_state.waiting_for_response = False
     _sync_store()
 
-# ---------- Small helper: “open file” badge ----------
-def file_badge_link(name: str, pdf_bytes: bytes, *, synced: bool = True):
-    base = os.path.splitext(name)[0]
-    b64 = base64.b64encode(pdf_bytes).decode("ascii")
-    label = "Using synced file:" if synced else "Using file:"
-    link_id = f"open-file-{uuid.uuid4().hex[:8]}"
-    st.markdown(
-        f'''
-        <div style="background:#1f2c3a; padding:8px; border-radius:8px; color:#fff; margin:6px 0 12px;">
-          ✅ <b>{label}</b>
-          <a id="{link_id}" href="#" target="_blank" rel="noopener" style="color:#93c5fd; text-decoration:none;">{base}</a>
-        </div>
-        ''',
-        unsafe_allow_html=True
-    )
-    components.html(
-        f'''<!doctype html><meta charset='utf-8'>
-<style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
-<script>(function(){{
-  function b64ToUint8Array(s){{var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}}
-  var blob = new Blob([b64ToUint8Array("{b64}")], {{type:"application/pdf"}});
-  var url  = URL.createObjectURL(blob);
-  function attach(){{
-    var d = window.parent && window.parent.document;
-    if(!d) return setTimeout(attach,120);
-    var a = d.getElementById("{link_id}");
-    if(!a) return setTimeout(attach,120);
-    a.setAttribute("href", url);
-  }}
-  attach();
-  var me = window.frameElement; if(me){{me.style.display="none";me.style.height="0";me.style.border="0";}}
-}})();</script>''',
-        height=0,
-    )
-
 # --------------- Styles ---------------
 st.markdown("""
 <style>
@@ -121,7 +79,7 @@ st.markdown("""
   .fab-wrap {
     position: fixed;
     right: 24px;
-    bottom: 110px;   /* sits above st.chat_input */
+    bottom: 110px;
     z-index: 1000;
     display: flex; gap: 10px; align-items: center; justify-content: flex-end;
   }
@@ -132,6 +90,7 @@ st.markdown("""
   }
   .fab-btn:hover { filter: brightness(1.08); }
 
+  /* custom chat bubbles */
   .user-bubble {
     background: #007bff; color: #fff;
     padding: 8px 12px; border-radius: 12px;
@@ -144,62 +103,41 @@ st.markdown("""
     margin: 4px 0; max-width: 60%;
     float: left; clear: both;
   }
-  .clearfix::after { content: ""; display: table; clear: both; }
+  .clearfix::after {content:"";display:table;clear:both;}
 </style>
 """, unsafe_allow_html=True)
 
-# ================= Sidebar: Google Drive loader =================
-st.sidebar.header("📂 Files")
-try:
-    service = get_drive_service()
-    pdf_files = get_all_pdfs(service)
-    if pdf_files:
-        names = [f["name"] for f in pdf_files]
-        sel = st.sidebar.selectbox("Select a PDF from Google Drive", names, key="gd_sel")
-        chosen = next(f for f in pdf_files if f["name"] == sel)
-        if st.sidebar.button("📥 Load Selected PDF", key="gd_load"):
+# ================= Sidebar: Google Drive loader (EXACT behavior from reference) =================
+service = get_drive_service()
+pdf_files = get_all_pdfs(service)
+
+st.sidebar.title("Underwriting Agent")
+if pdf_files:
+    names = [f["name"] for f in pdf_files]
+    sel = st.sidebar.selectbox("📂 Select a PDF from Google Drive", names, index=0 if names else None)
+    chosen = next((f for f in pdf_files if f["name"] == sel), None)
+    if st.sidebar.button("📥 Load Selected PDF"):
+        if chosen:
             fid, fname = chosen["id"], chosen["name"]
             if fid == st.session_state.last_synced_file_id:
                 st.sidebar.info("✅ Already loaded.")
             else:
                 path = download_pdf(service, fid, fname)
                 if path:
-                    st.session_state.uploaded_file_from_drive = open(path, "rb").read()
+                    with open(path, "rb") as fh:
+                        st.session_state.uploaded_file_from_drive = fh.read()
                     st.session_state.uploaded_file_name = fname
                     st.session_state.last_synced_file_id = fid
-                    _reset_chat()
-    else:
-        st.sidebar.info("No PDFs found in Drive.")
-except Exception as e:
-    st.sidebar.warning(f"Drive not configured: {e}")
-
-# ================= Main UI =================
-st.title("Underwriting Agent")
-
-# Show a badge if we have a loaded/synced file; else allow upload
-if st.session_state.uploaded_file_from_drive and st.session_state.uploaded_file_name:
-    file_badge_link(
-        st.session_state.uploaded_file_name,
-        st.session_state.uploaded_file_from_drive,
-        synced=True
-    )
+                    _reset_chat()  # exact reset behavior on new file
 else:
-    up = st.file_uploader("Upload a valuation report PDF", type="pdf", key="local_uploader")
-    if up:
-        # Only reset when user actually changes the file
-        if up.name != st.session_state.last_selected_upload:
-            st.session_state.last_selected_upload = up.name
-            # Stash like Drive path for consistent badge behavior
-            st.session_state.uploaded_file_from_drive = up.getvalue()
-            st.session_state.uploaded_file_name = up.name
-            st.session_state.last_synced_file_id = None
-            _reset_chat()
-    if st.session_state.uploaded_file_from_drive and st.session_state.uploaded_file_name:
-        file_badge_link(
-            st.session_state.uploaded_file_name,
-            st.session_state.uploaded_file_from_drive,
-            synced=False
-        )
+    st.sidebar.warning("📭 No PDFs found in Drive.")
+
+# ================= Main =================
+st.title("Underwriting Agent (Demo)")
+
+# (optional) small badge to show selected file name if any
+if st.session_state.uploaded_file_name:
+    st.info(f"Using file: **{st.session_state.uploaded_file_name}**")
 
 # ---------------- Render full history with custom bubbles ----------------
 for m in st.session_state.messages:
@@ -215,7 +153,7 @@ if qs:
     except Exception:
         pass
 
-# ---------------- Fixed buttons (bottom-right) ----------------
+# ---------------- Fixed buttons ----------------
 st.markdown("""
 <div class="fab-wrap">
   <form method="get" style="margin:0;">
@@ -241,6 +179,6 @@ if user_q:
 # ---------------- Answer queued question ----------------
 if st.session_state.waiting_for_response and st.session_state.pending_input:
     # Show Thinking... as assistant bubble
-    st.markdown("<div class='assistant-bubble'>Thinking…</div>", unsafe_allow_html=True)
+    st.markdown("<div class='assistant-bubble clearfix'>Thinking…</div>", unsafe_allow_html=True)
     answer_pending()
     st.rerun()
