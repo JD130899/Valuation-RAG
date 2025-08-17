@@ -3,8 +3,6 @@ import os
 import time
 import streamlit as st
 from dotenv import load_dotenv
-
-# ===== Google Drive sidebar (same behavior as reference) =====
 from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
 
 # ================= Setup =================
@@ -15,7 +13,6 @@ st.set_page_config(page_title="Underwriting Agent (Demo)", layout="wide")
 @st.cache_resource
 def _store():
     return {"messages": []}
-
 store = _store()
 
 # ---------- helpers (reference-style welcome) ----------
@@ -26,8 +23,7 @@ def _reset_chat():
     ]
     st.session_state.pending_input = None
     st.session_state.waiting_for_response = False
-    # keep global cache in sync so old questions don't reappear
-    store["messages"] = st.session_state.messages
+    store["messages"] = st.session_state.messages  # keep cache in sync
 
 def _sync_store():
     store["messages"] = st.session_state.messages
@@ -55,11 +51,11 @@ def answer_pending():
 
 # ---------------- Session state ----------------
 if "_initialized" not in st.session_state:
-    # first load: start with clean two-line welcome (prevents old questions showing)
     st.session_state._initialized = True
     st.session_state.next_id = 0
+    # start with clean two-line welcome so old qs don't show
     _reset_chat()
-# ensure keys exist
+
 st.session_state.setdefault("last_synced_file_id", None)
 st.session_state.setdefault("uploaded_file_from_drive", None)
 st.session_state.setdefault("uploaded_file_name", None)
@@ -68,20 +64,6 @@ st.session_state.setdefault("uploaded_file_name", None)
 st.markdown("""
 <style>
   .block-container { padding-bottom: 140px; }
-
-  .fab-wrap {
-    position: fixed;
-    right: 24px;
-    bottom: 110px;
-    z-index: 1000;
-    display: flex; gap: 10px; align-items: center; justify-content: flex-end;
-  }
-  .fab-btn {
-    background: #000 !important; color: #fff !important;
-    border-radius: 9999px !important; padding: 10px 16px !important; border: none !important;
-    box-shadow: 0 6px 18px rgba(0,0,0,0.25); font-weight: 600; cursor: pointer;
-  }
-  .fab-btn:hover { filter: brightness(1.08); }
 
   /* custom chat bubbles */
   .user-bubble {
@@ -97,10 +79,33 @@ st.markdown("""
     float: left; clear: both;
   }
   .clearfix::after {content:"";display:table;clear:both;}
+
+  /* ===== Fixed bottom-right Streamlit buttons (no page reload) ===== */
+  #fab-sentinel { height: 0; display: block; }
+  /* The horizontal block that comes right after our sentinel */
+  div[data-testid="stVerticalBlock"]:has(> #fab-sentinel) + div[data-testid="stHorizontalBlock"]{
+    position: fixed !important;
+    right: 24px;
+    bottom: 88px;      /* sits above st.chat_input */
+    z-index: 1000;
+    display: flex; gap: 10px;
+    width: auto !important;
+  }
+  /* shrink children so buttons size to content */
+  div[data-testid="stVerticalBlock"]:has(> #fab-sentinel) + div[data-testid="stHorizontalBlock"] > div{
+    width: auto !important;
+  }
+  /* button styling */
+  div[data-testid="stVerticalBlock"]:has(> #fab-sentinel) + div[data-testid="stHorizontalBlock"] button {
+    background:#000 !important; color:#fff !important;
+    border:none !important; border-radius:9999px !important;
+    padding:10px 18px !important; font-weight:600 !important;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.25);
+  }
 </style>
 """, unsafe_allow_html=True)
 
-# ================= Sidebar: Google Drive loader (EXACT UX) =================
+# ================= Sidebar: Google Drive loader (reference UX) =================
 service = get_drive_service()
 pdf_files = get_all_pdfs(service)
 
@@ -121,7 +126,7 @@ if pdf_files:
                         st.session_state.uploaded_file_from_drive = fh.read()
                     st.session_state.uploaded_file_name = fname
                     st.session_state.last_synced_file_id = fid
-                    _reset_chat()  # reset to the two-line welcome
+                    _reset_chat()
 else:
     st.sidebar.warning("📭 No PDFs found in Drive.")
 
@@ -132,7 +137,6 @@ if st.sidebar.button("🧹 New chat"):
 # ================= Main =================
 st.title("Underwriting Agent (Demo)")
 
-# small badge to show selected file name if any
 if st.session_state.uploaded_file_name:
     st.info(f"Using file: **{st.session_state.uploaded_file_name}**")
 
@@ -141,36 +145,19 @@ for m in st.session_state.messages:
     cls = "user-bubble" if m["role"] == "user" else "assistant-bubble"
     st.markdown(f"<div class='{cls} clearfix'>{m['content']}</div>", unsafe_allow_html=True)
 
-# ---------------- Handle ?qs= (robust clear so it doesn't re-queue) ----------------
-qs = st.query_params.get("qs")
-if qs:
-    queue_question(qs)
-    try:
-        # prefer clearing all params so it won't re-fire on rerun
-        st.query_params.clear()
-    except Exception:
-        try:
-            del st.query_params["qs"]
-        except Exception:
-            pass
-
-# ---------------- Fixed buttons (bottom-right) ----------------
-st.markdown("""
-<div class="fab-wrap">
-  <form method="get" style="margin:0;">
-    <input type="hidden" name="qs" value="ETRAN Cheatsheet"/>
-    <button class="fab-btn" type="submit">ETRAN Cheatsheet</button>
-  </form>
-  <form method="get" style="margin:0;">
-    <input type="hidden" name="qs" value="What is the valuation?"/>
-    <button class="fab-btn" type="submit">Valuation</button>
-  </form>
-  <form method="get" style="margin:0;">
-    <input type="hidden" name="qs" value="Goodwill value"/>
-    <button class="fab-btn" type="submit">Goodwill value</button>
-  </form>
-</div>
-""", unsafe_allow_html=True)
+# ---------------- Fixed buttons (Streamlit, not HTML forms) ----------------
+# Sentinel + the very next st.columns becomes the fixed bar via CSS above
+st.markdown('<span id="fab-sentinel"></span>', unsafe_allow_html=True)
+b1, b2, b3 = st.columns([1, 1, 1])
+with b1:
+    st.button("ETRAN Cheatsheet", key="fab_etran",
+              on_click=queue_question, args=("ETRAN Cheatsheet",))
+with b2:
+    st.button("Valuation", key="fab_val",
+              on_click=queue_question, args=("What is the valuation?",))
+with b3:
+    st.button("Goodwill value", key="fab_gw",
+              on_click=queue_question, args=("Goodwill value",))
 
 # ---------------- Chat input ----------------
 user_q = st.chat_input("Type your question here…")
