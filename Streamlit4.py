@@ -153,6 +153,13 @@ def _new_id():
     st.session_state.next_msg_id += 1
     return f"m{n}"
 
+# ==================== INTERACTIONS (define BEFORE buttons) ====================
+def queue_question(q: str):
+    st.session_state.pending_input = q
+    st.session_state.waiting_for_response = True
+    st.session_state.messages.append({"id": _new_id(), "role": "user", "content": q})
+
+
 def file_badge_link(name: str, pdf_bytes: bytes, synced: bool = True):
     base = os.path.splitext(name)[0]
     b64 = base64.b64encode(pdf_bytes).decode("ascii")
@@ -449,16 +456,17 @@ if not up:
     st.stop()
 
 # ===== TOP toolbar (buttons at the top; chat happens below) =====
+
 toolbar = st.container()
 with toolbar:
     st.markdown('<span id="toolbar-sentinel"></span>', unsafe_allow_html=True)
     t1, t2 = st.columns([1, 1])
     with t1:
-        if st.button("Valuation", key="top_val"):
-            queue_question("Valuation")
+        st.button("Valuation", key="top_val",
+                  on_click=queue_question, args=("Valuation",))
     with t2:
-        if st.button("Good will", key="top_gw"):
-            queue_question("Good will")
+        st.button("Good will", key="top_gw",
+                  on_click=queue_question, args=("Good will",))
 
 
 
@@ -473,11 +481,7 @@ if st.session_state.get("last_processed_pdf") != up.name:
     ]
     st.session_state.last_processed_pdf = up.name
 
-# ==================== INTERACTIONS ====================
-def queue_question(q: str):
-    st.session_state.pending_input = q
-    st.session_state.waiting_for_response = True
-    st.session_state.messages.append({"id": _new_id(), "role": "user", "content": q})
+
 
 # Chat input
 user_q = st.chat_input("Type your question here…", key="main_chat_input")
