@@ -483,22 +483,47 @@ if user_q:
     queue_question(user_q)
 
 # ===================== Fixed bottom-right FAB buttons =====================
-st.markdown("""
-<div class="fab-wrap">
+# ===================== Fixed bottom-right FAB buttons =====================
+# (DELETE your old st.markdown("""<div class="fab-wrap"> ... </div>"""))
+st.markdown(
+    """
+<div id="fab"
+     style="position:fixed; right:24px; bottom:110px; z-index:1000;
+            display:flex; gap:10px; align-items:center; justify-content:flex-end;">
   <form method="get" style="margin:0;">
     <input type="hidden" name="qs" value="Valuation"/>
-    <button class="fab-btn" type="submit">Valuation</button>
+    <button type="submit"
+            style="background:#000; color:#fff; border:none; border-radius:9999px;
+                   padding:10px 18px; font-weight:600; cursor:pointer;
+                   box-shadow:0 6px 18px rgba(0,0,0,0.25);">
+      Valuation
+    </button>
   </form>
+
   <form method="get" style="margin:0;">
     <input type="hidden" name="qs" value="Good will"/>
-    <button class="fab-btn" type="submit">Good will</button>
+    <button type="submit"
+            style="background:#000; color:#fff; border:none; border-radius:9999px;
+                   padding:10px 18px; font-weight:600; cursor:pointer;
+                   box-shadow:0 6px 18px rgba(0,0,0,0.25);">
+      Good will
+    </button>
   </form>
+
   <form method="get" style="margin:0;">
     <input type="hidden" name="qs" value="Etran Cheatsheet"/>
-    <button class="fab-btn" type="submit">Etran Cheatsheet</button>
+    <button type="submit"
+            style="background:#000; color:#fff; border:none; border-radius:9999px;
+                   padding:10px 18px; font-weight:600; cursor:pointer;
+                   box-shadow:0 6px 18px rgba(0,0,0,0.25);">
+      Etran Cheatsheet
+    </button>
   </form>
 </div>
-""", unsafe_allow_html=True)
+    """,
+    unsafe_allow_html=True,
+)
+
 
 # ========================== ANSWER ==========================
 if st.session_state.waiting_for_response and st.session_state.pending_input:
