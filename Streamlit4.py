@@ -118,33 +118,29 @@ st.markdown("""
 }
 </style>
 """, unsafe_allow_html=True)
-
 st.markdown("""
 <style>
-  /* --- sticky top toolbar that contains the two buttons --- */
-  div[data-testid="stVerticalBlock"]:has(> #toolbar-sentinel) {
-    position: sticky;          /* stays at top when you scroll */
-    top: 0;                    /* stick to top of the content area */
-    z-index: 1000;
-    display: flex; gap: 10px; align-items: center;
-    padding: 8px 12px;
-    margin: 8px 0 12px 0;
-    border-radius: 12px;
-    background: rgba(17,24,39,.85);      /* subtle dark bg */
-    backdrop-filter: blur(4px);
-    border: 1px solid rgba(255,255,255,.08);
+  /* Bottom-right dock that contains the action buttons */
+  div[data-testid="stVerticalBlock"]:has(> #dock-sentinel) {
+    position: fixed !important;
+    right: 24px;
+    bottom: calc(env(safe-area-inset-bottom) + 110px); /* sits above st.chat_input/footer */
+    z-index: 2147483647;
+    display: flex; gap: 10px;
+    width: auto !important;
   }
-  /* make Streamlit column wrappers shrink to content */
-  div[data-testid="stVerticalBlock"]:has(> #toolbar-sentinel) > div { width: auto !important; }
+  /* let Streamlit column wrappers shrink to content */
+  div[data-testid="stVerticalBlock"]:has(> #dock-sentinel) > div { width: auto !important; }
 
-  /* button look in the toolbar */
-  div[data-testid="stVerticalBlock"]:has(> #toolbar-sentinel) button {
+  /* button styling */
+  div[data-testid="stVerticalBlock"]:has(> #dock-sentinel) button {
     background:#000 !important; color:#fff !important;
     border:none !important; border-radius:9999px !important;
     padding:10px 18px !important; font-weight:600 !important;
   }
 </style>
 """, unsafe_allow_html=True)
+
 
 
 
@@ -457,19 +453,21 @@ if not up:
 
 # ===== TOP toolbar (buttons at the top; chat happens below) =====
 
-toolbar = st.container()
-with toolbar:
-    st.markdown('<span id="toolbar-sentinel"></span>', unsafe_allow_html=True)
-    t1, t2, t3 = st.columns([1, 1, 1])
-    with t1:
-        st.button("Valuation", key="top_val",
+# ===== Bottom dock (render LAST so it overlays above chat input) =====
+dock = st.container()
+with dock:
+    st.markdown('<span id="dock-sentinel"></span>', unsafe_allow_html=True)
+    c1, c2, c3 = st.columns([1, 1, 1])
+    with c1:
+        st.button("Valuation", key="dock_val",
                   on_click=queue_question, args=("Valuation",))
-    with t2:
-        st.button("Good will", key="top_gw",
+    with c2:
+        st.button("Good will", key="dock_gw",
                   on_click=queue_question, args=("Good will",))
-    with t3:
-        st.button("Etran Cheatsheet", key="top_etran",
+    with c3:
+        st.button("Etran Cheatsheet", key="dock_etran",
                   on_click=queue_question, args=("Etran Cheatsheet",))
+
 
 
 # Rebuild retriever when file changes
