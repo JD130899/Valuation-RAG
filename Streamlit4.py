@@ -121,26 +121,31 @@ st.markdown("""
 
 st.markdown("""
 <style>
-  /* Fixed, bottom-right action bar using a sentinel + :has() */
-  div[data-testid="stVerticalBlock"]:has(> #fab-sentinel) {
-    position: fixed !important;
-    right: 24px;
-    bottom: calc(env(safe-area-inset-bottom) + 120px);  /* keep above chat/footer */
-    z-index: 2147483647;  /* stay above everything */
-    display: flex; gap: 10px;
-    width: auto !important;
+  /* --- sticky top toolbar that contains the two buttons --- */
+  div[data-testid="stVerticalBlock"]:has(> #toolbar-sentinel) {
+    position: sticky;          /* stays at top when you scroll */
+    top: 0;                    /* stick to top of the content area */
+    z-index: 1000;
+    display: flex; gap: 10px; align-items: center;
+    padding: 8px 12px;
+    margin: 8px 0 12px 0;
+    border-radius: 12px;
+    background: rgba(17,24,39,.85);      /* subtle dark bg */
+    backdrop-filter: blur(4px);
+    border: 1px solid rgba(255,255,255,.08);
   }
-  /* Shrink Streamlit column wrappers to content */
-  div[data-testid="stVerticalBlock"]:has(> #fab-sentinel) > div { width: auto !important; }
+  /* make Streamlit column wrappers shrink to content */
+  div[data-testid="stVerticalBlock"]:has(> #toolbar-sentinel) > div { width: auto !important; }
 
-  /* Button look */
-  div[data-testid="stVerticalBlock"]:has(> #fab-sentinel) button {
+  /* button look in the toolbar */
+  div[data-testid="stVerticalBlock"]:has(> #toolbar-sentinel) button {
     background:#000 !important; color:#fff !important;
     border:none !important; border-radius:9999px !important;
     padding:10px 18px !important; font-weight:600 !important;
   }
 </style>
 """, unsafe_allow_html=True)
+
 
 
 def _new_id():
@@ -443,6 +448,20 @@ if not up:
     st.warning("Please upload or load a PDF to continue.")
     st.stop()
 
+# ===== TOP toolbar (buttons at the top; chat happens below) =====
+toolbar = st.container()
+with toolbar:
+    st.markdown('<span id="toolbar-sentinel"></span>', unsafe_allow_html=True)
+    t1, t2 = st.columns([1, 1])
+    with t1:
+        if st.button("Valuation", key="top_val"):
+            queue_question("Valuation")
+    with t2:
+        if st.button("Good will", key="top_gw"):
+            queue_question("Good will")
+
+
+
 # Rebuild retriever when file changes
 if st.session_state.get("last_processed_pdf") != up.name:
     pdf_bytes = up.getvalue()
@@ -627,19 +646,4 @@ Conversation so far:
             st.session_state.pending_input = None
             st.session_state.waiting_for_response = False
 
-# ===================== ADDED: Fixed bottom-right action buttons =====================
-# Rendered LAST so CSS pins this exact block. Clicking enqueues a question using your existing flow.
-# ==== Fixed bottom-right buttons (render LAST) ====
-fab = st.container()
-with fab:
-    # sentinel so our CSS can find this exact container
-    st.markdown('<span id="fab-sentinel"></span>', unsafe_allow_html=True)
-
-    c1, c2 = st.columns([1, 1])
-    with c1:
-        if st.button("Valuation", key="fab_val"):
-            queue_question("Valuation")  # uses your existing RAG flow & typing, etc.
-    with c2:
-        if st.button("Good will", key="fab_gw"):
-            queue_question("Good will")
 
