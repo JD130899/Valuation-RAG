@@ -3,16 +3,15 @@ import os
 import time
 import streamlit as st
 from dotenv import load_dotenv
-from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
 
-# ================= Setup =================
 load_dotenv()
 st.set_page_config(page_title="Underwriting Agent (Demo)", layout="wide")
 
-# ---------- Global store ----------
+# ---------- Global store so history survives reloads ----------
 @st.cache_resource
 def _store():
     return {"messages": []}
+
 store = _store()
 
 # ---------------- Session state ----------------
@@ -26,11 +25,6 @@ if "waiting_for_response" not in st.session_state:
     st.session_state.waiting_for_response = False
 if "next_id" not in st.session_state:
     st.session_state.next_id = 0
-
-# ---- Sidebar-related state ----
-st.session_state.setdefault("last_synced_file_id", None)
-st.session_state.setdefault("uploaded_file_from_drive", None)
-st.session_state.setdefault("uploaded_file_name", None)
 
 def _new_id():
     st.session_state.next_id += 1
@@ -56,33 +50,10 @@ def answer_pending():
     st.session_state.waiting_for_response = False
     _sync_store()
 
-def _reset_chat():
-    st.session_state.messages = [
-        {"role": "assistant", "content": "Hi! Ask anything about your valuation report."}
-    ]
-    st.session_state.pending_input = None
-    st.session_state.waiting_for_response = False
-    _sync_store()
-
-# ================= Styles =================
+# --------------- Styles ---------------
 st.markdown("""
 <style>
   .block-container { padding-bottom: 140px; }
-
-  /* Keep FABs bottom-right */
-  .fab-wrap {
-    position: fixed;
-    right: 24px;
-    bottom: 20px;
-    z-index: 1000;
-    display: flex; gap: 10px; align-items: center; justify-content: flex-end;
-  }
-  .fab-btn {
-    background: #000 !important; color: #fff !important;
-    border-radius: 9999px !important; padding: 10px 16px !important; border: none !important;
-    box-shadow: 0 6px 18px rgba(0,0,0,0.25); font-weight: 600; cursor: pointer;
-  }
-  .fab-btn:hover { filter: brightness(1.08); }
 
   /* custom chat bubbles */
   .user-bubble {
@@ -97,85 +68,63 @@ st.markdown("""
     margin: 4px 0; max-width: 60%;
     float: left; clear: both;
   }
+
+  /* ===== Fixed bottom-right Streamlit buttons (row) ===== */
+  /* Pin ONLY the next block after our anchor */
+  div[data-testid="stVerticalBlock"]:has(> #fab-anchor) + div[data-testid="stVerticalBlock"]{
+    position: fixed !important;
+    right: 24px;
+    bottom: 20px;             /* sit above chat input */
+    z-index: 1000;
+    display: flex;
+    flex-direction: row;      /* horizontal row like your dummy screenshot */
+    gap: 10px;
+    align-items: center;
+    width: auto !important;
+    pointer-events: none;     /* allow chat input underneath */
+  }
+  /* enable clicks on the buttons themselves */
+  div[data-testid="stVerticalBlock"]:has(> #fab-anchor) + div[data-testid="stVerticalBlock"] button{
+    pointer-events: auto;
+  }
+  /* Button look to match your style */
+  div[data-testid="stVerticalBlock"]:has(> #fab-anchor) + div[data-testid="stVerticalBlock"] button {
+    background:#000 !important; color:#fff !important;
+    border:none !important; border-radius:9999px !important;
+    padding:10px 16px !important; font-weight:600 !important;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.25);
+  }
 </style>
 """, unsafe_allow_html=True)
 
-# ================= Sidebar (Drive Loader) =================
-st.sidebar.title("Underwriting Agent")
-try:
-    service = get_drive_service()
-    pdf_files = get_all_pdfs(service)
-except Exception as e:
-    pdf_files = []
-    st.sidebar.warning(f"Drive not available: {e}")
-
-if pdf_files:
-    names = [f["name"] for f in pdf_files]
-    sel = st.sidebar.selectbox("📂 Select a PDF from Google Drive", names, index=0 if names else None)
-    chosen = next((f for f in pdf_files if f["name"] == sel), None)
-    if st.sidebar.button("📥 Load Selected PDF"):
-        if chosen:
-            fid, fname = chosen["id"], chosen["name"]
-            if fid == st.session_state.last_synced_file_id:
-                st.sidebar.info("✅ Already loaded.")
-            else:
-                path = download_pdf(service, fid, fname)
-                if path:
-                    with open(path, "rb") as fh:
-                        st.session_state.uploaded_file_from_drive = fh.read()
-                    st.session_state.uploaded_file_name = fname
-                    st.session_state.last_synced_file_id = fid
-                    _reset_chat()
-else:
-    st.sidebar.warning("📭 No PDFs found in Drive.")
-
-if st.sidebar.button("🧹 New chat"):
-    _reset_chat()
-
-# ================= Main =================
 st.title("Underwriting Agent (Demo)")
 
-if st.session_state.uploaded_file_name:
-    st.info(f"Using file: **{st.session_state.uploaded_file_name}**")
-
-# Render messages
+# ---------------- Render full history with custom bubbles ----------------
 for m in st.session_state.messages:
     cls = "user-bubble" if m["role"] == "user" else "assistant-bubble"
     st.markdown(f"<div class='{cls}'>{m['content']}</div>", unsafe_allow_html=True)
 
-# Handle ?qs= param
-qs = st.query_params.get("qs")
-if qs:
-    queue_question(qs)
-    try:
-        del st.query_params["qs"]
-    except Exception:
-        pass
+# ---------------- (REMOVED) ?qs handler ----------------
+# Not needed anymore since we aren't using GET forms.
 
-# ================= FAB Buttons (UNCHANGED from Image 2) =================
-st.markdown("""
-<div class="fab-wrap">
-  <form method="get" style="margin:0;">
-    <input type="hidden" name="qs" value="ETRAN Cheatsheet"/>
-    <button class="fab-btn" type="submit">ETRAN Cheatsheet</button>
-  </form>
-  <form method="get" style="margin:0;">
-    <input type="hidden" name="qs" value="What is the valuation?"/>
-    <button class="fab-btn" type="submit">Valuation</button>
-  </form>
-  <form method="get" style="margin:0;">
-    <input type="hidden" name="qs" value="Goodwill value"/>
-    <button class="fab-btn" type="submit">Goodwill value</button>
-  </form>
-</div>
-""", unsafe_allow_html=True)
+# ---------------- Fixed buttons (NO page navigation) ----------------
+# Anchor: the very next block is pinned bottom-right by the CSS above
+st.markdown('<span id="fab-anchor"></span>', unsafe_allow_html=True)
+fab = st.container()
+with fab:
+    st.button("ETRAN Cheatsheet", key="fab_etran",
+              on_click=queue_question, args=("ETRAN Cheatsheet",))
+    st.button("Valuation", key="fab_val",
+              on_click=queue_question, args=("What is the valuation?",))
+    st.button("Goodwill value", key="fab_gw",
+              on_click=queue_question, args=("Goodwill value",))
 
-# Chat input
+# ---------------- Chat input ----------------
 user_q = st.chat_input("Type your question here…")
 if user_q:
     queue_question(user_q)
 
-# Answer pending
+# ---------------- Answer queued question ----------------
 if st.session_state.waiting_for_response and st.session_state.pending_input:
     st.markdown("<div class='assistant-bubble'>Thinking…</div>", unsafe_allow_html=True)
     answer_pending()
