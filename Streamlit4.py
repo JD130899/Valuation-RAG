@@ -2,9 +2,9 @@
 import os
 import time
 import streamlit as st
-
-# ===== extra imports to match the reference sidebar =====
 from dotenv import load_dotenv
+
+# ===== Google Drive sidebar (same behavior as reference) =====
 from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
 
 # ================= Setup =================
@@ -18,7 +18,7 @@ def _store():
 
 store = _store()
 
-# ---------- helpers (match reference welcome) ----------
+# ---------- helpers (reference-style welcome) ----------
 def _reset_chat():
     st.session_state.messages = [
         {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
@@ -26,33 +26,15 @@ def _reset_chat():
     ]
     st.session_state.pending_input = None
     st.session_state.waiting_for_response = False
+    # keep global cache in sync so old questions don't reappear
+    store["messages"] = st.session_state.messages
 
-# ---------------- Session state ----------------
-if "messages" not in st.session_state:
-    # initialize using reference welcome (not the single-line one)
-    st.session_state.messages = store["messages"] or [
-        {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
-        {"role": "assistant", "content": "What can I help you with?"}
-    ]
-if "pending_input" not in st.session_state:
-    st.session_state.pending_input = None
-if "waiting_for_response" not in st.session_state:
-    st.session_state.waiting_for_response = False
-if "next_id" not in st.session_state:
-    st.session_state.next_id = 0
-if "last_synced_file_id" not in st.session_state:
-    st.session_state.last_synced_file_id = None
-if "uploaded_file_from_drive" not in st.session_state:
-    st.session_state.uploaded_file_from_drive = None
-if "uploaded_file_name" not in st.session_state:
-    st.session_state.uploaded_file_name = None
+def _sync_store():
+    store["messages"] = st.session_state.messages
 
 def _new_id():
     st.session_state.next_id += 1
     return f"m{st.session_state.next_id}"
-
-def _sync_store():
-    store["messages"] = st.session_state.messages
 
 def queue_question(q: str):
     if not q:
@@ -70,6 +52,17 @@ def answer_pending():
     st.session_state.pending_input = None
     st.session_state.waiting_for_response = False
     _sync_store()
+
+# ---------------- Session state ----------------
+if "_initialized" not in st.session_state:
+    # first load: start with clean two-line welcome (prevents old questions showing)
+    st.session_state._initialized = True
+    st.session_state.next_id = 0
+    _reset_chat()
+# ensure keys exist
+st.session_state.setdefault("last_synced_file_id", None)
+st.session_state.setdefault("uploaded_file_from_drive", None)
+st.session_state.setdefault("uploaded_file_name", None)
 
 # --------------- Styles ---------------
 st.markdown("""
@@ -107,7 +100,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ================= Sidebar: Google Drive loader (EXACT behavior from reference) =================
+# ================= Sidebar: Google Drive loader (EXACT UX) =================
 service = get_drive_service()
 pdf_files = get_all_pdfs(service)
 
@@ -128,14 +121,18 @@ if pdf_files:
                         st.session_state.uploaded_file_from_drive = fh.read()
                     st.session_state.uploaded_file_name = fname
                     st.session_state.last_synced_file_id = fid
-                    _reset_chat()  # exact reset behavior on new file
+                    _reset_chat()  # reset to the two-line welcome
 else:
     st.sidebar.warning("📭 No PDFs found in Drive.")
+
+# Optional: manual clear (handy while testing)
+if st.sidebar.button("🧹 New chat"):
+    _reset_chat()
 
 # ================= Main =================
 st.title("Underwriting Agent (Demo)")
 
-# (optional) small badge to show selected file name if any
+# small badge to show selected file name if any
 if st.session_state.uploaded_file_name:
     st.info(f"Using file: **{st.session_state.uploaded_file_name}**")
 
@@ -144,16 +141,20 @@ for m in st.session_state.messages:
     cls = "user-bubble" if m["role"] == "user" else "assistant-bubble"
     st.markdown(f"<div class='{cls} clearfix'>{m['content']}</div>", unsafe_allow_html=True)
 
-# ---------------- Handle ?qs= ----------------
+# ---------------- Handle ?qs= (robust clear so it doesn't re-queue) ----------------
 qs = st.query_params.get("qs")
 if qs:
     queue_question(qs)
     try:
-        del st.query_params["qs"]
+        # prefer clearing all params so it won't re-fire on rerun
+        st.query_params.clear()
     except Exception:
-        pass
+        try:
+            del st.query_params["qs"]
+        except Exception:
+            pass
 
-# ---------------- Fixed buttons ----------------
+# ---------------- Fixed buttons (bottom-right) ----------------
 st.markdown("""
 <div class="fab-wrap">
   <form method="get" style="margin:0;">
@@ -178,7 +179,6 @@ if user_q:
 
 # ---------------- Answer queued question ----------------
 if st.session_state.waiting_for_response and st.session_state.pending_input:
-    # Show Thinking... as assistant bubble
     st.markdown("<div class='assistant-bubble clearfix'>Thinking…</div>", unsafe_allow_html=True)
     answer_pending()
     st.rerun()
