@@ -53,7 +53,6 @@ def answer_pending():
 if "_initialized" not in st.session_state:
     st.session_state._initialized = True
     st.session_state.next_id = 0
-    # start with clean two-line welcome so old qs don't show
     _reset_chat()
 
 st.session_state.setdefault("last_synced_file_id", None)
@@ -80,23 +79,21 @@ st.markdown("""
   }
   .clearfix::after {content:"";display:table;clear:both;}
 
-  /* ===== Fixed bottom-right Streamlit buttons (no page reload) ===== */
-  #fab-sentinel { height: 0; display: block; }
-  /* The horizontal block that comes right after our sentinel */
-  div[data-testid="stVerticalBlock"]:has(> #fab-sentinel) + div[data-testid="stHorizontalBlock"]{
+  /* ===== Fixed bottom-right Streamlit buttons (no st.columns) ===== */
+  /* Pin the Streamlit block that CONTAINS the marker #fab-bar */
+  div[data-testid="stVerticalBlock"]:has(#fab-bar) {
     position: fixed !important;
     right: 24px;
     bottom: 88px;      /* sits above st.chat_input */
     z-index: 1000;
-    display: flex; gap: 10px;
+    display: flex;
+    flex-direction: column;    /* stack vertically */
+    gap: 10px;
+    align-items: flex-end;     /* align to right edge */
     width: auto !important;
   }
-  /* shrink children so buttons size to content */
-  div[data-testid="stVerticalBlock"]:has(> #fab-sentinel) + div[data-testid="stHorizontalBlock"] > div{
-    width: auto !important;
-  }
-  /* button styling */
-  div[data-testid="stVerticalBlock"]:has(> #fab-sentinel) + div[data-testid="stHorizontalBlock"] button {
+  /* Button styling */
+  div[data-testid="stVerticalBlock"]:has(#fab-bar) button {
     background:#000 !important; color:#fff !important;
     border:none !important; border-radius:9999px !important;
     padding:10px 18px !important; font-weight:600 !important;
@@ -145,17 +142,15 @@ for m in st.session_state.messages:
     cls = "user-bubble" if m["role"] == "user" else "assistant-bubble"
     st.markdown(f"<div class='{cls} clearfix'>{m['content']}</div>", unsafe_allow_html=True)
 
-# ---------------- Fixed buttons (Streamlit, not HTML forms) ----------------
-# Sentinel + the very next st.columns becomes the fixed bar via CSS above
-st.markdown('<span id="fab-sentinel"></span>', unsafe_allow_html=True)
-b1, b2, b3 = st.columns([1, 1, 1])
-with b1:
+# ---------------- Fixed buttons (no st.columns, no page reload) ----------------
+# Marker that our CSS targets to pin this block to bottom-right
+st.markdown('<div id="fab-bar"></div>', unsafe_allow_html=True)
+fab = st.container()
+with fab:
     st.button("ETRAN Cheatsheet", key="fab_etran",
               on_click=queue_question, args=("ETRAN Cheatsheet",))
-with b2:
     st.button("Valuation", key="fab_val",
               on_click=queue_question, args=("What is the valuation?",))
-with b3:
     st.button("Goodwill value", key="fab_gw",
               on_click=queue_question, args=("Goodwill value",))
 
