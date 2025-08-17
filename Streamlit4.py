@@ -27,23 +27,32 @@ load_dotenv()
 st.set_page_config(page_title="Underwriting Agent", layout="wide")
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-def type_bubble(text: str, *, max_delay_chars: int = 2000, base_delay: float = 0.015):
+def type_bubble(text: str, *, base_delay: float = 0.012, cutoff_chars: int = 2000):
     """
-    Gradually renders `text` inside an assistant bubble, left-to-right.
-    - max_delay_chars: for long answers we stop delaying after this many chars
-    - base_delay: ~15ms per token chunk gives a nice feel without being slow
+    Render an assistant bubble with a left-to-right 'typing' effect.
+    Streams per character for the first `cutoff_chars`, then dumps the rest
+    instantly so very long answers don't feel slow.
     """
     placeholder = st.empty()
     buf = []
-    # Split on whitespace to avoid flicker and keep speed reasonable
-    for i, tok in enumerate(re.split(r'(\s+)', text)):
-        buf.append(tok)
-        html = f"<div class='assistant-bubble clearfix'>{''.join(buf)}</div>"
-        placeholder.markdown(html, unsafe_allow_html=True)
-        # keep small delay only for the first N chars, then stop delaying
-        if sum(len(t) for t in buf) < max_delay_chars:
+    count = 0
+
+    for ch in text:
+        buf.append(ch)
+        count += 1
+
+        # Update the bubble
+        placeholder.markdown(
+            f"<div class='assistant-bubble clearfix'>{''.join(buf)}</div>",
+            unsafe_allow_html=True,
+        )
+
+        # Only keep the small delay for the first N characters
+        if count <= cutoff_chars:
             time.sleep(base_delay)
-    return placeholder  # so you can place something below if you want
+
+    return placeholder
+
 
 
 # ---------- Session state ----------
