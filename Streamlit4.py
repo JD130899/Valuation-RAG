@@ -79,21 +79,27 @@ st.markdown("""
   }
   .clearfix::after {content:"";display:table;clear:both;}
 
-  /* ===== Fixed bottom-right Streamlit buttons (no st.columns) ===== */
-  /* Pin the Streamlit block that CONTAINS the marker #fab-bar */
-  div[data-testid="stVerticalBlock"]:has(#fab-bar) {
+  /* ===== Fixed bottom-right button bar ===== */
+  /* Pin ONLY the block that comes right after our anchor #fab-anchor */
+  div[data-testid="stVerticalBlock"]:has(> #fab-anchor) + div[data-testid="stVerticalBlock"]{
     position: fixed !important;
     right: 24px;
-    bottom: 88px;      /* sits above st.chat_input */
+    bottom: 88px;           /* sits above chat input */
     z-index: 1000;
     display: flex;
-    flex-direction: column;    /* stack vertically */
+    flex-direction: column; /* stack vertically */
     gap: 10px;
-    align-items: flex-end;     /* align to right edge */
+    align-items: flex-end;  /* right edge */
     width: auto !important;
+    pointer-events: none;   /* let clicks pass except buttons */
   }
+  /* re-enable clicks on the buttons themselves */
+  div[data-testid="stVerticalBlock"]:has(> #fab-anchor) + div[data-testid="stVerticalBlock"] button{
+    pointer-events: auto;
+  }
+
   /* Button styling */
-  div[data-testid="stVerticalBlock"]:has(#fab-bar) button {
+  div[data-testid="stVerticalBlock"]:has(> #fab-anchor) + div[data-testid="stVerticalBlock"] button {
     background:#000 !important; color:#fff !important;
     border:none !important; border-radius:9999px !important;
     padding:10px 18px !important; font-weight:600 !important;
@@ -102,7 +108,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ================= Sidebar: Google Drive loader (reference UX) =================
+# ================= Sidebar: Google Drive loader =================
 service = get_drive_service()
 pdf_files = get_all_pdfs(service)
 
@@ -127,7 +133,6 @@ if pdf_files:
 else:
     st.sidebar.warning("📭 No PDFs found in Drive.")
 
-# Optional: manual clear (handy while testing)
 if st.sidebar.button("🧹 New chat"):
     _reset_chat()
 
@@ -142,9 +147,8 @@ for m in st.session_state.messages:
     cls = "user-bubble" if m["role"] == "user" else "assistant-bubble"
     st.markdown(f"<div class='{cls} clearfix'>{m['content']}</div>", unsafe_allow_html=True)
 
-# ---------------- Fixed buttons (no st.columns, no page reload) ----------------
-# Marker that our CSS targets to pin this block to bottom-right
-st.markdown('<div id="fab-bar"></div>', unsafe_allow_html=True)
+# ---------------- Fixed buttons (only these float) ----------------
+st.markdown('<span id="fab-anchor"></span>', unsafe_allow_html=True)
 fab = st.container()
 with fab:
     st.button("ETRAN Cheatsheet", key="fab_etran",
