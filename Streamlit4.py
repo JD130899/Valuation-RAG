@@ -8,6 +8,7 @@ from PIL import Image
 from dotenv import load_dotenv
 import streamlit.components.v1 as components
 import time
+
 # LangChain / RAG deps
 from langchain_core.documents import Document
 from llama_cloud_services import LlamaParse
@@ -27,6 +28,17 @@ load_dotenv()
 st.set_page_config(page_title="Underwriting Agent", layout="wide")
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
+# ===== Persist chat across GET reloads (for fixed FAB buttons) =====
+@st.cache_resource
+def _store():
+    return {"messages": []}
+
+_store_ref = _store()
+
+def _sync_store():
+    _store_ref["messages"] = st.session_state.messages
+
+# ===== Typing animation for assistant bubble =====
 def type_bubble(text: str, *, base_delay: float = 0.012, cutoff_chars: int = 2000):
     placeholder = st.empty()
     buf = []
@@ -49,12 +61,13 @@ def _reset_chat():
     st.session_state.pending_input = None
     st.session_state.waiting_for_response = False
     st.session_state.last_suggestion = None
+    _sync_store()
 
 # ---------- Session state ----------
 if "last_synced_file_id" not in st.session_state:
     st.session_state.last_synced_file_id = None
 if "messages" not in st.session_state:
-    st.session_state.messages = [
+    st.session_state.messages = _store_ref["messages"] or [
         {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
         {"role": "assistant", "content": "What can I help you with?"}
     ]
@@ -69,10 +82,11 @@ if "last_suggestion" not in st.session_state:
 if "next_msg_id" not in st.session_state:
     st.session_state.next_msg_id = 0
 
-# ---------- styles (chat + reference styles) ----------
+# ---------- styles (chat + reference styles + fixed FAB) ----------
 st.markdown("""
 <style>
-.block-container { padding-bottom: 32px; }
+/* Give space so fixed FABs don't overlap chat input */
+.block-container { padding-bottom: 140px; }
 
 /* Chat bubbles */
 .user-bubble {background:#007bff;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:right;margin:4px;}
@@ -100,61 +114,39 @@ st.markdown("""
 }
 .ref .close-x{ position:absolute; top:6px; right:10px; border:0; background:transparent; color:#94a3b8; font-size:20px; line-height:1; cursor:pointer; }
 
-/* ======= ADDED: fixed bottom-right dual buttons ======= */
-.fab-anchor { height: 0; }
-.fab-anchor + div[data-testid="stHorizontalBlock"]{
-  position: fixed !important;
+/* ===== Fixed bottom-right FAB buttons ===== */
+.fab-wrap {
+  position: fixed;
   right: 24px;
-  bottom: 88px;              /* sits above st.chat_input */
+  bottom: 110px;           /* sits above Streamlit chat input */
   z-index: 1000;
-  display: flex; gap: 10px;
-  width: auto !important;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
 }
-.fab-anchor + div[data-testid="stHorizontalBlock"] > div{ width: auto !important; }
-.fab-anchor + div[data-testid="stHorizontalBlock"] button{
+.fab-btn {
   background:#000 !important; color:#fff !important;
   border:none !important; border-radius:9999px !important;
   padding:10px 18px !important; font-weight:600 !important;
+  box-shadow:0 6px 18px rgba(0,0,0,0.25); cursor:pointer;
 }
+.fab-btn:hover { filter: brightness(1.08); }
+@media (max-width: 600px) { .fab-wrap { right: 12px; bottom: 120px; } }
 </style>
 """, unsafe_allow_html=True)
-st.markdown("""
-<style>
-  /* Bottom-right dock that contains the action buttons */
-  div[data-testid="stVerticalBlock"]:has(> #dock-sentinel) {
-    position: fixed !important;
-    right: 24px;
-    bottom: calc(env(safe-area-inset-bottom) + 110px); /* sits above st.chat_input/footer */
-    z-index: 2147483647;
-    display: flex; gap: 10px;
-    width: auto !important;
-  }
-  /* let Streamlit column wrappers shrink to content */
-  div[data-testid="stVerticalBlock"]:has(> #dock-sentinel) > div { width: auto !important; }
-
-  /* button styling */
-  div[data-testid="stVerticalBlock"]:has(> #dock-sentinel) button {
-    background:#000 !important; color:#fff !important;
-    border:none !important; border-radius:9999px !important;
-    padding:10px 18px !important; font-weight:600 !important;
-  }
-</style>
-""", unsafe_allow_html=True)
-
-
-
 
 def _new_id():
     n = st.session_state.next_msg_id
     st.session_state.next_msg_id += 1
     return f"m{n}"
 
-# ==================== INTERACTIONS (define BEFORE buttons) ====================
+# ==================== INTERACTIONS ====================
 def queue_question(q: str):
     st.session_state.pending_input = q
     st.session_state.waiting_for_response = True
     st.session_state.messages.append({"id": _new_id(), "role": "user", "content": q})
-
+    _sync_store()
 
 def file_badge_link(name: str, pdf_bytes: bytes, synced: bool = True):
     base = os.path.splitext(name)[0]
@@ -451,25 +443,6 @@ if not up:
     st.warning("Please upload or load a PDF to continue.")
     st.stop()
 
-# ===== TOP toolbar (buttons at the top; chat happens below) =====
-
-# ===== Bottom dock (render LAST so it overlays above chat input) =====
-dock = st.container()
-with dock:
-    st.markdown('<span id="dock-sentinel"></span>', unsafe_allow_html=True)
-    c1, c2, c3 = st.columns([1, 1, 1])
-    with c1:
-        st.button("Valuation", key="dock_val",
-                  on_click=queue_question, args=("Valuation",))
-    with c2:
-        st.button("Good will", key="dock_gw",
-                  on_click=queue_question, args=("Good will",))
-    with c3:
-        st.button("Etran Cheatsheet", key="dock_etran",
-                  on_click=queue_question, args=("Etran Cheatsheet",))
-
-
-
 # Rebuild retriever when file changes
 if st.session_state.get("last_processed_pdf") != up.name:
     pdf_bytes = up.getvalue()
@@ -480,13 +453,7 @@ if st.session_state.get("last_processed_pdf") != up.name:
         {"role": "assistant", "content": "What can I help you with?"}
     ]
     st.session_state.last_processed_pdf = up.name
-
-
-
-# Chat input
-user_q = st.chat_input("Type your question here…", key="main_chat_input")
-if user_q:
-    queue_question(user_q)
+    _sync_store()
 
 # ========================== RENDER HISTORY ==========================
 for msg in st.session_state.messages:
@@ -500,6 +467,38 @@ for msg in st.session_state.messages:
             page=msg["source_page"],
             key=msg.get("id", "k0"),
         )
+
+# ===================== Handle fixed FAB clicks (?qs=) =====================
+qs = st.query_params.get("qs")
+if qs:
+    queue_question(qs)
+    try:
+        del st.query_params["qs"]  # prevent re-fire on rerun
+    except Exception:
+        pass
+
+# ===================== Chat input =====================
+user_q = st.chat_input("Type your question here…", key="main_chat_input")
+if user_q:
+    queue_question(user_q)
+
+# ===================== Fixed bottom-right FAB buttons =====================
+st.markdown("""
+<div class="fab-wrap">
+  <form method="get" style="margin:0;">
+    <input type="hidden" name="qs" value="Valuation"/>
+    <button class="fab-btn" type="submit">Valuation</button>
+  </form>
+  <form method="get" style="margin:0;">
+    <input type="hidden" name="qs" value="Good will"/>
+    <button class="fab-btn" type="submit">Good will</button>
+  </form>
+  <form method="get" style="margin:0;">
+    <input type="hidden" name="qs" value="Etran Cheatsheet"/>
+    <button class="fab-btn" type="submit">Etran Cheatsheet</button>
+  </form>
+</div>
+""", unsafe_allow_html=True)
 
 # ========================== ANSWER ==========================
 if st.session_state.waiting_for_response and st.session_state.pending_input:
@@ -526,6 +525,7 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
             st.session_state.messages.append(entry)
             st.session_state.pending_input = None
             st.session_state.waiting_for_response = False
+            _sync_store()
 
         else:
             effective_q = st.session_state.last_suggestion if (is_confirm and st.session_state.last_suggestion) else raw_q
@@ -649,5 +649,4 @@ Conversation so far:
             st.session_state.messages.append(entry)
             st.session_state.pending_input = None
             st.session_state.waiting_for_response = False
-
-
+            _sync_store()
