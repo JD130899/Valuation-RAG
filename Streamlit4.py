@@ -53,6 +53,14 @@ def type_bubble(text: str, *, base_delay: float = 0.012, cutoff_chars: int = 200
 
     return placeholder
 
+def _reset_chat():
+    st.session_state.messages = [
+        {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
+        {"role": "assistant", "content": "What can I help you with?"}
+    ]
+    st.session_state.pending_input = None
+    st.session_state.waiting_for_response = False
+    st.session_state.last_suggestion = None
 
 
 # ---------- Session state ----------
@@ -393,10 +401,7 @@ if pdf_files:
                 st.session_state.uploaded_file_from_drive = open(path, "rb").read()
                 st.session_state.uploaded_file_name = fname
                 st.session_state.last_synced_file_id = fid
-                st.session_state.messages = [
-                    {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
-                    {"role": "assistant", "content": "What can I help you with?"}
-                ]
+                _reset_chat()
 else:
     st.sidebar.warning("📭 No PDFs found in Drive.")
 
@@ -415,6 +420,9 @@ else:
     up = st.file_uploader("Upload a valuation report PDF", type="pdf")
     if up:
         file_badge_link(up.name, up.getvalue(), synced=False)
+        if up.name != st.session_state.get("last_selected_upload"):
+        st.session_state.last_selected_upload = up.name
+        _reset_chat()
 
 if not up:
     st.warning("Please upload or load a PDF to continue.")
