@@ -2,8 +2,6 @@
 import os
 import time
 import streamlit as st
-
-# ---- NEW: sidebar deps ----
 from dotenv import load_dotenv
 from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
 
@@ -11,11 +9,10 @@ from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
 load_dotenv()
 st.set_page_config(page_title="Underwriting Agent (Demo)", layout="wide")
 
-# ---------- Global store so history survives reloads ----------
+# ---------- Global store ----------
 @st.cache_resource
 def _store():
     return {"messages": []}
-
 store = _store()
 
 # ---------------- Session state ----------------
@@ -30,7 +27,7 @@ if "waiting_for_response" not in st.session_state:
 if "next_id" not in st.session_state:
     st.session_state.next_id = 0
 
-# ---- NEW: sidebar-related state keys (minimal add) ----
+# ---- Sidebar-related state ----
 st.session_state.setdefault("last_synced_file_id", None)
 st.session_state.setdefault("uploaded_file_from_drive", None)
 st.session_state.setdefault("uploaded_file_name", None)
@@ -59,8 +56,7 @@ def answer_pending():
     st.session_state.waiting_for_response = False
     _sync_store()
 
-# ---- NEW: tiny helper for clean restart when a new Drive PDF is loaded ----
-def _reset_chat_same_layout():
+def _reset_chat():
     st.session_state.messages = [
         {"role": "assistant", "content": "Hi! Ask anything about your valuation report."}
     ]
@@ -68,15 +64,16 @@ def _reset_chat_same_layout():
     st.session_state.waiting_for_response = False
     _sync_store()
 
-# --------------- Styles ---------------
+# ================= Styles =================
 st.markdown("""
 <style>
   .block-container { padding-bottom: 140px; }
 
+  /* Keep FABs bottom-right */
   .fab-wrap {
     position: fixed;
     right: 24px;
-    bottom: 110px;
+    bottom: 20px;
     z-index: 1000;
     display: flex; gap: 10px; align-items: center; justify-content: flex-end;
   }
@@ -103,7 +100,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ===================== NEW: Sidebar (Google Drive loader) =====================
+# ================= Sidebar (Drive Loader) =================
 st.sidebar.title("Underwriting Agent")
 try:
     service = get_drive_service()
@@ -128,27 +125,25 @@ if pdf_files:
                         st.session_state.uploaded_file_from_drive = fh.read()
                     st.session_state.uploaded_file_name = fname
                     st.session_state.last_synced_file_id = fid
-                    _reset_chat_same_layout()  # keep your original one-line welcome
+                    _reset_chat()
 else:
     st.sidebar.warning("📭 No PDFs found in Drive.")
 
-# (Optional) quick reset while testing; keeps layout the same
 if st.sidebar.button("🧹 New chat"):
-    _reset_chat_same_layout()
+    _reset_chat()
 
-# ===================== Main (unchanged layout) =====================
+# ================= Main =================
 st.title("Underwriting Agent (Demo)")
 
-# (Non-intrusive) show which file is active, if any
 if st.session_state.uploaded_file_name:
     st.info(f"Using file: **{st.session_state.uploaded_file_name}**")
 
-# ---------------- Render full history with custom bubbles ----------------
+# Render messages
 for m in st.session_state.messages:
     cls = "user-bubble" if m["role"] == "user" else "assistant-bubble"
     st.markdown(f"<div class='{cls}'>{m['content']}</div>", unsafe_allow_html=True)
 
-# ---------------- Handle ?qs= ----------------
+# Handle ?qs= param
 qs = st.query_params.get("qs")
 if qs:
     queue_question(qs)
@@ -157,7 +152,7 @@ if qs:
     except Exception:
         pass
 
-# ---------------- Fixed buttons (unchanged) ----------------
+# ================= FAB Buttons (UNCHANGED from Image 2) =================
 st.markdown("""
 <div class="fab-wrap">
   <form method="get" style="margin:0;">
@@ -175,12 +170,12 @@ st.markdown("""
 </div>
 """, unsafe_allow_html=True)
 
-# ---------------- Chat input ----------------
+# Chat input
 user_q = st.chat_input("Type your question here…")
 if user_q:
     queue_question(user_q)
 
-# ---------------- Answer queued question ----------------
+# Answer pending
 if st.session_state.waiting_for_response and st.session_state.pending_input:
     st.markdown("<div class='assistant-bubble'>Thinking…</div>", unsafe_allow_html=True)
     answer_pending()
