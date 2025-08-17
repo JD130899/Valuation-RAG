@@ -136,6 +136,28 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# --- FAB styles: bottom-right quick buttons (same as dummy) ---
+st.markdown("""
+<style>
+  /* give room so FABs don't overlap the chat input */
+  .block-container { padding-bottom: 140px; }
+
+  .fab-wrap {
+    position: fixed;
+    right: 24px;
+    bottom: 110px;
+    z-index: 1000;
+    display: flex; gap: 10px; align-items: center; justify-content: flex-end;
+  }
+  .fab-btn {
+    background: #000 !important; color: #fff !important;
+    border-radius: 9999px !important; padding: 10px 16px !important; border: none !important;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.25); font-weight: 600; cursor: pointer;
+  }
+  .fab-btn:hover { filter: brightness(1.08); }
+</style>
+""", unsafe_allow_html=True)
+
 def _new_id():
     n = st.session_state.next_msg_id
     st.session_state.next_msg_id += 1
@@ -455,6 +477,16 @@ if st.session_state.get("last_processed_pdf") != up.name:
     st.session_state.last_processed_pdf = up.name
     _sync_store()
 
+# ---------------- Handle ?qs= from fixed FABs (dummy style) ----------------
+qs = st.query_params.get("qs")
+if qs:
+    queue_question(qs)
+    try:
+        del st.query_params["qs"]  # prevent retrigger on rerun
+    except Exception:
+        pass
+
+
 # ========================== RENDER HISTORY ==========================
 for msg in st.session_state.messages:
     cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
@@ -468,14 +500,7 @@ for msg in st.session_state.messages:
             key=msg.get("id", "k0"),
         )
 
-# ===================== Handle fixed FAB clicks (?qs=) =====================
-qs = st.query_params.get("qs")
-if qs:
-    queue_question(qs)
-    try:
-        del st.query_params["qs"]  # prevent re-fire on rerun
-    except Exception:
-        pass
+
 
 # ===================== Chat input =====================
 user_q = st.chat_input("Type your question here…", key="main_chat_input")
@@ -523,6 +548,25 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+# ---------------- Fixed FAB buttons (exactly like your dummy) ----------------
+st.markdown("""
+<div class="fab-wrap">
+  <form method="get" style="margin:0;">
+    <input type="hidden" name="qs" value="Valuation"/>
+    <button class="fab-btn" type="submit">Valuation</button>
+  </form>
+  <form method="get" style="margin:0;">
+    <input type="hidden" name="qs" value="Good will"/>
+    <button class="fab-btn" type="submit">Good will</button>
+  </form>
+  <form method="get" style="margin:0;">
+    <input type="hidden" name="qs" value="Etran Cheatsheet"/>
+    <button class="fab-btn" type="submit">Etran Cheatsheet</button>
+  </form>
+</div>
+""", unsafe_allow_html=True)
+
 
 
 # ========================== ANSWER ==========================
