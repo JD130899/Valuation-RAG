@@ -44,6 +44,13 @@ def type_bubble(text: str, *, base_delay: float = 0.012, cutoff_chars: int = 200
             time.sleep(base_delay)
     return placeholder
 
+def _company_from_filename(pdf_name: str) -> str:
+    base = os.path.splitext(pdf_name)[0]
+    # remove common suffixes like "Certified Valuation Report"
+    base = re.sub(r"\s*[-–—:]?\s*Certified\s+Valuation\s+Report.*$", "", base, flags=re.I)
+    return base.strip() or "the subject company"
+
+
 def _reset_chat():
     st.session_state.messages = [
         {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
@@ -732,6 +739,21 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
                 extracted = etran_extract_from_page3(page3_text)
                 table_md = render_etran_table(extracted)
                 answer = f"### Etran Cheatsheet\n\n{table_md}"
+
+        if raw_q.strip().lower() == "valuation":
+            page3_text = (st.session_state.page_texts or {}).get(3, "")
+            if not page3_text:
+                answer = "I couldn’t find page 3 content in this PDF."
+            else:
+                data = etran_extract_from_page3(page3_text)
+                # prefer “Concluded Value”; fall back to “Fair Market Value” if you decide to add that key later
+                fmv = (data.get("Concluded Value") or data.get("Fair Market Value") or "").strip()
+                company = _company_from_filename(up.name)
+        
+                if fmv:
+                    answer = f"Valuation of {company} is {fmv}."
+                else:
+                    answer = "I couldn’t find a clear Fair Market Value on page 3."      
 
             thinking.empty()
             with block.container():
