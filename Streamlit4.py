@@ -495,7 +495,7 @@ if not up:
 toolbar = st.container()
 with toolbar:
     st.markdown('<span id="toolbar-sentinel"></span>', unsafe_allow_html=True)
-    t1, t2, t3 = st.columns([1, 1, 10])
+    t1, t2, t3 = st.columns([1, 1, 10,1])
     with t1:
         st.button("Valuation", key="top_val",
                   on_click=queue_question, args=("Valuation",))
