@@ -488,57 +488,7 @@ if st.session_state.get("last_processed_pdf") != up.name:
 
 
 # ===== Bottom-right pinned quick actions (compact pill) =====
-pill = st.container()
-with pill:
-    # sentinel so we can find + pin this container from JS
-    st.markdown("<span id='pin-bottom-right'></span>", unsafe_allow_html=True)
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.button("Valuation", key="qa_val",
-                  on_click=queue_question, args=("Valuation",))
-    with c2:
-        st.button("Good will", key="qa_gw",
-                  on_click=queue_question, args=("Good will",))
-    with c3:
-        st.button("Etran Cheatsheet", key="qa_etran",
-                  on_click=queue_question, args=("Etran Cheatsheet",))
 
-# Pin that container as a floating pill above the chat input
-components.html("""
-<script>
-(function pin(){
-  const d = window.parent.document;
-  const mark = d.querySelector('#pin-bottom-right');
-  if(!mark) return setTimeout(pin,120);
-  const block = mark.closest('div[data-testid="stVerticalBlock"]');
-  if(!block) return setTimeout(pin,120);
-  if(block.dataset.pinned==="1") return;
-  block.dataset.pinned="1";
-  Object.assign(block.style,{
-    position:'fixed',
-    right:'18px',
-    bottom:'88px',            // sits above st.chat_input
-    zIndex:'10000',
-    display:'inline-flex',
-    gap:'8px',
-    padding:'6px 8px',
-    borderRadius:'9999px',
-    background:'rgba(17,24,39,.96)',
-    border:'1px solid rgba(255,255,255,.12)',
-    boxShadow:'0 8px 28px rgba(0,0,0,.35)',
-    width:'fit-content',
-    maxWidth:'none'
-  });
-  // prevent Streamlit column wrappers from stretching it
-  Array.from(block.children||[]).forEach(ch=>{ ch.style.width='auto'; ch.style.margin='0'; });
-  // compact buttons
-  block.querySelectorAll('button').forEach(b=>{
-    b.style.padding='6px 12px';
-    b.style.borderRadius='9999px';
-  });
-})();
-</script>
-""", height=0)
 
 
 # Chat input
