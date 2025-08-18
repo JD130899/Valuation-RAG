@@ -508,6 +508,16 @@ with pill:
 
 components.html("""
 <script>
+(function pin(){
+  const d = window.parent.document;
+  const mark = d.querySelector('#pin-bottom-right');
+  if(!mark) return setTimeout(pin,120);
+
+  // the element we rendered (the pill lives inside this stVerticalBlock)
+  const block = mark.closest('div[data-testid="stVerticalBlock"]');
+  if(!block) return setTimeout(pin,120);
+  if(block.dataset.pinned==="1") return;
+  block.dataset.pinned="1";
 
   // 🔧 collapse the original Streamlit element container so it doesn't leave a gap
   // (stElementContainer is the outer wrapper that still takes up height)
@@ -553,7 +563,6 @@ components.html("""
 })();
 </script>
 """, height=0)
-
 
 
 # Chat input
