@@ -417,11 +417,16 @@ service = get_drive_service()
 HARDCODED_FOLDER_LINK = "https://drive.google.com/drive/folders/1XGyBBFhhQFiG43jpYJhNzZYi7C-_l5me"
 
 pdf_files = get_all_pdfs(service, HARDCODED_FOLDER_LINK)
+
 if not pdf_files:
     st.sidebar.warning("📭 No PDFs found in the hardcoded Drive folder.")
 else:
-    first_pdf = pdf_files[0]  # newest (because of orderBy=createdTime desc)
-    st.sidebar.markdown(f"**📄 Latest PDF:** {first_pdf['name']}")
+    st.sidebar.success(f"Found {len(pdf_files)} PDFs in the folder")
+    with st.sidebar.expander("Show all PDFs", expanded=True):
+        for i, f in enumerate(pdf_files, 1):
+            st.write(f"{i}. {f['name']}")
+            st.caption(f"ID: `{f['id']}`")
+
 
     # Load on click (recommended)
     if st.sidebar.button("📥 Load latest from Drive"):
