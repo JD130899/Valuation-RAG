@@ -412,25 +412,32 @@ def pil_to_base64(img: Image.Image) -> str:
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 # ================= Sidebar: Google Drive loader =================
+# ================= Sidebar: Google Drive loader =================
 service = get_drive_service()
-pdf_files = get_all_pdfs(service)
+
+# Either keep a constant, or put it in secrets as GOOGLE_DRIVE_FOLDER
+FOLDER = st.secrets.get("GOOGLE_DRIVE_FOLDER", "IMZHc_WawXZkPAiQcEWR213TVSrxilnC")
+
+pdf_files = get_all_pdfs(service, FOLDER)
 if pdf_files:
     names = [f["name"] for f in pdf_files]
     sel = st.sidebar.selectbox("📂 Select a PDF from Google Drive", names)
     chosen = next(f for f in pdf_files if f["name"] == sel)
     if st.sidebar.button("📥 Load Selected PDF"):
         fid, fname = chosen["id"], chosen["name"]
-        if fid == st.session_state.last_synced_file_id:
+        if fid == st.session_state.get("last_synced_file_id"):
             st.sidebar.info("✅ Already loaded.")
         else:
             path = download_pdf(service, fid, fname)
             if path:
-                st.session_state.uploaded_file_from_drive = open(path, "rb").read()
+                with open(path, "rb") as fh:
+                    st.session_state.uploaded_file_from_drive = fh.read()
                 st.session_state.uploaded_file_name = fname
                 st.session_state.last_synced_file_id = fid
-                _reset_chat()
+                # reset your chat, etc.
 else:
     st.sidebar.warning("📭 No PDFs found in Drive.")
+
 
 # ================= Main UI =================
 st.title("Underwriting Agent")
