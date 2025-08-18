@@ -21,6 +21,14 @@ def get_drive_service():
     creds = Credentials.from_service_account_info(sa, scopes=SCOPES)
     return build("drive", "v3", credentials=creds)
 
+def _get_folder_meta(service, folder_id: str) -> Dict:
+    return (
+        service.files()
+        .get(fileId=folder_id, fields="id,name,driveId", supportsAllDrives=True)
+        .execute()
+    )
+
+
 def _resolve_folder_id(service, folder_id: str) -> Dict:
     """
     Resolves folder_id; if it's a shortcut, returns the target folder id.
