@@ -492,18 +492,11 @@ if st.session_state.get("last_processed_pdf") != up.name:
 # ===== Bottom-right pinned quick actions (compact pill) =====
 pill = st.container()
 with pill:
-    # sentinel so we can find + pin this container from JS
     st.markdown("<span id='pin-bottom-right'></span>", unsafe_allow_html=True)
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.button("Valuation", key="qa_val",
-                  on_click=queue_question, args=("Valuation",))
-    with c2:
-        st.button("Good will", key="qa_gw",
-                  on_click=queue_question, args=("Good will",))
-    with c3:
-        st.button("Etran Cheatsheet", key="qa_etran",
-                  on_click=queue_question, args=("Etran Cheatsheet",))
+    st.button("Valuation", key="qa_val", on_click=queue_question, args=("Valuation",))
+    st.button("Good will", key="qa_gw", on_click=queue_question, args=("Good will",))
+    st.button("Etran Cheatsheet", key="qa_etran", on_click=queue_question, args=("Etran Cheatsheet",))
+
 
 components.html("""
 <script>
