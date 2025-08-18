@@ -459,25 +459,27 @@ if not up:
 
 toolbar = st.container()
 with toolbar:
-
-    st.markdown('<span id="fab-anchor"></span>', unsafe_allow_html=True)
-    
+# ---------------- Fixed buttons (NO NAV, truly pinned) ----------------
+    # Put a unique marker INSIDE the same container as the buttons
     st.markdown("""
     <style>
-      /* Pin the button block at bottom-right, floating above everything */
-      div[data-testid="stVerticalBlock"]:has(> #fab-anchor) + div[data-testid="stVerticalBlock"] {
+      /* Find the EXACT Streamlit block that contains #fab-target and pin it */
+      div[data-testid="stVerticalBlock"]:has(#fab-target) {
         position: fixed !important;
         right: 24px;
-        bottom: 20px;            /* adjust distance from bottom */
-        z-index: 2000 !important; /* make sure it’s above chat */
+        bottom: 20px;               /* sits above the chat input */
+        z-index: 2000 !important;
         display: flex !important;
-        gap: 10px;
-        justify-content: flex-end;
-        background: transparent; /* keep it floating, no background */
-        pointer-events: none;    /* allow interactions below except buttons */
+        flex-direction: row !important;
+        gap: 10px !important;       /* space between buttons */
+        align-items: center !important;
+        width: auto !important;
+        background: transparent !important;
+        pointer-events: none;       /* allow interactions underneath */
       }
-      /* Buttons inside remain clickable */
-      div[data-testid="stVerticalBlock"]:has(> #fab-anchor) + div[data-testid="stVerticalBlock"] button {
+    
+      /* Keep the buttons clickable */
+      div[data-testid="stVerticalBlock"]:has(#fab-target) button {
         pointer-events: auto;
         background:#000 !important; color:#fff !important;
         border:none !important; border-radius:9999px !important;
@@ -485,20 +487,25 @@ with toolbar:
         box-shadow: 0 6px 18px rgba(0,0,0,0.25);
         cursor:pointer;
       }
-      div[data-testid="stVerticalBlock"]:has(> #fab-anchor) + div[data-testid="stVerticalBlock"] button:hover {
-        filter: brightness(1.15);
+      div[data-testid="stVerticalBlock"]:has(#fab-target) button:hover {
+        filter: brightness(1.12);
       }
     </style>
     """, unsafe_allow_html=True)
     
-    fab_row = st.container()
-    with fab_row:
+    fab = st.container()
+    with fab:
+        # Marker INSIDE the same container as the buttons
+        st.markdown('<span id="fab-target"></span>', unsafe_allow_html=True)
+    
+        # No columns: render buttons inline so spacing is tight
         st.button("ETRAN Cheatsheet", key="fab_etran",
                   on_click=queue_question, args=("ETRAN Cheatsheet",))
         st.button("Valuation", key="fab_val",
                   on_click=queue_question, args=("What is the valuation?",))
         st.button("Goodwill value", key="fab_gw",
                   on_click=queue_question, args=("Goodwill value",))
+
 
 
 
