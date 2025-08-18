@@ -505,55 +505,29 @@ components.html("""
   const mark = d.querySelector('#pin-bottom-right');
   if(!mark) return setTimeout(pin,120);
 
-  // the element we rendered (the pill lives inside this stVerticalBlock)
   const block = mark.closest('div[data-testid="stVerticalBlock"]');
-  if(!block) return setTimeout(pin,120);
-  if(block.dataset.pinned==="1") return;
-  block.dataset.pinned="1";
+  if(!block || block.dataset.pinned==="1") return block?null:setTimeout(pin,120);
+  block.dataset.pinned = "1";
 
-  // 🔧 collapse the original Streamlit element container so it doesn't leave a gap
-  // (stElementContainer is the outer wrapper that still takes up height)
+  // collapse the Streamlit container that would otherwise leave a gap
   const host = block.closest('div[data-testid="stElementContainer"]');
-  if (host) {
-    Object.assign(host.style, {
-      height: '0px',
-      minHeight: '0',
-      padding: '0',
-      margin: '0',
-      display: 'contents'   // let the fixed child render without reserving space
-    });
-  }
+  if (host) Object.assign(host.style, {height:'0', minHeight:'0', padding:'0', margin:'0', display:'contents'});
 
-  // now pin the actual pill
+  // also collapse the columns wrapper (it’s the direct parent of your three column divs)
+  const columnsRow = block.querySelector('div[data-testid="stHorizontalBlock"]');
+  if (columnsRow) Object.assign(columnsRow.style, {display:'contents', margin:'0', padding:'0'});
+
+  // now pin and style the pill
   Object.assign(block.style, {
-    position:'fixed',
-    right:'18px',
-    bottom:'88px',          // sits above st.chat_input
-    zIndex:'10000',
-    display:'inline-flex',
-    gap:'8px',
-    padding:'6px 8px',
-    borderRadius:'9999px',
-    background:'rgba(17,24,39,.96)',
-    border:'1px solid rgba(255,255,255,.12)',
-    boxShadow:'0 8px 28px rgba(0,0,0,.35)',
-    width:'fit-content',
-    maxWidth:'none'
+    position:'fixed', right:'18px', bottom:'88px', zIndex:'10000',
+    display:'inline-flex', gap:'8px', padding:'6px 8px',
+    borderRadius:'9999px', background:'rgba(17,24,39,.96)',
+    border:'1px solid rgba(255,255,255,.12)', boxShadow:'0 8px 28px rgba(0,0,0,.35)'
   });
-
-  // prevent streamlit column wrappers from stretching it
-  Array.from(block.children||[]).forEach(ch => {
-    ch.style.width = 'auto';
-    ch.style.margin = '0';
-  });
-
-  // compact buttons
-  block.querySelectorAll('button').forEach(b => {
-    b.style.padding = '6px 12px';
-    b.style.borderRadius = '9999px';
-  });
+  block.querySelectorAll('button').forEach(b => { b.style.padding='6px 12px'; b.style.borderRadius='9999px'; });
 })();
 </script>
+
 """, height=0)
 
 # Chat input
