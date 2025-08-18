@@ -493,7 +493,7 @@ if up:
         zIndex:'10000',
         display:'inline-flex',
         gap:'8px',
-        padding:'46px 8px',
+        padding:'16px 48px',
         borderRadius:'9999px',
         background:'rgba(17,24,39,.96)',
         border:'1px solid rgba(255,255,255,.12)',
