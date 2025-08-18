@@ -121,27 +121,29 @@ st.markdown("""
 
 st.markdown("""
 <style>
-  /* reserve space so the fixed bar doesn't cover the first messages */
-  .block-container { padding-top: 72px !important; }
+  /* leave room under the pinned bar */
+  .block-container { padding-top: 80px !important; }
 
-  /* 🔒 freeze the 3-button toolbar at the top */
+  /* 🔒 pin the toolbar that contains #toolbar-sentinel */
   div[data-testid="stVerticalBlock"]:has(> #toolbar-sentinel) {
     position: fixed !important;
     top: 12px;
     left: 50%;
-    transform: translateX(-50%);     /* center it */
-    z-index: 1005;
+    transform: translateX(-50%);
+    z-index: 10050;              /* above chat & reference cards */
 
     display: flex; gap: 10px; align-items: center;
     padding: 8px 12px;
     border-radius: 12px;
-    background: rgba(17,24,39,.90);
+    background: rgba(17,24,39,.92);
     backdrop-filter: blur(4px);
     border: 1px solid rgba(255,255,255,.08);
   }
 
-  /* let the three column wrappers shrink to content */
-  div[data-testid="stVerticalBlock"]:has(> #toolbar-sentinel) > div { width: auto !important; }
+  /* make the three columns shrink to content (no full-width) */
+  div[data-testid="stVerticalBlock"]:has(> #toolbar-sentinel) > div {
+    width: auto !important;
+  }
 
   /* button look */
   div[data-testid="stVerticalBlock"]:has(> #toolbar-sentinel) button {
@@ -150,12 +152,15 @@ st.markdown("""
     padding:10px 18px !important; font-weight:600 !important;
   }
 
-  /* small screens: keep it centered */
-  @media (max-width: 960px){
-    div[data-testid="stVerticalBlock"]:has(> #toolbar-sentinel) { left: 50%; transform: translateX(-50%); }
+  /* optional: top-right instead of centered */
+  /* 
+  div[data-testid="stVerticalBlock"]:has(> #toolbar-sentinel) {
+    right: 24px; left: auto; transform: none;
   }
+  */
 </style>
 """, unsafe_allow_html=True)
+
 
 
 
