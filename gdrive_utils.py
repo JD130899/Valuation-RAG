@@ -20,7 +20,7 @@ def get_drive_service():
 # === Fetch Latest PDF ===
 # gdrive_utils.py
 # ...
-FOLDER_ID = "1VglZDFbufOxHTZ4qZ_feUw_XHaxacPxr"  # default
+#FOLDER_ID = "1VglZDFbufOxHTZ4qZ_feUw_XHaxacPxr"  # default
 
 def _extract_folder_id(folder_id_or_url: str) -> str:
     s = (folder_id_or_url or "").strip()
