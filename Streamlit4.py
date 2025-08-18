@@ -770,35 +770,35 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
                             answer = "I couldn’t find a clear Goodwill value on page 3."
             
 
-            thinking.empty()
-            with block.container():
-                type_bubble(answer)
-                # attach a reference preview for page 3 if available
-                img = st.session_state.page_images.get(3)
-                if img:
-                    entry = {
-                        "id": _new_id(),
-                        "role": "assistant",
-                        "content": answer,
-                        "source": "Page 3",
-                        "source_img": pil_to_base64(img),
-                        "source_pdf_b64": base64.b64encode(st.session_state.pdf_bytes).decode("ascii"),
-                        "source_page": 3,
-                    }
-                    render_reference_card(
-                        label=entry["source"],
-                        img_b64=entry["source_img"],
-                        pdf_b64=entry["source_pdf_b64"],
-                        page=entry["source_page"],
-                        key=entry["id"],
-                    )
-                else:
-                    entry = {"id": _new_id(), "role": "assistant", "content": answer}
-
-            st.session_state.messages.append(entry)
-            st.session_state.pending_input = None
-            st.session_state.waiting_for_response = False
-            st.stop()  # prevent the generic RAG flow from running too
+                    thinking.empty()
+                    with block.container():
+                        type_bubble(answer)
+                        # attach a reference preview for page 3 if available
+                        img = st.session_state.page_images.get(3)
+                        if img:
+                            entry = {
+                                "id": _new_id(),
+                                "role": "assistant",
+                                "content": answer,
+                                "source": "Page 3",
+                                "source_img": pil_to_base64(img),
+                                "source_pdf_b64": base64.b64encode(st.session_state.pdf_bytes).decode("ascii"),
+                                "source_page": 3,
+                            }
+                            render_reference_card(
+                                label=entry["source"],
+                                img_b64=entry["source_img"],
+                                pdf_b64=entry["source_pdf_b64"],
+                                page=entry["source_page"],
+                                key=entry["id"],
+                            )
+                        else:
+                            entry = {"id": _new_id(), "role": "assistant", "content": answer}
+        
+                    st.session_state.messages.append(entry)
+                    st.session_state.pending_input = None
+                    st.session_state.waiting_for_response = False
+                    st.stop()  # prevent the generic RAG flow from running too
 
         if is_deny:
             st.session_state.last_suggestion = None
