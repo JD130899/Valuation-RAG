@@ -413,24 +413,29 @@ def pil_to_base64(img: Image.Image) -> str:
 
 # ================= Sidebar: Google Drive loader =================
 service = get_drive_service()
-pdf_files = get_all_pdfs(service)
-if pdf_files:
-    names = [f["name"] for f in pdf_files]
-    sel = st.sidebar.selectbox("📂 Select a PDF from Google Drive", names)
-    chosen = next(f for f in pdf_files if f["name"] == sel)
-    if st.sidebar.button("📥 Load Selected PDF"):
-        fid, fname = chosen["id"], chosen["name"]
-        if fid == st.session_state.last_synced_file_id:
+
+HARDCODED_FOLDER_LINK = "https://drive.google.com/drive/folders/1XGyBBFhhQFiG43jpYJhNzZYi7C-_l5me"
+
+pdf_files = get_all_pdfs(service, HARDCODED_FOLDER_LINK)
+if not pdf_files:
+    st.sidebar.warning("📭 No PDFs found in the hardcoded Drive folder.")
+else:
+    first_pdf = pdf_files[0]  # newest (because of orderBy=createdTime desc)
+    st.sidebar.markdown(f"**📄 Latest PDF:** {first_pdf['name']}")
+
+    # Load on click (recommended)
+    if st.sidebar.button("📥 Load latest from Drive"):
+        if first_pdf["id"] == st.session_state.get("last_synced_file_id"):
             st.sidebar.info("✅ Already loaded.")
         else:
-            path = download_pdf(service, fid, fname)
+            path = download_pdf(service, first_pdf["id"], first_pdf["name"])
             if path:
-                st.session_state.uploaded_file_from_drive = open(path, "rb").read()
-                st.session_state.uploaded_file_name = fname
-                st.session_state.last_synced_file_id = fid
+                with open(path, "rb") as f:
+                    st.session_state.uploaded_file_from_drive = f.read()
+                st.session_state.uploaded_file_name = first_pdf["name"]
+                st.session_state.last_synced_file_id = first_pdf["id"]
                 _reset_chat()
-else:
-    st.sidebar.warning("📭 No PDFs found in Drive.")
+
 
 # ================= Main UI =================
 st.title("Underwriting Agent")
