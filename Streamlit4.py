@@ -414,8 +414,10 @@ def pil_to_base64(img: Image.Image) -> str:
 # ================= Sidebar: Google Drive loader =================
 # ================= Sidebar: Google Drive loader =================
 service = get_drive_service()
-fid = "IMZHc_WawXZkPAiQcEWR213TVSrxilnC"  # your folder ID
-st.json(debug_folder_meta(service, fid))
+# Usage
+fid = "IMZHc_WawXZkPAiQcEWR213TVSrxilnC"
+result = debug_folder_meta(service, fid)
+st.json(result)
 
 try:
     st.caption(f"Service account: {st.secrets['service_account']['client_email']}")
