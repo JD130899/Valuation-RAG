@@ -459,62 +459,17 @@ if not up:
 
 toolbar = st.container()
 with toolbar:
-# ---------------- Fixed buttons (NO NAV, truly pinned) ----------------
-    # Put a unique marker INSIDE the same container as the buttons
- # ====== Add styles (chat bubbles + fixed FAB row) ======
-    st.markdown("""
-    <style>
-      .block-container { padding-bottom: 140px; }
-    
-      .user-bubble {
-        background: #007bff; color: #fff; padding: 8px 12px; border-radius: 12px;
-        margin: 4px 0; max-width: 60%; float: right; clear: both;
-      }
-      .assistant-bubble {
-        background: #1e1e1e; color: #fff; padding: 8px 12px; border-radius: 12px;
-        margin: 4px 0; max-width: 60%; float: left; clear: both;
-      }
-    
-      /* === PIN the LAST vertical block (our button container) to the bottom-right ===
-         IMPORTANT: Keep the button container as the VERY LAST element in the script. */
-      .block-container > div[data-testid="stVerticalBlock"]:last-of-type {
-        position: fixed !important;
-        right: 24px;
-        bottom: 20px;             /* sit just above chat input */
-        z-index: 2000 !important;
-        display: flex !important;
-        flex-direction: row !important;
-        gap: 10px !important;
-        align-items: center !important;
-        width: auto !important;
-        pointer-events: none;     /* let user interact with chat under it */
-      }
-      /* Make the buttons inside still clickable and match your look */
-      .block-container > div[data-testid="stVerticalBlock"]:last-of-type button {
-        pointer-events: auto;
-        background:#000 !important; color:#fff !important;
-        border:none !important; border-radius:9999px !important;
-        padding:10px 16px !important; font-weight:600 !important;
-        box-shadow: 0 6px 18px rgba(0,0,0,0.25);
-        cursor:pointer;
-      }
-      .block-container > div[data-testid="stVerticalBlock"]:last-of-type button:hover {
-        filter: brightness(1.12);
-      }
-    </style>
-    """, unsafe_allow_html=True)
-    
-    # ====== FAB row (keep this as the VERY LAST element on the page) ======
-    fab = st.container()
-    with fab:
-        st.button("ETRAN Cheatsheet", key="fab_etran",
-                  on_click=queue_question, args=("ETRAN Cheatsheet",))
-        st.button("Valuation", key="fab_val",
-                  on_click=queue_question, args=("What is the valuation?",))
-        st.button("Goodwill value", key="fab_gw",
-                  on_click=queue_question, args=("Goodwill value",))
-
-
+    st.markdown('<span id="toolbar-sentinel"></span>', unsafe_allow_html=True)
+    t1, t2, t3 = st.columns([1, 1, 1])
+    with t1:
+        st.button("Valuation", key="top_val",
+                  on_click=queue_question, args=("Valuation",))
+    with t2:
+        st.button("Good will", key="top_gw",
+                  on_click=queue_question, args=("Good will",))
+    with t3:
+        st.button("Etran Cheatsheet", key="top_etran",
+                  on_click=queue_question, args=("Etran Cheatsheet",))
 
 
 # Rebuild retriever when file changes
