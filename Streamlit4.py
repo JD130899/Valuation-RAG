@@ -72,18 +72,14 @@ if "next_msg_id" not in st.session_state:
 # ---------- styles (chat + reference styles) ----------
 st.markdown("""
 <style>
-/* kill any top spacing */
-[data-testid="stAppViewBlockContainer"],
-.block-container { padding-top: 0 !important; }
-.block-container > :first-child { margin-top: 0 !important; }
-h1 { margin-top: 0 !important; }
+.block-container { padding-bottom: 32px; }
 
 /* Chat bubbles */
 .user-bubble {background:#007bff;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:right;margin:4px;}
 .assistant-bubble {background:#1e1e1e;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:left;margin:4px;}
 .clearfix::after {content:"";display:table;clear:both;}
 
-/* Reference card (unchanged) */
+/* Reference card */
 .ref{ display:block; width:60%; max-width:900px; margin:6px 0 12px 8px; }
 .ref summary{
   display:inline-flex; align-items:center; gap:8px; cursor:pointer; list-style:none; outline:none;
@@ -103,10 +99,52 @@ h1 { margin-top: 0 !important; }
   width: min(900px, 90vw); max-height: 75vh; overflow: auto; box-shadow:0 20px 60px rgba(0,0,0,.45);
 }
 .ref .close-x{ position:absolute; top:6px; right:10px; border:0; background:transparent; color:#94a3b8; font-size:20px; line-height:1; cursor:pointer; }
+
+/* ======= ADDED: fixed bottom-right dual buttons ======= */
+.fab-anchor { height: 0; }
+.fab-anchor + div[data-testid="stHorizontalBlock"]{
+  position: fixed !important;
+  right: 24px;
+  bottom: 88px;              /* sits above st.chat_input */
+  z-index: 1000;
+  display: flex; gap: 10px;
+  width: auto !important;
+}
+.fab-anchor + div[data-testid="stHorizontalBlock"] > div{ width: auto !important; }
+.fab-anchor + div[data-testid="stHorizontalBlock"] button{
+  background:#000 !important; color:#fff !important;
+  border:none !important; border-radius:9999px !important;
+  padding:10px 18px !important; font-weight:600 !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
+st.markdown("""
+<style>
+  /* --- sticky top toolbar that contains the two buttons --- */
+  div[data-testid="stVerticalBlock"]:has(> #toolbar-sentinel) {
+    position: sticky;          /* stays at top when you scroll */
+    top: 0;                    /* stick to top of the content area */
+    z-index: 1000;
+    display: flex; gap: 10px; align-items: center;
+    padding: 8px 12px;
+    margin: 8px 0 12px 0;
+    border-radius: 12px;
+    background: rgba(17,24,39,.85);      /* subtle dark bg */
+    backdrop-filter: blur(4px);
+    border: 1px solid rgba(255,255,255,.08);
+  }
+  /* make Streamlit column wrappers shrink to content */
+  div[data-testid="stVerticalBlock"]:has(> #toolbar-sentinel) > div { width: auto !important; }
 
+  /* button look in the toolbar */
+  div[data-testid="stVerticalBlock"]:has(> #toolbar-sentinel) button {
+    background:#000 !important; color:#fff !important;
+    border:none !important; border-radius:9999px !important;
+    padding:10px 18px !important; font-weight:600 !important;
+  }
+</style>
+""", unsafe_allow_html=True)
 
 
 
@@ -374,43 +412,25 @@ def pil_to_base64(img: Image.Image) -> str:
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 # ================= Sidebar: Google Drive loader =================
-# ===== Sidebar: list ALL PDFs and load chosen one =====
-# ===== Sidebar: minimal picker =====
 service = get_drive_service()
-HARDCODED_FOLDER_LINK = "https://drive.google.com/drive/folders/1XGyBBFhhQFiG43jpYJhNzZYi7C-_l5me"
-
-pdf_files = get_all_pdfs(service, HARDCODED_FOLDER_LINK)
-
-if not pdf_files:
-    st.sidebar.warning("No PDFs found in the folder.")
-else:
-    # persist selection across reruns
-    if "selected_pdf_name" not in st.session_state:
-        st.session_state.selected_pdf_name = pdf_files[0]["name"]
-
+pdf_files = get_all_pdfs(service)
+if pdf_files:
     names = [f["name"] for f in pdf_files]
-    sel_name = st.sidebar.selectbox(
-        "Select a PDF to load",
-        names,
-        index=names.index(st.session_state.selected_pdf_name) if st.session_state.get("selected_pdf_name") in names else 0,
-        key="selected_pdf_name",
-    )
-
-    if st.sidebar.button("Load selected PDF"):
-        chosen = next(f for f in pdf_files if f["name"] == sel_name)
-        if chosen["id"] == st.session_state.get("last_synced_file_id"):
-            st.sidebar.info("Already loaded.")
+    sel = st.sidebar.selectbox("📂 Select a PDF from Google Drive", names)
+    chosen = next(f for f in pdf_files if f["name"] == sel)
+    if st.sidebar.button("📥 Load Selected PDF"):
+        fid, fname = chosen["id"], chosen["name"]
+        if fid == st.session_state.last_synced_file_id:
+            st.sidebar.info("✅ Already loaded.")
         else:
-            path = download_pdf(service, chosen["id"], chosen["name"])
+            path = download_pdf(service, fid, fname)
             if path:
-                with open(path, "rb") as f:
-                    st.session_state.uploaded_file_from_drive = f.read()
-                st.session_state.uploaded_file_name = chosen["name"]
-                st.session_state.last_synced_file_id = chosen["id"]
+                st.session_state.uploaded_file_from_drive = open(path, "rb").read()
+                st.session_state.uploaded_file_name = fname
+                st.session_state.last_synced_file_id = fid
                 _reset_chat()
-
-
-
+else:
+    st.sidebar.warning("📭 No PDFs found in Drive.")
 
 # ================= Main UI =================
 st.title("Underwriting Agent")
@@ -435,7 +455,21 @@ if not up:
     st.warning("Please upload or load a PDF to continue.")
     st.stop()
 
+# ===== TOP toolbar (buttons at the top; chat happens below) =====
 
+toolbar = st.container()
+with toolbar:
+    st.markdown('<span id="toolbar-sentinel"></span>', unsafe_allow_html=True)
+    t1, t2, t3 = st.columns([1, 1, 1])
+    with t1:
+        st.button("Valuation", key="top_val",
+                  on_click=queue_question, args=("Valuation",))
+    with t2:
+        st.button("Good will", key="top_gw",
+                  on_click=queue_question, args=("Good will",))
+    with t3:
+        st.button("Etran Cheatsheet", key="top_etran",
+                  on_click=queue_question, args=("Etran Cheatsheet",))
 
 
 # Rebuild retriever when file changes
@@ -449,55 +483,6 @@ if st.session_state.get("last_processed_pdf") != up.name:
     ]
     st.session_state.last_processed_pdf = up.name
 
-# ===== Bottom-right pinned quick actions (compact pill) =====
-pill = st.container()
-with pill:
-    # sentinel so we can find + pin this container from JS
-    st.markdown("<span id='pin-bottom-right'></span>", unsafe_allow_html=True)
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.button("Valuation", key="qa_val", on_click=queue_question, args=("Valuation",))
-    with c2:
-        st.button("Good will", key="qa_gw", on_click=queue_question, args=("Good will",))
-    with c3:
-        st.button("Etran Cheatsheet", key="qa_etran", on_click=queue_question, args=("Etran Cheatsheet",))
-
-# make that container a floating pill above the chat input
-components.html("""
-<script>
-(function pin(){
-  const d = window.parent.document;
-  const mark = d.querySelector('#pin-bottom-right');
-  if(!mark) return setTimeout(pin,120);
-  const block = mark.closest('div[data-testid="stVerticalBlock"]');
-  if(!block) return setTimeout(pin,120);
-  if(block.dataset.pinned==="1") return;
-  block.dataset.pinned="1";
-  Object.assign(block.style,{
-    position:'fixed',
-    right:'18px',
-    bottom:'88px',            // sits above st.chat_input
-    zIndex:'10000',
-    display:'inline-flex',
-    gap:'8px',
-    padding:'6px 8px',
-    borderRadius:'9999px',
-    background:'rgba(17,24,39,.96)',
-    border:'1px solid rgba(255,255,255,.12)',
-    boxShadow:'0 8px 28px rgba(0,0,0,.35)',
-    width:'fit-content',
-    maxWidth:'none'
-  });
-  // prevent streamlit column wrappers from stretching it
-  Array.from(block.children||[]).forEach(ch=>{ ch.style.width='auto'; ch.style.margin='0'; });
-  // compact buttons
-  block.querySelectorAll('button').forEach(b=>{
-    b.style.padding='6px 12px';
-    b.style.borderRadius='9999px';
-  });
-})();
-</script>
-""", height=0)
 
 
 # Chat input
