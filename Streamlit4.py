@@ -8,10 +8,16 @@ st.set_page_config(page_title="Pinned Buttons Chat", layout="wide")
 # (optional) tighten page padding a bit
 st.markdown("""
 <style>
-  .block-container{ padding-top:0!important; padding-bottom:160px!important; }
   .user-bubble{ background:#2563eb; color:#fff; padding:8px 14px; border-radius:14px; margin:4px 0; max-width:70%; align-self:flex-end; }
   .assistant-bubble{ background:#1f2937; color:#fff; padding:8px 14px; border-radius:14px; margin:4px 0; max-width:70%; align-self:flex-start; }
   .chat-row{ display:flex; width:100%; }
+   /* small top padding so the H1 isn't cut off */
+  .block-container{
+    padding-top: 14px !important;   /* was 0 */
+    padding-bottom: 160px !important;
+  }
+  /* keep the heading from adding extra gap */
+  .block-container h1 { margin-top: 0 !important; }
 </style>
 """, unsafe_allow_html=True)
 
