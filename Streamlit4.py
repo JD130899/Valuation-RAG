@@ -7,9 +7,7 @@ import fitz  # PyMuPDF
 from PIL import Image
 from dotenv import load_dotenv
 import streamlit.components.v1 as components
-
-from urllib.parse import quote
-
+import time
 # LangChain / RAG deps
 from langchain_core.documents import Document
 from llama_cloud_services import LlamaParse
@@ -27,10 +25,30 @@ from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
 # ================= Setup =================
 load_dotenv()
 st.set_page_config(page_title="Underwriting Agent", layout="wide")
-# Kill any legacy query params like ?qs=... from old builds
-
-
 openai.api_key = os.getenv("OPENAI_API_KEY")
+
+def type_bubble(text: str, *, base_delay: float = 0.012, cutoff_chars: int = 2000):
+    placeholder = st.empty()
+    buf = []
+    count = 0
+    for ch in text:
+        buf.append(ch); count += 1
+        placeholder.markdown(
+            f"<div class='assistant-bubble clearfix'>{''.join(buf)}</div>",
+            unsafe_allow_html=True,
+        )
+        if count <= cutoff_chars:
+            time.sleep(base_delay)
+    return placeholder
+
+def _reset_chat():
+    st.session_state.messages = [
+        {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
+        {"role": "assistant", "content": "What can I help you with?"}
+    ]
+    st.session_state.pending_input = None
+    st.session_state.waiting_for_response = False
+    st.session_state.last_suggestion = None
 
 # ---------- Session state ----------
 if "last_synced_file_id" not in st.session_state:
@@ -47,48 +65,14 @@ if "waiting_for_response" not in st.session_state:
 if "page_images" not in st.session_state:
     st.session_state.page_images = {}
 if "last_suggestion" not in st.session_state:
-    st.session_state.last_suggestion = None  # remember last “Did you mean X?”
+    st.session_state.last_suggestion = None
 if "next_msg_id" not in st.session_state:
     st.session_state.next_msg_id = 0
 
-# ---------- styles (floating pill row above chat input; buttons now, no URL params) ----------
+# ---------- styles (chat + reference styles) ----------
 st.markdown("""
 <style>
-.block-container { padding-bottom: 140px; }
-
-/* fixed bottom-right container */
-/* Give space so fixed buttons don't overlap chat input */
-.block-container { padding-bottom: 140px; }
-
-
-/* Pin ONLY the block that directly contains the sentinel */
-div[data-testid="stVerticalBlock"]:has(> #qs_sentinel) {
-  position: fixed;
-  right: 20px;
-  bottom: 2px;   /* tweak as you like */
-  z-index: 1000;
-  background: transparent;
-  padding: 0;
-}
-
-/* Layout the columns inside that pinned block */
-div[data-testid="stVerticalBlock"]:has(> #qs_sentinel)
-  > div[data-testid="stHorizontalBlock"] {
-  display: flex;
-  gap: 10px;
-  flex-wrap: nowrap;
-  justify-content: flex-end;
-}
-
-
-/* inner flex so buttons line up nicely */
-.qs-flex { display: flex; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
-
-/* make Streamlit buttons pill-ish */
-button[kind="secondary"] {
-  border-radius: 999px !important;
-  padding: 16px 14px !important;
-}
+.block-container { padding-bottom: 32px; }
 
 /* Chat bubbles */
 .user-bubble {background:#007bff;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:right;margin:4px;}
@@ -115,19 +99,66 @@ button[kind="secondary"] {
   width: min(900px, 90vw); max-height: 75vh; overflow: auto; box-shadow:0 20px 60px rgba(0,0,0,.45);
 }
 .ref .close-x{ position:absolute; top:6px; right:10px; border:0; background:transparent; color:#94a3b8; font-size:20px; line-height:1; cursor:pointer; }
+
+/* ======= ADDED: fixed bottom-right dual buttons ======= */
+.fab-anchor { height: 0; }
+.fab-anchor + div[data-testid="stHorizontalBlock"]{
+  position: fixed !important;
+  right: 24px;
+  bottom: 88px;              /* sits above st.chat_input */
+  z-index: 1000;
+  display: flex; gap: 10px;
+  width: auto !important;
+}
+.fab-anchor + div[data-testid="stHorizontalBlock"] > div{ width: auto !important; }
+.fab-anchor + div[data-testid="stHorizontalBlock"] button{
+  background:#000 !important; color:#fff !important;
+  border:none !important; border-radius:9999px !important;
+  padding:10px 18px !important; font-weight:600 !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
-SUGGESTION_BUTTONS = [
-    "ETRAN Cheatsheet",
-    "What is the valuation?",
-    "Goodwill value",
-]
+st.markdown("""
+<style>
+  /* --- sticky top toolbar that contains the two buttons --- */
+  div[data-testid="stVerticalBlock"]:has(> #toolbar-sentinel) {
+    position: sticky;          /* stays at top when you scroll */
+    top: 0;                    /* stick to top of the content area */
+    z-index: 1000;
+    display: flex; gap: 10px; align-items: center;
+    padding: 8px 12px;
+    margin: 8px 0 12px 0;
+    border-radius: 12px;
+    background: rgba(17,24,39,.85);      /* subtle dark bg */
+    backdrop-filter: blur(4px);
+    border: 1px solid rgba(255,255,255,.08);
+  }
+  /* make Streamlit column wrappers shrink to content */
+  div[data-testid="stVerticalBlock"]:has(> #toolbar-sentinel) > div { width: auto !important; }
+
+  /* button look in the toolbar */
+  div[data-testid="stVerticalBlock"]:has(> #toolbar-sentinel) button {
+    background:#000 !important; color:#fff !important;
+    border:none !important; border-radius:9999px !important;
+    padding:10px 18px !important; font-weight:600 !important;
+  }
+</style>
+""", unsafe_allow_html=True)
+
+
 
 def _new_id():
     n = st.session_state.next_msg_id
     st.session_state.next_msg_id += 1
     return f"m{n}"
+
+# ==================== INTERACTIONS (define BEFORE buttons) ====================
+def queue_question(q: str):
+    st.session_state.pending_input = q
+    st.session_state.waiting_for_response = True
+    st.session_state.messages.append({"id": _new_id(), "role": "user", "content": q})
+
 
 def file_badge_link(name: str, pdf_bytes: bytes, synced: bool = True):
     base = os.path.splitext(name)[0]
@@ -213,21 +244,18 @@ for m in st.session_state.messages:
     if "id" not in m:
         m["id"] = _new_id()
 
-# ----------- helpers (cleaning + suggestion + confirmation routing) -----------
+# ----------- helpers -----------
 def _clean_heading(text: str) -> str:
-    if not text:
-        return text
+    if not text: return text
     text = re.sub(r"^[#>\-\*\d\.\)\(]+\s*", "", text).strip()
     text = text.strip(" :–—-·•")
     return text
 
 def extract_suggestion(text):
     m = re.search(r"did you mean\s+(.+?)\?", text, flags=re.IGNORECASE)
-    if not m:
-        return None
+    if not m: return None
     val = _clean_heading(m.group(1).strip())
-    if val.lower() == "suggestion":
-        return None
+    if val.lower() == "suggestion": return None
     return val
 
 def is_clarification(answer: str) -> bool:
@@ -249,10 +277,8 @@ def guess_suggestion(question: str, docs):
     for d in docs or []:
         for ln in d.page_content.splitlines():
             raw = ln.strip()
-            if not raw:
-                continue
-            if len(raw.split()) > 6:
-                continue
+            if not raw: continue
+            if len(raw.split()) > 6: continue
             words = set(w.lower() for w in re.findall(r"[A-Za-z]{3,}", raw))
             score = len(q_terms & words)
             if score > best_score:
@@ -265,11 +291,9 @@ def sanitize_suggestion(answer: str, question: str, docs):
         and "sorry i didn't understand the question" not in low
         and "did you mean" not in low):
         return answer
-
     sug = _clean_heading(guess_suggestion(question, docs))
     answer = re.sub(r"\bSUGGESTION\b", sug, answer, flags=re.IGNORECASE)
     answer = re.sub(r"\[.*?\]", sug, answer)
-
     m = re.search(r"did you mean\s+(.+?)\?", answer, flags=re.IGNORECASE)
     cand = _clean_heading(m.group(1).strip()) if m else ""
     if not cand or cand.lower() == "suggestion":
@@ -333,7 +357,6 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
     with open(pdf_path, "wb") as f:
         f.write(pdf_bytes)
 
-    # Page images
     doc = fitz.open(pdf_path)
     page_images = {
         i + 1: Image.open(io.BytesIO(page.get_pixmap(dpi=180).tobytes("png")))
@@ -341,7 +364,6 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
     }
     doc.close()
 
-    # Parse
     parser = LlamaParse(api_key=os.environ["LLAMA_CLOUD_API_KEY"], num_workers=4)
     result = parser.parse(pdf_path)
     pages = []
@@ -351,13 +373,11 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
         if text:
             pages.append(Document(page_content=text, metadata={"page_number": pg.page}))
 
-    # Chunk
     splitter = RecursiveCharacterTextSplitter(chunk_size=3300, chunk_overlap=0)
     chunks = splitter.split_documents(pages)
     for idx, c in enumerate(chunks):
         c.metadata["chunk_id"] = idx + 1
 
-    # Embed + FAISS
     embedder = CohereEmbeddings(
         model="embed-english-v3.0",
         user_agent="langchain",
@@ -365,14 +385,12 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
     )
     vs = FAISS.from_documents(chunks, embedder)
 
-    # Persist (optional)
     store = os.path.join("vectorstore", file_name)
     os.makedirs(store, exist_ok=True)
     vs.save_local(store, index_name="faiss")
     with open(os.path.join(store, "metadata.pkl"), "wb") as mf:
         pickle.dump([c.metadata for c in chunks], mf)
 
-    # Retriever + reranker
     reranker = CohereRerank(
         model="rerank-english-v3.0",
         user_agent="langchain",
@@ -394,28 +412,40 @@ def pil_to_base64(img: Image.Image) -> str:
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 # ================= Sidebar: Google Drive loader =================
+# ===== Sidebar: minimal picker =====
 service = get_drive_service()
-pdf_files = get_all_pdfs(service)
-if pdf_files:
-    names = [f["name"] for f in pdf_files]
-    sel = st.sidebar.selectbox("📂 Select a PDF from Google Drive", names)
-    chosen = next(f for f in pdf_files if f["name"] == sel)
-    if st.sidebar.button("📥 Load Selected PDF"):
-        fid, fname = chosen["id"], chosen["name"]
-        if fid == st.session_state.last_synced_file_id:
-            st.sidebar.info("✅ Already loaded.")
-        else:
-            path = download_pdf(service, fid, fname)
-            if path:
-                st.session_state.uploaded_file_from_drive = open(path, "rb").read()
-                st.session_state.uploaded_file_name = fname
-                st.session_state.last_synced_file_id = fid
-                st.session_state.messages = [
-                    {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
-                    {"role": "assistant", "content": "What can I help you with?"}
-                ]
+HARDCODED_FOLDER_LINK = "https://drive.google.com/drive/folders/1XGyBBFhhQFiG43jpYJhNzZYi7C-_l5me"
+
+pdf_files = get_all_pdfs(service, HARDCODED_FOLDER_LINK)
+
+if not pdf_files:
+    st.sidebar.warning("No PDFs found in the folder.")
 else:
-    st.sidebar.warning("📭 No PDFs found in Drive.")
+    # persist selection across reruns
+    if "selected_pdf_name" not in st.session_state:
+        st.session_state.selected_pdf_name = pdf_files[0]["name"]
+
+    names = [f["name"] for f in pdf_files]
+    sel_name = st.sidebar.selectbox(
+        "Select a PDF to load",
+        names,
+        index=names.index(st.session_state.selected_pdf_name) if st.session_state.get("selected_pdf_name") in names else 0,
+        key="selected_pdf_name",
+    )
+
+    if st.sidebar.button("Load selected PDF"):
+        chosen = next(f for f in pdf_files if f["name"] == sel_name)
+        if chosen["id"] == st.session_state.get("last_synced_file_id"):
+            st.sidebar.info("Already loaded.")
+        else:
+            path = download_pdf(service, chosen["id"], chosen["name"])
+            if path:
+                with open(path, "rb") as f:
+                    st.session_state.uploaded_file_from_drive = f.read()
+                st.session_state.uploaded_file_name = chosen["name"]
+                st.session_state.last_synced_file_id = chosen["id"]
+                _reset_chat()
+
 
 # ================= Main UI =================
 st.title("Underwriting Agent")
@@ -432,10 +462,18 @@ else:
     up = st.file_uploader("Upload a valuation report PDF", type="pdf")
     if up:
         file_badge_link(up.name, up.getvalue(), synced=False)
+        if up.name != st.session_state.get("last_selected_upload"):
+            st.session_state.last_selected_upload = up.name
+            _reset_chat()
 
 if not up:
     st.warning("Please upload or load a PDF to continue.")
     st.stop()
+
+# ===== TOP toolbar (buttons at the top; chat happens below) =====
+
+
+
 
 # Rebuild retriever when file changes
 if st.session_state.get("last_processed_pdf") != up.name:
@@ -448,76 +486,68 @@ if st.session_state.get("last_processed_pdf") != up.name:
     ]
     st.session_state.last_processed_pdf = up.name
 
-# ==================== INTERACTIONS FIRST (no query params, no manual rerun) ====================
-def queue_question(q: str):
-    st.session_state.pending_input = q
-    st.session_state.waiting_for_response = True
-    # append user message immediately (so it shows in same run)
-    st.session_state.messages.append({"id": _new_id(), "role": "user", "content": q})
 
-# --- consume quick-suggest clicks coming via ?qs=... ---
-qs = st.query_params.get("qs")
-if qs:
-    queue_question(qs)
-    # clear it so it doesn't re-trigger on rerun
-    try:
-        del st.query_params["qs"]
-    except Exception:
-        pass
+# ===== Bottom-right pinned quick actions (compact pill) =====
+pill = st.container()
+with pill:
+    # sentinel so we can find + pin this container from JS
+    st.markdown("<span id='pin-bottom-right'></span>", unsafe_allow_html=True)
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.button("Valuation", key="qa_val",
+                  on_click=queue_question, args=("Valuation",))
+    with c2:
+        st.button("Good will", key="qa_gw",
+                  on_click=queue_question, args=("Good will",))
+    with c3:
+        st.button("Etran Cheatsheet", key="qa_etran",
+                  on_click=queue_question, args=("Etran Cheatsheet",))
+
+# Pin that container as a floating pill above the chat input
+components.html("""
+<script>
+(function pin(){
+  const d = window.parent.document;
+  const mark = d.querySelector('#pin-bottom-right');
+  if(!mark) return setTimeout(pin,120);
+  const block = mark.closest('div[data-testid="stVerticalBlock"]');
+  if(!block) return setTimeout(pin,120);
+  if(block.dataset.pinned==="1") return;
+  block.dataset.pinned="1";
+  Object.assign(block.style,{
+    position:'fixed',
+    right:'18px',
+    bottom:'88px',            // sits above st.chat_input
+    zIndex:'10000',
+    display:'inline-flex',
+    gap:'8px',
+    padding:'6px 8px',
+    borderRadius:'9999px',
+    background:'rgba(17,24,39,.96)',
+    border:'1px solid rgba(255,255,255,.12)',
+    boxShadow:'0 8px 28px rgba(0,0,0,.35)',
+    width:'fit-content',
+    maxWidth:'none'
+  });
+  // prevent Streamlit column wrappers from stretching it
+  Array.from(block.children||[]).forEach(ch=>{ ch.style.width='auto'; ch.style.margin='0'; });
+  // compact buttons
+  block.querySelectorAll('button').forEach(b=>{
+    b.style.padding='6px 12px';
+    b.style.borderRadius='9999px';
+  });
+})();
+</script>
+""", height=0)
 
 
-# ================= Prompt helpers =================
-def format_chat_history(messages):
-    lines = []
-    for m in messages:
-        speaker = "User" if m["role"] == "user" else "Assistant"
-        lines.append(f"{speaker}: {m['content']}")
-    return "\n".join(lines)
-
-prompt = PromptTemplate(
-    template = """
-You are a financial-data extraction assistant.
-
-**IMPORTANT CONDITIONAL FOLLOW-UP**
-🛎️ After you answer the user’s question (using steps 1–4), **only if** there is still **unused** relevant report content, **ask**:
-“Would you like more detail on [X]?”
-Otherwise, **do not** ask any follow-up.
-
-**HARD RULE (unrelated questions)**
-If the user's question is unrelated to this PDF or requires information outside the Context, reply **exactly**:
-"Sorry I can only answer question related to {pdf_name} pdf document"
-
-**Use ONLY what appears under “Context”**.
-
-### How to answer
-1. Single value → short sentence with the exact number.
-2. Table questions → return the full table in GitHub-flavoured markdown.
-3. Valuation methods → synthesize across chunks; show weights and $ values; prefer detailed breakdowns.
-4. Theory/text → explain using context.
-5. If you cannot find an answer in Context → reply exactly:
-   "Sorry I didnt understand the question. Did you mean SUGGESTION?"
-
----
-Context:
-{context}
----
-Question: {question}
-Answer:""",
-    input_variables=["context", "question", "pdf_name"]
-)
-
-base_text = prompt.template
-wrapped_prompt = PromptTemplate(
-    template=base_text + """
-Conversation so far:
-{chat_history}
-""",
-    input_variables=["chat_history", "context", "question", "pdf_name"]
-)
+# Chat input
+user_q = st.chat_input("Type your question here…", key="main_chat_input")
+if user_q:
+    queue_question(user_q)
 
 # ========================== RENDER HISTORY ==========================
 for msg in st.session_state.messages:
-    
     cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
     st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
     if msg.get("source_img") and msg.get("source_pdf_b64") and msg.get("source_page"):
@@ -528,33 +558,8 @@ for msg in st.session_state.messages:
             page=msg["source_page"],
             key=msg.get("id", "k0"),
         )
-# --- Quick-suggest buttons (normal Streamlit widgets) ---
-qs_host = st.container()
-with qs_host:
-    st.markdown('<div id="qs_sentinel"></div>', unsafe_allow_html=True)  # marker for CSS
 
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.button("ETRAN Cheatsheet", key="btn_et", type="secondary",
-                  on_click=queue_question, args=("ETRAN Cheatsheet",))
-    with c2:
-        st.button("What is the valuation?", key="btn_val", type="secondary",
-                  on_click=queue_question, args=("What is the valuation?",))
-    with c3:
-        st.button("Goodwill value", key="btn_gw", type="secondary",
-                  on_click=queue_question, args=("Goodwill value",))
-
-
-
-
-# Chat input (one instance only; keep this AFTER the floating buttons)
-user_q = st.chat_input("Type your question here…", key="main_chat_input")
-if user_q:
-    queue_question(user_q)
-
-        
-
-# ========================== ANSWER (same run; smooth) ==========================
+# ========================== ANSWER ==========================
 if st.session_state.waiting_for_response and st.session_state.pending_input:
     block = st.empty()
     with block.container():
@@ -593,15 +598,53 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
 
             llm = ChatOpenAI(model="gpt-4o", temperature=0)
             full_input = {
-                "chat_history": format_chat_history(history_to_use),
+                "chat_history": "\n".join(
+                    f"{'User' if m['role']=='user' else 'Assistant'}: {m['content']}"
+                    for m in history_to_use
+                ),
                 "context":      ctx,
                 "question":     effective_q,
                 "pdf_name":     pdf_display,
             }
-            answer = llm.invoke(wrapped_prompt.invoke(full_input)).content
+            answer = llm.invoke(
+                PromptTemplate(
+                    template = """
+You are a financial-data extraction assistant.
+
+**IMPORTANT CONDITIONAL FOLLOW-UP**
+🛎️ After you answer the user’s question (using steps 1–4), **only if** there is still **unused** relevant report content, **ask**:
+“Would you like more detail on [X]?”
+Otherwise, **do not** ask any follow-up.
+
+**HARD RULE (unrelated questions)**
+If the user's question is unrelated to this PDF or requires information outside the Context, reply **exactly**:
+"Sorry I can only answer question related to {pdf_name} pdf document"
+
+**Use ONLY what appears under “Context”**.
+
+### How to answer
+1. Single value → short sentence with the exact number.
+2. Table questions → return the full table in GitHub-flavoured markdown.
+3. Valuation methods → synthesize across chunks; show weights and $ values; prefer detailed breakdowns.
+4. Theory/text → explain using context.
+5. If you cannot find an answer in Context → reply exactly:
+   "Sorry I didnt understand the question. Did you mean SUGGESTION?"
+
+---
+Context:
+{context}
+---
+Question: {question}
+Answer:
+Conversation so far:
+{chat_history}
+""",
+                    input_variables=["chat_history", "context", "question", "pdf_name"]
+                ).invoke(full_input)
+            ).content
+
             answer = sanitize_suggestion(answer, effective_q, docs)
 
-            # Save a CLEANED last suggestion for future confirmations
             sug = extract_suggestion(answer)
             st.session_state.last_suggestion = _clean_heading(sug) if sug else None
 
@@ -612,14 +655,10 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
             entry = {"id": _new_id(), "role": "assistant", "content": answer}
             thinking.empty()
 
-            # Render answer
             with block.container():
-                st.markdown(f"<div class='assistant-bubble clearfix'>{answer}</div>", unsafe_allow_html=True)
-
-                # Only attach a reference when it's a real, contentful answer
+                type_bubble(answer)
                 skip_reference = is_unrelated or is_clarify
                 if docs and not skip_reference:
-                    # ---------- TOP-3 LLM PICK (reference card) ----------
                     try:
                         top3 = docs[:3]
                         best_doc = top3[0] if top3 else None
@@ -655,7 +694,6 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
                                 entry["source_img"] = pil_to_base64(img)
                                 entry["source_pdf_b64"] = base64.b64encode(st.session_state.pdf_bytes).decode("ascii")
                                 entry["source_page"] = ref_page
-                                # draw the card
                                 render_reference_card(
                                     label=entry["source"],
                                     img_b64=entry["source_img"],
@@ -666,8 +704,6 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
                     except Exception as e:
                         st.info(f"ℹ️ Reference selection skipped: {e}")
 
-            # Persist
             st.session_state.messages.append(entry)
             st.session_state.pending_input = None
             st.session_state.waiting_for_response = False
-
