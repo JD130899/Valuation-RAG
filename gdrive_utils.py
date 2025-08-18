@@ -28,16 +28,25 @@ def _get_folder_meta(service, folder_id: str) -> Dict:
         .execute()
     )
 
-def debug_folder_meta(service, folder_id):
+from googleapiclient.errors import HttpError
+import json
+
+
+def debug_folder_meta(service, folder_id: str):
     try:
         meta = service.files().get(
             fileId=folder_id,
-            fields="id, name, mimeType, driveId, parents",
+            fields="id,name,mimeType,driveId,parents",
             supportsAllDrives=True
         ).execute()
-        return meta
-    except Exception as e:
-        return str(e)
+        return {"ok": True, "meta": meta}
+    except HttpError as e:
+        # Try to decode the API's JSON error body; fall back to status/message
+        try:
+            body = json.loads(e.content.decode("utf-8"))
+        except Exception:
+            body = {"status": getattr(e.resp, "status", None), "message": str(e)}
+        return {"ok": False, "error": body}
 
 
 def _resolve_folder_id(service, folder_id: str) -> Dict:
