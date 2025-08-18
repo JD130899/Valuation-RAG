@@ -20,7 +20,7 @@ from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 
 import openai
-from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
+from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf,debug_folder_meta
 
 # ================= Setup =================
 load_dotenv()
