@@ -376,126 +376,36 @@ def pil_to_base64(img: Image.Image) -> str:
     img.save(buf, format="PNG")
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
-# --------- ETRAN CHEATSHEET HELPERS (REPLACEMENT) ----------
-import re
-import json
-from typing import Dict, List, Optional
-
-_CURRENCY = r"(?P<amt>[$€£]?\s?-?\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?|[$€£]?\s?—|-)"  # also match dashes
-
-def _norm(s: str) -> str:
-    return re.sub(r"\s+", " ", s or "").strip().lower()
-
-def _clean_amt(raw: str) -> str:
-    return (raw or "").strip()
-
-def _is_dash(v: str) -> bool:
-    return v.strip() in {"—", "-", "$—", "$-"}
-
-def _find_amount_near(lines: List[str], idx: int, normalize_dash_for: Optional[str] = None) -> Optional[str]:
-    """
-    Scan in this order: same line -> previous line -> next line -> next+1 line.
-    """
-    order = [idx, idx - 1, idx + 1, idx + 2]
-    for j in order:
-        if 0 <= j < len(lines):
-            m = re.search(_CURRENCY, lines[j])
-            if m:
-                val = _clean_amt(m.group("amt"))
-                # If it's just a dash:
-                if _is_dash(val):
-                    # We normalize dash to $0 only for fixed/other tangible assets (common pattern).
-                    if normalize_dash_for in {"fixed", "other_tangible"}:
-                        return "$0"
-                    # For concluded/free cash flow, don't force to $0 (treat as not found)
-                    continue
-                return val
-    return None
-
-def _first_amount_for_label(page_text: str, label_variants: List[str], normalize_dash_for: Optional[str] = None) -> str:
-    lines = [l for l in page_text.splitlines()]
-    lines_lower = [_norm(l) for l in lines]
-
-    for i, low in enumerate(lines_lower):
-        for lab in label_variants:
-            if lab in low:
-                amt = _find_amount_near(lines, i, normalize_dash_for=normalize_dash_for)
-                if amt:
-                    return amt
-    return ""
-
-def _purchase_type(page_text: str) -> str:
-    txt_low = _norm(page_text)
-    # Strong direct matches anywhere on page
-    m = re.search(r"\b(asset purchase|stock purchase)\b", txt_low)
-    if m:
-        return m.group(1).title()
-
-    # Otherwise, try near a label instance
-    labels = ["purchase type", "type of purchase"]
-    lines = [l for l in page_text.splitlines() if l.strip()]
-    for i, ln in enumerate(lines):
-        low = _norm(ln)
-        if any(lab in low for lab in labels):
-            # Try text after colon on the same line
-            m = re.search(r":\s*(.+)$", ln)
-            cand = (m.group(1) if m else "").strip()
-            if cand and not re.search(_CURRENCY, cand):
-                return cand
-            # Or check the next non-empty line
-            if i + 1 < len(lines):
-                cand2 = lines[i + 1].strip()
-                if cand2 and not re.search(_CURRENCY, cand2):
-                    return cand2
-    return ""
-
-def etran_extract_from_page3(page3_text: str) -> Dict[str, str]:
-    """
-    Deterministic extraction from page 3 text with smarter line-window search.
-    Falls back to an LLM only for still-missing fields.
-    """
-    want_labels = {
-        "Concluded Value":               (["concluded value", "conclusion of value", "concluded valuation"], None),
-        "Purchase Type":                 (["purchase type", "type of purchase"], None),  # handled via text logic
-        "Fixed Asset Value":             (["fixed asset", "fixed assets", "fixed tangible assets"], "fixed"),
-        "Other Tangible Assets Value":   (["other tangible assets", "tangible assets assumed", "other tangible"], "other_tangible"),
-        "Goodwill Value":                (["goodwill"], None),
-        "Free Cash Flow":                (["free cash flow", "fcf"], None),
-    }
-
-    out = {k: "" for k in want_labels}
-
-    # Deterministic grabs
-    for key, (labs, dash_norm) in want_labels.items():
-        if key == "Purchase Type":
-            out[key] = _purchase_type(page3_text)
-        else:
-            out[key] = _first_amount_for_label(page3_text, labs, normalize_dash_for=dash_norm)
-
-    # Fallback to LLM for anything still empty
-    missing = [k for k, v in out.items() if not v]
-    if missing:
-        try:
-            llm = ChatOpenAI(model="gpt-4o", temperature=0)
-            prompt = PromptTemplate(
-                template=(
-                    "From this page-3 report text, extract ONLY these fields and "
-                    "return valid JSON with these exact keys:\n{keys}\n\nText:\n{txt}"
-                ),
-                input_variables=["keys", "txt"]
-            )
-            raw = llm.invoke(prompt.invoke({
-                "keys": json.dumps(missing),
-                "txt": page3_text
-            })).content.strip()
-            data = json.loads(raw)
-            for k in missing:
-                if isinstance(data, dict) and data.get(k):
-                    out[k] = str(data[k]).strip()
-        except Exception:
-            pass
-
-    return out
+# --------- ETRAN CHEATSHEET HELPERS ----------
+def etran_extract_from_page3(page3_text: str) -> dict:
+    """Use the LLM to extract key values from page 3 text. Returns a dict with fixed keys."""
+    want_keys = [
+        "Concluded Value",
+        "Purchase Type",
+        "Fixed Asset Value",
+        "Other Tangible Assets Value",
+        "Goodwill Value",
+        "Free Cash Flow",
+    ]
+    prompt = PromptTemplate(
+        template=(
+            "From the provided report text (this is the exact content of page 3), "
+            "extract the following fields. Return ONLY valid JSON (no code fences), "
+            "with these exact keys (even if value is unknown, use an empty string):\n"
+            f"{want_keys}\n\n"
+            "Text:\n{page3}\n"
+        ),
+        input_variables=["page3"]
+    )
+    llm = ChatOpenAI(model="gpt-4o", temperature=0)
+    raw = llm.invoke(prompt.invoke({"page3": page3_text})).content.strip()
+    try:
+        data = json.loads(raw)
+    except Exception:
+        data = {k: "" for k in want_keys}
+    for k in want_keys:
+        data.setdefault(k, "")
+    return data
 
 def render_etran_table(dynamic: dict) -> str:
     static_rows = [
@@ -517,7 +427,6 @@ def render_etran_table(dynamic: dict) -> str:
         val = (v or "").replace("\n", " ").strip()
         lines.append(f"| {k} | {val if val else '—'} |")
     return "\n".join(lines)
-
 
 # ================= Sidebar: Google Drive loader =================
 service = get_drive_service()
