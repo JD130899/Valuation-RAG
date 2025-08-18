@@ -495,14 +495,14 @@ if not up:
 toolbar = st.container()
 with toolbar:
     st.markdown('<span id="toolbar-sentinel"></span>', unsafe_allow_html=True)
-    t1, t2, t3 = st.columns([1, 1, 10,1])
-    with t1:
+    columns = st.columns([1, 1, 10,1])
+    with columns[0]:
         st.button("Valuation", key="top_val",
                   on_click=queue_question, args=("Valuation",))
-    with t2:
+    with columns[1]:
         st.button("Good will", key="top_gw",
                   on_click=queue_question, args=("Good will",))
-    with t3:
+    with columns[3]:
         st.button("Etran Cheatsheet", key="top_etran",
                   on_click=queue_question, args=("Etran Cheatsheet",))
 
