@@ -407,6 +407,80 @@ else:
 # ================= Main UI =================
 st.title("Underwriting Agent")
 
+# ===== Bottom-right pinned quick actions (compact pill) =====
+pill = st.container()
+with pill:
+    # sentinel used by the JS to find & pin the block (but do NOT reparent)
+    st.markdown("<span id='pin-bottom-right'></span>", unsafe_allow_html=True)
+
+    c1, c2, c3 = st.columns(3)
+    if c1.button("Valuation", key="qa_val"):
+        st.session_state.pending_input = "Valuation"
+        st.session_state.waiting_for_response = True
+        st.session_state.messages.append({"id": _new_id(), "role": "user", "content": "Valuation"})
+
+    if c2.button("Good will", key="qa_gw"):
+        st.session_state.pending_input = "Good will"
+        st.session_state.waiting_for_response = True
+        st.session_state.messages.append({"id": _new_id(), "role": "user", "content": "Good will"})
+
+    if c3.button("Etran Cheatsheet", key="qa_etran"):
+        st.session_state.pending_input = "Etran Cheatsheet"
+        st.session_state.waiting_for_response = True
+        st.session_state.messages.append({"id": _new_id(), "role": "user", "content": "Etran Cheatsheet"})
+
+components.html("""
+<script>
+(function pin(){
+  const d = window.parent.document;
+  const mark = d.querySelector('#pin-bottom-right');
+  if(!mark) return setTimeout(pin,120);
+
+  const block = mark.closest('div[data-testid="stVerticalBlock"]');
+  if(!block) return setTimeout(pin,120);
+  if(block.dataset.pinned === "1") return;
+  block.dataset.pinned = "1";
+
+  // Collapse original host so there's no layout gap (keep React bindings!)
+  const host = block.closest('div[data-testid="stElementContainer"]');
+  if (host) {
+    host.style.height = '0px';
+    host.style.minHeight = '0';
+    host.style.margin = '0';
+    host.style.padding = '0';
+    host.style.display = 'contents';   // NOT 'none'
+  }
+
+  // Float the pill
+  Object.assign(block.style, {
+    position:'fixed',
+    right:'18px',
+    bottom:'88px',
+    zIndex:'10000',
+    display:'inline-flex',
+    gap:'8px',
+    padding:'6px 8px',
+    borderRadius:'9999px',
+    background:'rgba(17,24,39,.96)',
+    border:'1px solid rgba(255,255,255,.12)',
+    boxShadow:'0 8px 28px rgba(0,0,0,.35)',
+    width:'fit-content',
+    maxWidth:'none',
+    pointerEvents:'auto'
+  });
+
+  // Don’t let Streamlit’s columns stretch
+  Array.from(block.children||[]).forEach(ch => { ch.style.width='auto'; ch.style.margin='0'; });
+  block.querySelectorAll('button').forEach(b => {
+    b.style.padding='6px 12px';
+    b.style.borderRadius='9999px';
+  });
+})();
+</script>
+""", height=0)
+
+
+
 if "uploaded_file_from_drive" in st.session_state:
     file_badge_link(
         st.session_state.uploaded_file_name,
