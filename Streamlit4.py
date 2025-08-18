@@ -461,25 +461,36 @@ toolbar = st.container()
 with toolbar:
 # ---------------- Fixed buttons (NO NAV, truly pinned) ----------------
     # Put a unique marker INSIDE the same container as the buttons
+ # ====== Add styles (chat bubbles + fixed FAB row) ======
     st.markdown("""
     <style>
-      /* Find the EXACT Streamlit block that contains #fab-target and pin it */
-      div[data-testid="stVerticalBlock"]:has(#fab-target) {
+      .block-container { padding-bottom: 140px; }
+    
+      .user-bubble {
+        background: #007bff; color: #fff; padding: 8px 12px; border-radius: 12px;
+        margin: 4px 0; max-width: 60%; float: right; clear: both;
+      }
+      .assistant-bubble {
+        background: #1e1e1e; color: #fff; padding: 8px 12px; border-radius: 12px;
+        margin: 4px 0; max-width: 60%; float: left; clear: both;
+      }
+    
+      /* === PIN the LAST vertical block (our button container) to the bottom-right ===
+         IMPORTANT: Keep the button container as the VERY LAST element in the script. */
+      .block-container > div[data-testid="stVerticalBlock"]:last-of-type {
         position: fixed !important;
         right: 24px;
-        bottom: 20px;               /* sits above the chat input */
+        bottom: 20px;             /* sit just above chat input */
         z-index: 2000 !important;
         display: flex !important;
         flex-direction: row !important;
-        gap: 10px !important;       /* space between buttons */
+        gap: 10px !important;
         align-items: center !important;
         width: auto !important;
-        background: transparent !important;
-        pointer-events: none;       /* allow interactions underneath */
+        pointer-events: none;     /* let user interact with chat under it */
       }
-    
-      /* Keep the buttons clickable */
-      div[data-testid="stVerticalBlock"]:has(#fab-target) button {
+      /* Make the buttons inside still clickable and match your look */
+      .block-container > div[data-testid="stVerticalBlock"]:last-of-type button {
         pointer-events: auto;
         background:#000 !important; color:#fff !important;
         border:none !important; border-radius:9999px !important;
@@ -487,25 +498,21 @@ with toolbar:
         box-shadow: 0 6px 18px rgba(0,0,0,0.25);
         cursor:pointer;
       }
-      div[data-testid="stVerticalBlock"]:has(#fab-target) button:hover {
+      .block-container > div[data-testid="stVerticalBlock"]:last-of-type button:hover {
         filter: brightness(1.12);
       }
     </style>
     """, unsafe_allow_html=True)
     
+    # ====== FAB row (keep this as the VERY LAST element on the page) ======
     fab = st.container()
     with fab:
-        # Marker INSIDE the same container as the buttons
-        st.markdown('<span id="fab-target"></span>', unsafe_allow_html=True)
-    
-        # No columns: render buttons inline so spacing is tight
         st.button("ETRAN Cheatsheet", key="fab_etran",
                   on_click=queue_question, args=("ETRAN Cheatsheet",))
         st.button("Valuation", key="fab_val",
                   on_click=queue_question, args=("What is the valuation?",))
         st.button("Goodwill value", key="fab_gw",
                   on_click=queue_question, args=("Goodwill value",))
-
 
 
 
