@@ -496,7 +496,7 @@ if up:
       gap:'12px',           // 👈 spacing between buttons inside
       padding:'10px 118px',  // 👈 inner padding of the bubble (makes bubble thicker/taller)
       borderRadius:'9999px',
-      background:'transparent',
+      background:'rgba(17,24,39,.96)',
       border:'none',
       boxShadow:'none',
       minWidth:'350px',     // 👈 ensures minimum width (controls bubble length)
