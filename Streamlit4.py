@@ -72,7 +72,11 @@ if "next_msg_id" not in st.session_state:
 # ---------- styles (chat + reference styles) ----------
 st.markdown("""
 <style>
-.block-container { padding-bottom: 160px; }
+.block-container {
+  padding-top: 0 !important;      /* remove the gap at the top */
+  padding-bottom: 160px !important;/* keep room for the pinned pill */
+}
+h1 { margin-top: 0 !important; }   /* title shouldn’t re-introduce a gap */
 
 /* Chat bubbles */
 .user-bubble {background:#007bff;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:right;margin:4px;}
