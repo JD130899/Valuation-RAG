@@ -121,30 +121,42 @@ st.markdown("""
 
 st.markdown("""
 <style>
-  /* --- sticky top toolbar that contains the two buttons --- */
+  /* reserve space so the fixed bar doesn't cover the first messages */
+  .block-container { padding-top: 72px !important; }
+
+  /* 🔒 freeze the 3-button toolbar at the top */
   div[data-testid="stVerticalBlock"]:has(> #toolbar-sentinel) {
-    position: sticky;          /* stays at top when you scroll */
-    top: 0;                    /* stick to top of the content area */
-    z-index: 1000;
+    position: fixed !important;
+    top: 12px;
+    left: 50%;
+    transform: translateX(-50%);     /* center it */
+    z-index: 1005;
+
     display: flex; gap: 10px; align-items: center;
     padding: 8px 12px;
-    margin: 8px 0 12px 0;
     border-radius: 12px;
-    background: rgba(17,24,39,.85);      /* subtle dark bg */
+    background: rgba(17,24,39,.90);
     backdrop-filter: blur(4px);
     border: 1px solid rgba(255,255,255,.08);
   }
-  /* make Streamlit column wrappers shrink to content */
+
+  /* let the three column wrappers shrink to content */
   div[data-testid="stVerticalBlock"]:has(> #toolbar-sentinel) > div { width: auto !important; }
 
-  /* button look in the toolbar */
+  /* button look */
   div[data-testid="stVerticalBlock"]:has(> #toolbar-sentinel) button {
     background:#000 !important; color:#fff !important;
     border:none !important; border-radius:9999px !important;
     padding:10px 18px !important; font-weight:600 !important;
   }
+
+  /* small screens: keep it centered */
+  @media (max-width: 960px){
+    div[data-testid="stVerticalBlock"]:has(> #toolbar-sentinel) { left: 50%; transform: translateX(-50%); }
+  }
 </style>
 """, unsafe_allow_html=True)
+
 
 
 
