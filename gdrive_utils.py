@@ -27,7 +27,7 @@ def _get_folder_meta(service, folder_id: str) -> Dict:
         .execute()
     )
 
-def get_all_pdfs(service, folder_id_or_url)
+def get_all_pdfs(service, folder_id_or_url):
     folder_id = _extract_folder_id(folder_id_or_url)
     try:
         meta = _get_folder_meta(service, folder_id)
