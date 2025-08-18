@@ -505,18 +505,27 @@ with pill:
         st.button("Etran Cheatsheet", key="qa_etran",
                   on_click=queue_question, args=("Etran Cheatsheet",))
 
-
 components.html("""
 <script>
 (function pin(){
-
-  // the element we rendered (the pill lives inside this stVerticalBlock)
-  const block = mark.closest('div[data-testid="stVerticalBlock"]');
-  if(!block) return setTimeout(pin,120);
-  if(block.dataset.pinned==="1") return;
-  block.dataset.pinned="1";
+  const d = window.parent.document;
+  const mark = d.querySelector('#pin-bottom-right');
+  if(!mark) return setTimeout(pin,120);
 
 
+
+  // 🔧 collapse the original Streamlit element container so it doesn't leave a gap
+  // (stElementContainer is the outer wrapper that still takes up height)
+  const host = block.closest('div[data-testid="stElementContainer"]');
+  if (host) {
+    Object.assign(host.style, {
+      height: '0px',
+      minHeight: '0',
+      padding: '0',
+      margin: '0',
+      display: 'contents'   // let the fixed child render without reserving space
+    });
+  }
 
   // now pin the actual pill
   Object.assign(block.style, {
@@ -535,7 +544,16 @@ components.html("""
     maxWidth:'none'
   });
 
+  // prevent streamlit column wrappers from stretching it
+  Array.from(block.children||[]).forEach(ch => {
+    ch.style.width = 'auto';
+    ch.style.margin = '0';
+  });
 
+  // compact buttons
+  block.querySelectorAll('button').forEach(b => {
+    b.style.padding = '6px 12px';
+    b.style.borderRadius = '9999px';
   });
 })();
 </script>
