@@ -3,6 +3,7 @@ import os, io, pickle, base64
 import re
 import uuid
 import time
+import json
 import streamlit as st
 import fitz  # PyMuPDF
 from PIL import Image
@@ -66,6 +67,8 @@ if "waiting_for_response" not in st.session_state:
     st.session_state.waiting_for_response = False
 if "page_images" not in st.session_state:
     st.session_state.page_images = {}
+if "page_texts" not in st.session_state:
+    st.session_state.page_texts = {}
 if "last_suggestion" not in st.session_state:
     st.session_state.last_suggestion = None
 if "next_msg_id" not in st.session_state:
@@ -327,11 +330,13 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
     parser = LlamaParse(api_key=os.environ["LLAMA_CLOUD_API_KEY"], num_workers=4)
     result = parser.parse(pdf_path)
     pages = []
+    page_texts = {}  # NEW: hold raw page text
     for pg in result.pages:
         cleaned = [l for l in pg.md.splitlines() if l.strip() and l.lower() != "null"]
         text = "\n".join(cleaned)
         if text:
             pages.append(Document(page_content=text, metadata={"page_number": pg.page}))
+            page_texts[pg.page] = text  # NEW
 
     splitter = RecursiveCharacterTextSplitter(chunk_size=3300, chunk_overlap=0)
     chunks = splitter.split_documents(pages)
@@ -364,12 +369,64 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
         ),
         base_compressor=reranker
     )
-    return retriever, page_images
+    return retriever, page_images, page_texts  # CHANGED
 
 def pil_to_base64(img: Image.Image) -> str:
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return base64.b64encode(buf.getvalue()).decode("ascii")
+
+# --------- ETRAN CHEATSHEET HELPERS ----------
+def etran_extract_from_page3(page3_text: str) -> dict:
+    """Use the LLM to extract key values from page 3 text. Returns a dict with fixed keys."""
+    want_keys = [
+        "Concluded Value",
+        "Purchase Type",
+        "Fixed Asset Value",
+        "Other Tangible Assets Value",
+        "Goodwill Value",
+        "Free Cash Flow",
+    ]
+    prompt = PromptTemplate(
+        template=(
+            "From the provided report text (this is the exact content of page 3), "
+            "extract the following fields. Return ONLY valid JSON (no code fences), "
+            "with these exact keys (even if value is unknown, use an empty string):\n"
+            f"{want_keys}\n\n"
+            "Text:\n{page3}\n"
+        ),
+        input_variables=["page3"]
+    )
+    llm = ChatOpenAI(model="gpt-4o", temperature=0)
+    raw = llm.invoke(prompt.invoke({"page3": page3_text})).content.strip()
+    try:
+        data = json.loads(raw)
+    except Exception:
+        data = {k: "" for k in want_keys}
+    for k in want_keys:
+        data.setdefault(k, "")
+    return data
+
+def render_etran_table(dynamic: dict) -> str:
+    static_rows = [
+        ("Appraisal Firm", "Value Buddy"),
+        ("Appraiser", "Tim Gbur"),
+        ("Appraiser Certification", "NACVA - Certified Valuation Analyst (CVA)"),
+    ]
+    dyn_rows = [
+        ("Concluded Value", dynamic.get("Concluded Value","")),
+        ("Purchase Type", dynamic.get("Purchase Type","")),
+        ("Fixed Asset Value", dynamic.get("Fixed Asset Value","")),
+        ("Other Tangible Assets Value", dynamic.get("Other Tangible Assets Value","")),
+        ("Goodwill Value", dynamic.get("Goodwill Value","")),
+        ("Free Cash Flow", dynamic.get("Free Cash Flow","")),
+    ]
+    rows = static_rows + dyn_rows
+    lines = ["| Field | Value |", "|---|---|"]
+    for k, v in rows:
+        val = (v or "").replace("\n", " ").strip()
+        lines.append(f"| {k} | {val if val else '—'} |")
+    return "\n".join(lines)
 
 # ================= Sidebar: Google Drive loader =================
 service = get_drive_service()
@@ -431,16 +488,16 @@ if not up:
 if st.session_state.get("last_processed_pdf") != up.name:
     pdf_bytes = up.getvalue()
     st.session_state.pdf_bytes = pdf_bytes
-    st.session_state.retriever, st.session_state.page_images = build_retriever_from_pdf(pdf_bytes, up.name)
+    (st.session_state.retriever,
+     st.session_state.page_images,
+     st.session_state.page_texts) = build_retriever_from_pdf(pdf_bytes, up.name)
     st.session_state.messages = [
         {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
         {"role": "assistant", "content": "What can I help you with?"}
     ]
     st.session_state.last_processed_pdf = up.name
 
-
-
-# ===== Bottom-right pinned quick actions (compact pill) =====
+# ===== Bottom-right pinned quick actions (compact pill) - only show when a PDF is present =====
 if up:
     pill = st.container()
     with pill:
@@ -463,6 +520,7 @@ if up:
             st.session_state.waiting_for_response = True
             st.session_state.messages.append({"id": _new_id(), "role": "user", "content": "Etran Cheatsheet"})
 
+    # Pin & style bubble (transparent container; larger inner buttons)
     components.html("""
     <script>
     (function pin(){
@@ -485,44 +543,36 @@ if up:
         host.style.display = 'contents';   // NOT 'none'
       }
 
-      // Float the pill
+      // Float the pill container (transparent)
       Object.assign(block.style, {
-      position:'fixed',
-      right:'0px',
-      bottom:'100px',
-      zIndex:'10000',
-      display:'flex',
-      flexWrap:'nowrap',
-      gap:'12px',           // 👈 spacing between buttons inside
-      padding:'10px 118px',  // 👈 inner padding of the bubble (makes bubble thicker/taller)
-      borderRadius:'9999px',
-      background:'transparent',
-      border:'none',
-      boxShadow:'none',
-      minWidth:'350px',     // 👈 ensures minimum width (controls bubble length)
-      width:'fit-content',  // 👈 lets it shrink/grow to content size
-      whiteSpace:'nowrap',
-      pointerEvents:'auto'
-    });
+        position:'fixed',
+        right:'0px',
+        bottom:'100px',
+        zIndex:'10000',
+        display:'flex',
+        flexWrap:'nowrap',
+        gap:'12px',
+        padding:'10px 118px',
+        borderRadius:'9999px',
+        background:'transparent',  // invisible container
+        border:'none',
+        boxShadow:'none',
+        minWidth:'350px',
+        width:'fit-content',
+        whiteSpace:'nowrap',
+        pointerEvents:'auto'
+      });
 
-
-
-
-
-      // Don’t let Streamlit’s columns stretch
+      // Tighten Streamlit column wrappers; enlarge the inner button pills only
       Array.from(block.children||[]).forEach(ch => { ch.style.width='auto'; ch.style.margin='0'; });
       block.querySelectorAll('button').forEach(b => {
-      b.style.padding='18px 32px';    // 👈 more padding = larger buttons
-      b.style.fontSize='32px';        // 👈 increase text size
-      b.style.borderRadius='9999px';  // keeps pill shape
-    });
-
+        b.style.padding='18px 32px';     // larger button pills
+        b.style.fontSize='18px';
+        b.style.borderRadius='9999px';
+      });
     })();
     </script>
     """, height=0)
-
-
-
 
 # Chat input
 user_q = st.chat_input("Type your question here…", key="main_chat_input")
@@ -556,6 +606,46 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
         intent = classify_reply_intent(raw_q, _last_assistant_text(history_to_use))
         is_deny = (intent == "DENY")
         is_confirm = (intent == "CONFIRM")
+
+        # ===== SPECIAL CASE: ETRAN CHEATSHEET =====
+        if raw_q.strip().lower() in {"etran cheatsheet", "etran cheat sheet", "etran"}:
+            page3_text = (st.session_state.page_texts or {}).get(3, "")
+            if not page3_text:
+                answer = "I couldn’t find page 3 content in this PDF."
+            else:
+                extracted = etran_extract_from_page3(page3_text)
+                table_md = render_etran_table(extracted)
+                answer = f"### Etran Cheatsheet\n\n{table_md}"
+
+            thinking.empty()
+            with block.container():
+                type_bubble(answer)
+                # attach a reference preview for page 3 if available
+                img = st.session_state.page_images.get(3)
+                if img:
+                    entry = {
+                        "id": _new_id(),
+                        "role": "assistant",
+                        "content": answer,
+                        "source": "Page 3",
+                        "source_img": pil_to_base64(img),
+                        "source_pdf_b64": base64.b64encode(st.session_state.pdf_bytes).decode("ascii"),
+                        "source_page": 3,
+                    }
+                    render_reference_card(
+                        label=entry["source"],
+                        img_b64=entry["source_img"],
+                        pdf_b64=entry["source_pdf_b64"],
+                        page=entry["source_page"],
+                        key=entry["id"],
+                    )
+                else:
+                    entry = {"id": _new_id(), "role": "assistant", "content": answer}
+
+            st.session_state.messages.append(entry)
+            st.session_state.pending_input = None
+            st.session_state.waiting_for_response = False
+            st.stop()  # prevent the generic RAG flow from running too
 
         if is_deny:
             st.session_state.last_suggestion = None
@@ -690,4 +780,3 @@ Conversation so far:
             st.session_state.messages.append(entry)
             st.session_state.pending_input = None
             st.session_state.waiting_for_response = False
-
