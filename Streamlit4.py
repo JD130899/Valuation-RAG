@@ -486,22 +486,22 @@ if up:
       }
 
       // Float the pill
-      Object.assign(block.style, {
-        position:'fixed',
-        right:'18px',
-        bottom:'120px',
-        zIndex:'10000',
-        display:'inline-flex',
-        gap:'8px',
-        padding:'16px 48px',
-        borderRadius:'9999px',
-        background:'rgba(17,24,39,.96)',
-        border:'1px solid rgba(255,255,255,.12)',
-        boxShadow:'0 8px 28px rgba(0,0,0,.35)',
-        width:'fit-content',
-        maxWidth:'none',
-        pointerEvents:'auto'
-      });
+        Object.assign(block.style, {
+    position:'fixed',
+    right:'18px',
+    bottom:'88px',
+    zIndex:'10000',
+    display:'inline-flex',
+    gap:'8px',
+    width:'fit-content',
+    maxWidth:'none',
+    pointerEvents:'auto',
+    background:'transparent',   // make transparent
+    border:'none',
+    boxShadow:'none',
+    padding:'0'
+  });
+
 
       // Don’t let Streamlit’s columns stretch
       Array.from(block.children||[]).forEach(ch => { ch.style.width='auto'; ch.style.margin='0'; });
