@@ -5,15 +5,16 @@ import streamlit.components.v1 as components
 st.set_page_config(page_title="Pinned Buttons Chat", layout="wide")
 st.markdown("<style>.block-container{padding-bottom:160px!important}</style>", unsafe_allow_html=True)
 
-# ---------------- state ----------------
+# -------- state --------
 if "messages" not in st.session_state:
-    st.session_state.messages = []        # [{"role":"user"/"assistant","content":str}]
+    st.session_state.messages = []   # [{"role": "user"/"assistant", "content": str}]
 if "quick_action" not in st.session_state:
-    st.session_state.quick_action = None  # holds button text for this run only
+    st.session_state.quick_action = None
+if "just_handled" not in st.session_state:
+    st.session_state.just_handled = False
 
-# ---------------- model call ----------------
+# -------- model call --------
 def call_llm(prompt: str) -> str:
-    # Replace with your backend if you like
     try:
         from openai import OpenAI
         client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
@@ -29,7 +30,7 @@ def call_llm(prompt: str) -> str:
     except Exception as e:
         return f"(LLM error) {e}"
 
-# ---------------- pinned bottom-right actions (compact) ----------------
+# -------- pinned bottom-right buttons (compact pill) --------
 pill = st.container()
 with pill:
     st.markdown("<span id='pin-bottom-right'></span>", unsafe_allow_html=True)
@@ -41,7 +42,6 @@ with pill:
         if st.button("Good will", key="qa_gw"):
             st.session_state.quick_action = "Good will"
 
-# compact pill styling (no full-width bar)
 components.html("""
 <script>
 (function pin(){
@@ -67,30 +67,37 @@ components.html("""
 
 st.title("Chat with Pinned Bottom-Right Buttons")
 
-# ---------------- collect user input (do NOT render bubbles yet) ----------------
+# -------- gather input (buttons > chat) --------
 typed = st.chat_input("Type your question…")
-
-# determine the user text for this run (buttons win if both happen)
 user_text = st.session_state.quick_action or typed
-st.session_state.quick_action = None  # consume the quick action
+st.session_state.quick_action = None
 
-# ---------------- handle input ONCE, update history ONCE ----------------
-thinking_slot = st.empty()  # non-persisted area to avoid flicker
+# -------- handle one turn with live bubbles (no duplicates) --------
 if user_text:
-    # append user to history
-    st.session_state.messages.append({"role": "user", "content": user_text})
-    # show transient "Thinking..." under the chat title while we wait
-    with thinking_slot.container():
-        with st.chat_message("assistant"):
-            st.markdown("🧠 *Thinking…*")
-    # call model
-    reply = call_llm(user_text)
-    # persist assistant reply
-    st.session_state.messages.append({"role": "assistant", "content": reply})
-    # clear the transient area (so we don't see double)
-    thinking_slot.empty()
+    st.session_state.just_handled = True
 
-# ---------------- render the full history (single pass) ----------------
-for m in st.session_state.messages:
-    with st.chat_message(m["role"]):
-        st.markdown(m["content"])
+    # 1) show the user's bubble immediately (right/blue)
+    with st.chat_message("user"):
+        st.markdown(user_text)
+
+    # 2) show assistant placeholder and "Thinking…" (left/black)
+    assistant_slot = st.chat_message("assistant").empty()
+    assistant_slot.markdown("🧠 *Thinking…*")
+
+    # 3) call LLM and replace the placeholder with the answer
+    reply = call_llm(user_text)
+    assistant_slot.markdown(reply)
+
+    # 4) persist both to history (so they appear on the next rerun only)
+    st.session_state.messages.append({"role": "user", "content": user_text})
+    st.session_state.messages.append({"role": "assistant", "content": reply})
+
+# -------- render history (single pass) --------
+# Skip in the same run we just handled input (prevents duplicate bubbles now).
+if not st.session_state.just_handled:
+    for m in st.session_state.messages:
+        with st.chat_message(m["role"]):
+            st.markdown(m["content"])
+
+# reset flag so the next rerun renders history as usual
+st.session_state.just_handled = False
