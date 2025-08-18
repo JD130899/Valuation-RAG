@@ -312,32 +312,153 @@ def condense_query(chat_history, user_input: str, pdf_name: str) -> str:
         prompt.invoke({"pdf_name": pdf_name, "history": hist_txt, "question": user_input})
     ).content.strip() or user_input
 
+# ================= Helper for page selection + OCR =================
+def _detect_selected_pages(doc: fitz.Document):
+    """
+    Return a set of 1-based page numbers to override with OCR text, based on headings:
+      - Always include page 3
+      - First 'VALUATION SUMMARY'
+      - 1st 'INCOME APPROACH'
+      - 2nd 'MARKET APPROACH' and the immediate next page (if exists)
+    """
+    want = set()
+    total = len(doc)
+
+    # Always include page 3 if it exists
+    if total >= 3:
+        want.add(3)
+
+    income_hits = []
+    market_hits = []
+    valuation_summary_page = None
+
+    for i in range(total):  # i is 0-based
+        # skip very early clutter if desired; here we scan all
+        text = (doc[i].get_text() or "").upper()
+
+        if "INCOME APPROACH" in text:
+            income_hits.append(i + 1)  # store 1-based
+
+        if "MARKET APPROACH" in text:
+            market_hits.append(i + 1)
+
+        if valuation_summary_page is None and "VALUATION SUMMARY" in text:
+            valuation_summary_page = i + 1
+
+    # 1st Income Approach
+    if income_hits:
+        want.add(income_hits[0])
+
+    # 2nd Market Approach + next
+    if len(market_hits) >= 2:
+        second = market_hits[1]
+        want.add(second)
+        if second + 1 <= total:
+            want.add(second + 1)
+
+    # Valuation Summary (first)
+    if valuation_summary_page:
+        want.add(valuation_summary_page)
+
+    return want
+
+def _ocr_page_with_gpt4o(img_png_bytes: bytes) -> str:
+    """Send a PNG image to GPT-4o vision and return plain text."""
+    b64 = base64.b64encode(img_png_bytes).decode("utf-8")
+    prompt_text = (
+        "Extract all values and details precisely from the image. "
+        "Return clean, readable plain text (not markdown tables). "
+        "If formulas are present, write THE EQUATION using simple math symbols. "
+        "Avoid extra commentary."
+    )
+    try:
+        resp = openai.chat.completions.create(
+            model="gpt-4o",
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt_text},
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                ],
+            }],
+            max_tokens=800,
+        )
+        return resp.choices[0].message.content.strip()
+    except Exception as e:
+        # fall back to empty string so we keep LlamaParse for that page
+        return ""
+
+def pil_to_base64(img: Image.Image) -> str:
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
 # ================= Builder =================
 @st.cache_resource(show_spinner="📦 Processing & indexing PDF…")
 def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
+    """
+    1) Save PDF to disk
+    2) Build page preview images
+    3) Detect selected pages & OCR them with GPT-4o vision
+    4) Parse PDF with LlamaParse; replace selected pages with OCR text
+    5) Build vector index & retriever; return (retriever, page_images, page_texts)
+    """
     os.makedirs("uploaded", exist_ok=True)
     pdf_path = os.path.join("uploaded", file_name)
     with open(pdf_path, "wb") as f:
         f.write(pdf_bytes)
 
+    # Open with PyMuPDF
     doc = fitz.open(pdf_path)
-    page_images = {
-        i + 1: Image.open(io.BytesIO(page.get_pixmap(dpi=180).tobytes("png")))
-        for i, page in enumerate(doc)
-    }
+
+    # Build PIL images for all pages (also reused for OCR)
+    page_images = {}
+    for i, page in enumerate(doc):
+        pix = page.get_pixmap(dpi=180)
+        img = Image.open(io.BytesIO(pix.tobytes("png")))
+        page_images[i + 1] = img
+
+    # Detect which pages to override with OCR
+    selected_pages = _detect_selected_pages(doc)
+
+    # OCR the selected pages with GPT-4o
+    ocr_text_by_page = {}
+    for pnum in sorted(selected_pages):
+        try:
+            img = page_images.get(pnum)
+            if img is None:
+                continue
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            ocr_text = _ocr_page_with_gpt4o(buf.getvalue())
+            if ocr_text:
+                ocr_text_by_page[pnum] = ocr_text
+        except Exception:
+            # if anything fails, skip replacement for that page
+            pass
+
+    # Done with the PDF object
     doc.close()
 
+    # Parse entire document with LlamaParse
     parser = LlamaParse(api_key=os.environ["LLAMA_CLOUD_API_KEY"], num_workers=4)
     result = parser.parse(pdf_path)
-    pages = []
-    page_texts = {}  # NEW: hold raw page text
-    for pg in result.pages:
-        cleaned = [l for l in pg.md.splitlines() if l.strip() and l.lower() != "null"]
-        text = "\n".join(cleaned)
-        if text:
-            pages.append(Document(page_content=text, metadata={"page_number": pg.page}))
-            page_texts[pg.page] = text  # NEW
 
+    # Build pages[] using OCR text when available; otherwise cleaned LlamaParse text
+    pages = []
+    page_texts = {}
+    for pg in result.pages:
+        pnum = pg.page  # 1-based
+        if pnum in ocr_text_by_page:
+            text = ocr_text_by_page[pnum].strip()
+        else:
+            cleaned = [l for l in pg.md.splitlines() if l.strip() and l.lower() != "null"]
+            text = "\n".join(cleaned)
+        if text:
+            pages.append(Document(page_content=text, metadata={"page_number": pnum}))
+            page_texts[pnum] = text
+
+    # Split → Embed → Index
     splitter = RecursiveCharacterTextSplitter(chunk_size=3300, chunk_overlap=0)
     chunks = splitter.split_documents(pages)
     for idx, c in enumerate(chunks):
@@ -369,12 +490,7 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
         ),
         base_compressor=reranker
     )
-    return retriever, page_images, page_texts  # CHANGED
-
-def pil_to_base64(img: Image.Image) -> str:
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    return base64.b64encode(buf.getvalue()).decode("ascii")
+    return retriever, page_images, page_texts
 
 # --------- ETRAN CHEATSHEET HELPERS ----------
 def etran_extract_from_page3(page3_text: str) -> dict:
