@@ -1,14 +1,14 @@
-
 # app.py
 import os, io, pickle, base64
 import re
 import uuid
+import time
 import streamlit as st
 import fitz  # PyMuPDF
 from PIL import Image
 from dotenv import load_dotenv
 import streamlit.components.v1 as components
-import time
+
 # LangChain / RAG deps
 from langchain_core.documents import Document
 from llama_cloud_services import LlamaParse
@@ -22,6 +22,7 @@ from langchain_core.prompts import PromptTemplate
 
 import openai
 from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
+
 
 # ================= Setup =================
 load_dotenv()
@@ -73,7 +74,12 @@ if "next_msg_id" not in st.session_state:
 # ---------- styles (chat + reference styles) ----------
 st.markdown("""
 <style>
-.block-container { padding-bottom: 32px; }
+/* give the page a little top room so H1 isn't clipped, and bottom room for the pill */
+.block-container{
+  padding-top: 14px !important;
+  padding-bottom: 160px !important;
+}
+.block-container h1 { margin-top: 0 !important; }
 
 /* Chat bubbles */
 .user-bubble {background:#007bff;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:right;margin:4px;}
@@ -100,66 +106,19 @@ st.markdown("""
   width: min(900px, 90vw); max-height: 75vh; overflow: auto; box-shadow:0 20px 60px rgba(0,0,0,.45);
 }
 .ref .close-x{ position:absolute; top:6px; right:10px; border:0; background:transparent; color:#94a3b8; font-size:20px; line-height:1; cursor:pointer; }
-
-/* ======= ADDED: fixed bottom-right dual buttons ======= */
-.fab-anchor { height: 0; }
-.fab-anchor + div[data-testid="stHorizontalBlock"]{
-  position: fixed !important;
-  right: 24px;
-  bottom: 88px;              /* sits above st.chat_input */
-  z-index: 1000;
-  display: flex; gap: 10px;
-  width: auto !important;
-}
-.fab-anchor + div[data-testid="stHorizontalBlock"] > div{ width: auto !important; }
-.fab-anchor + div[data-testid="stHorizontalBlock"] button{
-  background:#000 !important; color:#fff !important;
-  border:none !important; border-radius:9999px !important;
-  padding:10px 18px !important; font-weight:600 !important;
-}
 </style>
 """, unsafe_allow_html=True)
-
-st.markdown("""
-<style>
-  /* --- sticky top toolbar that contains the two buttons --- */
-  div[data-testid="stVerticalBlock"]:has(> #toolbar-sentinel) {
-    position: sticky;          /* stays at top when you scroll */
-    top: 0;                    /* stick to top of the content area */
-    z-index: 1000;
-    display: flex; gap: 10px; align-items: center;
-    padding: 8px 12px;
-    margin: 8px 0 12px 0;
-    border-radius: 12px;
-    background: rgba(17,24,39,.85);      /* subtle dark bg */
-    backdrop-filter: blur(4px);
-    border: 1px solid rgba(255,255,255,.08);
-  }
-  /* make Streamlit column wrappers shrink to content */
-  div[data-testid="stVerticalBlock"]:has(> #toolbar-sentinel) > div { width: auto !important; }
-
-  /* button look in the toolbar */
-  div[data-testid="stVerticalBlock"]:has(> #toolbar-sentinel) button {
-    background:#000 !important; color:#fff !important;
-    border:none !important; border-radius:9999px !important;
-    padding:10px 18px !important; font-weight:600 !important;
-  }
-</style>
-""", unsafe_allow_html=True)
-
-
 
 def _new_id():
     n = st.session_state.next_msg_id
     st.session_state.next_msg_id += 1
     return f"m{n}"
 
-# ==================== INTERACTIONS (define BEFORE buttons) ====================
+# ==================== INTERACTIONS ====================
 def queue_question(q: str):
     st.session_state.pending_input = q
     st.session_state.waiting_for_response = True
     st.session_state.messages.append({"id": _new_id(), "role": "user", "content": q})
-
 
 def file_badge_link(name: str, pdf_bytes: bytes, synced: bool = True):
     base = os.path.splitext(name)[0]
@@ -413,8 +372,6 @@ def pil_to_base64(img: Image.Image) -> str:
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 # ================= Sidebar: Google Drive loader =================
-# ===== Sidebar: list ALL PDFs and load chosen one =====
-# ===== Sidebar: minimal picker =====
 service = get_drive_service()
 HARDCODED_FOLDER_LINK = "https://drive.google.com/drive/folders/1XGyBBFhhQFiG43jpYJhNzZYi7C-_l5me"
 
@@ -423,7 +380,6 @@ pdf_files = get_all_pdfs(service, HARDCODED_FOLDER_LINK)
 if not pdf_files:
     st.sidebar.warning("No PDFs found in the folder.")
 else:
-    # persist selection across reruns
     if "selected_pdf_name" not in st.session_state:
         st.session_state.selected_pdf_name = pdf_files[0]["name"]
 
@@ -448,9 +404,6 @@ else:
                 st.session_state.last_synced_file_id = chosen["id"]
                 _reset_chat()
 
-
-
-
 # ================= Main UI =================
 st.title("Underwriting Agent")
 
@@ -474,10 +427,63 @@ if not up:
     st.warning("Please upload or load a PDF to continue.")
     st.stop()
 
-# ===== TOP toolbar (buttons at the top; chat happens below) =====
+# ===== Bottom-right pinned quick actions (compact pill) =====
+pill = st.container()
+with pill:
+    # sentinel used by the JS to find & pin the block
+    st.markdown("<span id='pin-bottom-right'></span>", unsafe_allow_html=True)
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.button("Valuation", key="qa_val",
+                  on_click=queue_question, args=("Valuation",))
+    with c2:
+        st.button("Good will", key="qa_gw",
+                  on_click=queue_question, args=("Good will",))
+    with c3:
+        st.button("Etran Cheatsheet", key="qa_etran",
+                  on_click=queue_question, args=("Etran Cheatsheet",))
 
+# Pin the container AND collapse its original wrapper so no gap is left anywhere
+components.html("""
+<script>
+(function pin(){
+  const d = window.parent.document;
+  const mark = d.querySelector('#pin-bottom-right');
+  if(!mark) return setTimeout(pin,120);
 
+  const block = mark.closest('div[data-testid="stVerticalBlock"]');
+  if(!block) return setTimeout(pin,120);
+  if(block.dataset.pinned==="1") return;
+  block.dataset.pinned="1";
 
+  // Collapse the host container so it doesn't occupy space in the layout
+  const host = block.closest('div[data-testid="stElementContainer"]');
+  if (host) {
+    host.style.height = '0px';
+    host.style.minHeight = '0';
+    host.style.padding = '0';
+    host.style.margin = '0';
+    host.style.display = 'contents';
+  }
+
+  // Float the pill at bottom-right
+  Object.assign(block.style, {
+    position:'fixed', right:'18px', bottom:'88px', zIndex:'10000',
+    display:'inline-flex', gap:'8px', padding:'6px 8px',
+    borderRadius:'9999px', background:'rgba(17,24,39,.96)',
+    border:'1px solid rgba(255,255,255,.12)', boxShadow:'0 8px 28px rgba(0,0,0,.35)',
+    width:'fit-content', maxWidth:'none'
+  });
+
+  // Remove column stretch + compact buttons
+  Array.from(block.children||[]).forEach(ch=>{ ch.style.width='auto'; ch.style.margin='0'; });
+  block.querySelectorAll('button').forEach(b=>{
+    b.style.padding='6px 12px';
+    b.style.borderRadius='9999px';
+  });
+})();
+</script>
+""", height=0)
 
 # Rebuild retriever when file changes
 if st.session_state.get("last_processed_pdf") != up.name:
@@ -489,8 +495,6 @@ if st.session_state.get("last_processed_pdf") != up.name:
         {"role": "assistant", "content": "What can I help you with?"}
     ]
     st.session_state.last_processed_pdf = up.name
-
-
 
 # Chat input
 user_q = st.chat_input("Type your question here…", key="main_chat_input")
@@ -658,4 +662,3 @@ Conversation so far:
             st.session_state.messages.append(entry)
             st.session_state.pending_input = None
             st.session_state.waiting_for_response = False
-
