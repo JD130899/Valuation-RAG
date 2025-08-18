@@ -740,7 +740,7 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
                 table_md = render_etran_table(extracted)
                 answer = f"### Etran Cheatsheet\n\n{table_md}"
 
-        if raw_q.strip().lower() == "valuation":
+        if raw_q.strip().lower() == "Valuation":
             page3_text = (st.session_state.page_texts or {}).get(3, "")
             if not page3_text:
                 answer = "I couldn’t find page 3 content in this PDF."
