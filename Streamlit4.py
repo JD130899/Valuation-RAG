@@ -404,9 +404,6 @@ else:
                 st.session_state.last_synced_file_id = chosen["id"]
                 _reset_chat()
 
-# ================= Main UI =================
-st.title("Underwriting Agent")
-
 # ===== Bottom-right pinned quick actions (compact pill) =====
 pill = st.container()
 with pill:
@@ -478,6 +475,11 @@ components.html("""
 })();
 </script>
 """, height=0)
+
+
+
+# ================= Main UI =================
+st.title("Underwriting Agent")
 
 
 
