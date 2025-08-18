@@ -519,18 +519,7 @@ components.html("""
   if(block.dataset.pinned==="1") return;
   block.dataset.pinned="1";
 
-  // 🔧 collapse the original Streamlit element container so it doesn't leave a gap
-  // (stElementContainer is the outer wrapper that still takes up height)
-  const host = block.closest('div[data-testid="stElementContainer"]');
-  if (host) {
-    Object.assign(host.style, {
-      height: '0px',
-      minHeight: '0',
-      padding: '0',
-      margin: '0',
-      display: 'contents'   // let the fixed child render without reserving space
-    });
-  }
+
 
   // now pin the actual pill
   Object.assign(block.style, {
