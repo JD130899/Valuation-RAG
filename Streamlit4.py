@@ -509,9 +509,6 @@ with pill:
 components.html("""
 <script>
 (function pin(){
-  const d = window.parent.document;
-  const mark = d.querySelector('#pin-bottom-right');
-  if(!mark) return setTimeout(pin,120);
 
   // the element we rendered (the pill lives inside this stVerticalBlock)
   const block = mark.closest('div[data-testid="stVerticalBlock"]');
