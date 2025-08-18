@@ -535,12 +535,7 @@ components.html("""
     maxWidth:'none'
   });
 
- 
 
-  // compact buttons
-  block.querySelectorAll('button').forEach(b => {
-    b.style.padding = '6px 12px';
-    b.style.borderRadius = '9999px';
   });
 })();
 </script>
