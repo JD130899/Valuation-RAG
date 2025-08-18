@@ -488,8 +488,8 @@ if up:
       // Float the pill
       Object.assign(block.style, {
       position:'fixed',
-      right:'14px',
-      bottom:'120px',
+      right:'68px',
+      bottom:'100px',
       zIndex:'10000',
       display:'flex',
       flexWrap:'nowrap',
