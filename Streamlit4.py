@@ -493,17 +493,18 @@ if up:
       zIndex:'10000',
       display:'flex',
       flexWrap:'nowrap',
-      gap:'12px',                 // more spacing between buttons
-      padding:'10px 18px',        // bigger padding inside the bubble
+      gap:'12px',           // 👈 spacing between buttons inside
+      padding:'10px 48px',  // 👈 inner padding of the bubble (makes bubble thicker/taller)
       borderRadius:'9999px',
       background:'transparent',
       border:'none',
       boxShadow:'none',
-      minWidth:'350px',           // 👈 ensures a larger bubble
-      width:'fit-content',
+      minWidth:'350px',     // 👈 ensures minimum width (controls bubble length)
+      width:'fit-content',  // 👈 lets it shrink/grow to content size
       whiteSpace:'nowrap',
       pointerEvents:'auto'
     });
+
 
 
 
