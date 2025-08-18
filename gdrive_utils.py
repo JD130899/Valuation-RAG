@@ -8,7 +8,7 @@ from googleapiclient.http import MediaIoBaseDownload
 
 # === CONFIG ===
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
-FOLDER_ID = "1VglZDFbufOxHTZ4qZ_feUw_XHaxacPxr"  # Folder to watch
+FOLDER_ID = "1XGyBBFhhQFiG43jpYJhNzZYi7C-_l5me"  # Folder to watch
 
 
 # === Auth ===
