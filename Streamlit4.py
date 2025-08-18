@@ -486,21 +486,24 @@ if up:
       }
 
       // Float the pill
-        Object.assign(block.style, {
-    position:'fixed',
-    right:'18px',
-    bottom:'88px',
-    zIndex:'10000',
-    display:'inline-flex',
-    gap:'8px',
-    width:'fit-content',
-    maxWidth:'none',
-    pointerEvents:'auto',
-    background:'transparent',   // make transparent
-    border:'none',
-    boxShadow:'none',
-    padding:'0'
-  });
+       Object.assign(block.style, {
+  position:'fixed',
+  right:'18px',
+  bottom:'88px',
+  zIndex:'10000',
+  display:'flex',               // flex keeps items in one line
+  flexWrap:'nowrap',            // prevent wrapping
+  gap:'8px',
+  padding:'6px 12px',
+  borderRadius:'9999px',
+  background:'transparent',
+  border:'none',
+  boxShadow:'none',
+  width:'fit-content',
+  whiteSpace:'nowrap',          // make sure text/buttons never wrap
+  pointerEvents:'auto'
+});
+
 
 
       // Don’t let Streamlit’s columns stretch
