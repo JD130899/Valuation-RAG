@@ -506,6 +506,53 @@ with pill:
                   on_click=queue_question, args=("Etran Cheatsheet",))
 
 
+components.html("""
+<script>
+
+  // 🔧 collapse the original Streamlit element container so it doesn't leave a gap
+  // (stElementContainer is the outer wrapper that still takes up height)
+  const host = block.closest('div[data-testid="stElementContainer"]');
+  if (host) {
+    Object.assign(host.style, {
+      height: '0px',
+      minHeight: '0',
+      padding: '0',
+      margin: '0',
+      display: 'contents'   // let the fixed child render without reserving space
+    });
+  }
+
+  // now pin the actual pill
+  Object.assign(block.style, {
+    position:'fixed',
+    right:'18px',
+    bottom:'88px',          // sits above st.chat_input
+    zIndex:'10000',
+    display:'inline-flex',
+    gap:'8px',
+    padding:'6px 8px',
+    borderRadius:'9999px',
+    background:'rgba(17,24,39,.96)',
+    border:'1px solid rgba(255,255,255,.12)',
+    boxShadow:'0 8px 28px rgba(0,0,0,.35)',
+    width:'fit-content',
+    maxWidth:'none'
+  });
+
+  // prevent streamlit column wrappers from stretching it
+  Array.from(block.children||[]).forEach(ch => {
+    ch.style.width = 'auto';
+    ch.style.margin = '0';
+  });
+
+  // compact buttons
+  block.querySelectorAll('button').forEach(b => {
+    b.style.padding = '6px 12px';
+    b.style.borderRadius = '9999px';
+  });
+})();
+</script>
+""", height=0)
 
 
 
