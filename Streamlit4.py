@@ -457,19 +457,7 @@ if not up:
 
 # ===== TOP toolbar (buttons at the top; chat happens below) =====
 
-toolbar = st.container()
-with toolbar:
-    st.markdown('<span id="toolbar-sentinel"></span>', unsafe_allow_html=True)
-    t1, t2, t3 = st.columns([1, 1, 1])
-    with t1:
-        st.button("Valuation", key="top_val",
-                  on_click=queue_question, args=("Valuation",))
-    with t2:
-        st.button("Good will", key="top_gw",
-                  on_click=queue_question, args=("Good will",))
-    with t3:
-        st.button("Etran Cheatsheet", key="top_etran",
-                  on_click=queue_question, args=("Etran Cheatsheet",))
+
 
 
 # Rebuild retriever when file changes
