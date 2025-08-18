@@ -489,7 +489,7 @@ if up:
       Object.assign(block.style, {
         position:'fixed',
         right:'18px',
-        bottom:'88px',
+        bottom:'120px',
         zIndex:'10000',
         display:'inline-flex',
         gap:'8px',
