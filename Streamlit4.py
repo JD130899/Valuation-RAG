@@ -427,6 +427,17 @@ if not up:
     st.warning("Please upload or load a PDF to continue.")
     st.stop()
 
+# Rebuild retriever when file changes
+if st.session_state.get("last_processed_pdf") != up.name:
+    pdf_bytes = up.getvalue()
+    st.session_state.pdf_bytes = pdf_bytes
+    st.session_state.retriever, st.session_state.page_images = build_retriever_from_pdf(pdf_bytes, up.name)
+    st.session_state.messages = [
+        {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
+        {"role": "assistant", "content": "What can I help you with?"}
+    ]
+    st.session_state.last_processed_pdf = up.name
+    
 # ===== Bottom-right pinned quick actions (compact pill) =====
 pill = st.container()
 with pill:
@@ -485,16 +496,7 @@ components.html("""
 </script>
 """, height=0)
 
-# Rebuild retriever when file changes
-if st.session_state.get("last_processed_pdf") != up.name:
-    pdf_bytes = up.getvalue()
-    st.session_state.pdf_bytes = pdf_bytes
-    st.session_state.retriever, st.session_state.page_images = build_retriever_from_pdf(pdf_bytes, up.name)
-    st.session_state.messages = [
-        {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
-        {"role": "assistant", "content": "What can I help you with?"}
-    ]
-    st.session_state.last_processed_pdf = up.name
+
 
 # Chat input
 user_q = st.chat_input("Type your question here…", key="main_chat_input")
