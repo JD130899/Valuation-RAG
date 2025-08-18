@@ -459,28 +459,34 @@ if not up:
 
 toolbar = st.container()
 with toolbar:
-    # ---------------- Fixed buttons (NO NAVIGATION, pinned at bottom) ----------------
+
     st.markdown('<span id="fab-anchor"></span>', unsafe_allow_html=True)
     
     st.markdown("""
     <style>
-      div[data-testid="stVerticalBlock"]:has(> #fab-anchor) + div[data-testid="stVerticalBlock"]{
+      /* Pin the button block at bottom-right, floating above everything */
+      div[data-testid="stVerticalBlock"]:has(> #fab-anchor) + div[data-testid="stVerticalBlock"] {
         position: fixed !important;
         right: 24px;
-        bottom: 20px;
-        z-index: 1000;
-        display: flex;
-        gap: 10px;                /* space between buttons */
-        align-items: center;
+        bottom: 20px;            /* adjust distance from bottom */
+        z-index: 2000 !important; /* make sure it’s above chat */
+        display: flex !important;
+        gap: 10px;
         justify-content: flex-end;
-        pointer-events: none;
+        background: transparent; /* keep it floating, no background */
+        pointer-events: none;    /* allow interactions below except buttons */
       }
-      div[data-testid="stVerticalBlock"]:has(> #fab-anchor) + div[data-testid="stVerticalBlock"] button{
+      /* Buttons inside remain clickable */
+      div[data-testid="stVerticalBlock"]:has(> #fab-anchor) + div[data-testid="stVerticalBlock"] button {
         pointer-events: auto;
         background:#000 !important; color:#fff !important;
         border:none !important; border-radius:9999px !important;
         padding:10px 16px !important; font-weight:600 !important;
         box-shadow: 0 6px 18px rgba(0,0,0,0.25);
+        cursor:pointer;
+      }
+      div[data-testid="stVerticalBlock"]:has(> #fab-anchor) + div[data-testid="stVerticalBlock"] button:hover {
+        filter: brightness(1.15);
       }
     </style>
     """, unsafe_allow_html=True)
@@ -493,6 +499,7 @@ with toolbar:
                   on_click=queue_question, args=("What is the valuation?",))
         st.button("Goodwill value", key="fab_gw",
                   on_click=queue_question, args=("Goodwill value",))
+
 
 
 
