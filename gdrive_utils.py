@@ -18,26 +18,37 @@ def get_drive_service():
     return build('drive', 'v3', credentials=creds)
 
 # === Fetch Latest PDF ===
-def get_all_pdfs(service):
-    query = f"'{FOLDER_ID}' in parents and trashed = false"
+# gdrive_utils.py
+# ...
+FOLDER_ID = "1VglZDFbufOxHTZ4qZ_feUw_XHaxacPxr"  # default
+
+def _extract_folder_id(folder_id_or_url: str) -> str:
+    s = (folder_id_or_url or "").strip()
+    if not s:
+        return FOLDER_ID
+    if s.startswith("http"):
+        # works for https://drive.google.com/drive/folders/<ID>
+        s = s.rstrip("/").split("/")[-1]
+    return s
+
+def get_all_pdfs(service, folder_id_or_url: str = None):
+    folder_id = _extract_folder_id(folder_id_or_url)
+    query = f"'{folder_id}' in parents and trashed = false"
     try:
         results = service.files().list(
             q=query,
-            orderBy="createdTime desc",
-            pageSize=20,  # You can increase this if needed
-            fields="files(id, name, mimeType)"
+            orderBy="createdTime desc",         # newest first
+            pageSize=100,
+            fields="files(id, name, mimeType)",
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True,
         ).execute()
         files = results.get("files", [])
-
-        pdfs = [file for file in files if file["name"].lower().endswith(".pdf")]
-
-        if not pdfs:
-            st.warning("📭 No PDF files found in Google Drive folder.")
-        return pdfs
-
+        return [f for f in files if f["name"].lower().endswith(".pdf")]
     except Exception as e:
         st.error(f"❌ Error accessing Drive folder: {e}")
         return []
+
 
 
 # === Download PDF ===
