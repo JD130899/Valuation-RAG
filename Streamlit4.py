@@ -486,23 +486,25 @@ if up:
       }
 
       // Float the pill
-       Object.assign(block.style, {
-  position:'fixed',
-  right:'48px',
-  bottom:'120px',
-  zIndex:'10000',
-  display:'flex',               // flex keeps items in one line
-  flexWrap:'nowrap',            // prevent wrapping
-  gap:'8px',
-  padding:'6px 32px',
-  borderRadius:'9999px',
-  background:'transparent',
-  border:'none',
-  boxShadow:'none',
-  width:'fit-content',
-  whiteSpace:'nowrap',          // make sure text/buttons never wrap
-  pointerEvents:'auto'
-});
+      Object.assign(block.style, {
+      position:'fixed',
+      right:'18px',
+      bottom:'88px',
+      zIndex:'10000',
+      display:'flex',
+      flexWrap:'nowrap',
+      gap:'12px',                 // more spacing between buttons
+      padding:'10px 18px',        // bigger padding inside the bubble
+      borderRadius:'9999px',
+      background:'transparent',
+      border:'none',
+      boxShadow:'none',
+      minWidth:'350px',           // 👈 ensures a larger bubble
+      width:'fit-content',
+      whiteSpace:'nowrap',
+      pointerEvents:'auto'
+    });
+
 
 
 
