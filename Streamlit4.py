@@ -104,53 +104,8 @@ h1 { margin-top: 0 !important; }   /* title shouldn’t re-introduce a gap */
 }
 .ref .close-x{ position:absolute; top:6px; right:10px; border:0; background:transparent; color:#94a3b8; font-size:20px; line-height:1; cursor:pointer; }
 
-/* ======= ADDED: fixed bottom-right dual buttons ======= */
-.fab-anchor { height: 0; }
-.fab-anchor + div[data-testid="stHorizontalBlock"]{
-  position: fixed !important;
-  right: 24px;
-  bottom: 88px;              /* sits above st.chat_input */
-  z-index: 1000;
-  display: flex; gap: 10px;
-  width: auto !important;
-}
-.fab-anchor + div[data-testid="stHorizontalBlock"] > div{ width: auto !important; }
-.fab-anchor + div[data-testid="stHorizontalBlock"] button{
-  background:#000 !important; color:#fff !important;
-  border:none !important; border-radius:9999px !important;
-  padding:10px 18px !important; font-weight:600 !important;
-}
 </style>
 """, unsafe_allow_html=True)
-
-st.markdown("""
-<style>
-  /* --- sticky top toolbar that contains the two buttons --- */
-  div[data-testid="stVerticalBlock"]:has(> #toolbar-sentinel) {
-    position: sticky;          /* stays at top when you scroll */
-    top: 0;                    /* stick to top of the content area */
-    z-index: 1000;
-    display: flex; gap: 10px; align-items: center;
-    padding: 8px 12px;
-    margin: 8px 0 12px 0;
-    border-radius: 12px;
-    background: rgba(17,24,39,.85);      /* subtle dark bg */
-    backdrop-filter: blur(4px);
-    border: 1px solid rgba(255,255,255,.08);
-  }
-  /* make Streamlit column wrappers shrink to content */
-  div[data-testid="stVerticalBlock"]:has(> #toolbar-sentinel) > div { width: auto !important; }
-
-  /* button look in the toolbar */
-  div[data-testid="stVerticalBlock"]:has(> #toolbar-sentinel) button {
-    background:#000 !important; color:#fff !important;
-    border:none !important; border-radius:9999px !important;
-    padding:10px 18px !important; font-weight:600 !important;
-  }
-</style>
-""", unsafe_allow_html=True)
-
-
 
 def _new_id():
     n = st.session_state.next_msg_id
