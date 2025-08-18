@@ -412,25 +412,40 @@ def pil_to_base64(img: Image.Image) -> str:
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 # ================= Sidebar: Google Drive loader =================
+# ===== Sidebar: minimal picker =====
 service = get_drive_service()
-pdf_files = get_all_pdfs(service)
-if pdf_files:
-    names = [f["name"] for f in pdf_files]
-    sel = st.sidebar.selectbox("📂 Select a PDF from Google Drive", names)
-    chosen = next(f for f in pdf_files if f["name"] == sel)
-    if st.sidebar.button("📥 Load Selected PDF"):
-        fid, fname = chosen["id"], chosen["name"]
-        if fid == st.session_state.last_synced_file_id:
-            st.sidebar.info("✅ Already loaded.")
-        else:
-            path = download_pdf(service, fid, fname)
-            if path:
-                st.session_state.uploaded_file_from_drive = open(path, "rb").read()
-                st.session_state.uploaded_file_name = fname
-                st.session_state.last_synced_file_id = fid
-                _reset_chat()
+HARDCODED_FOLDER_LINK = "https://drive.google.com/drive/folders/1XGyBBFhhQFiG43jpYJhNzZYi7C-_l5me"
+
+pdf_files = get_all_pdfs(service, HARDCODED_FOLDER_LINK)
+
+if not pdf_files:
+    st.sidebar.warning("No PDFs found in the folder.")
 else:
-    st.sidebar.warning("📭 No PDFs found in Drive.")
+    # persist selection across reruns
+    if "selected_pdf_name" not in st.session_state:
+        st.session_state.selected_pdf_name = pdf_files[0]["name"]
+
+    names = [f["name"] for f in pdf_files]
+    sel_name = st.sidebar.selectbox(
+        "Select a PDF to load",
+        names,
+        index=names.index(st.session_state.selected_pdf_name) if st.session_state.get("selected_pdf_name") in names else 0,
+        key="selected_pdf_name",
+    )
+
+    if st.sidebar.button("Load selected PDF"):
+        chosen = next(f for f in pdf_files if f["name"] == sel_name)
+        if chosen["id"] == st.session_state.get("last_synced_file_id"):
+            st.sidebar.info("Already loaded.")
+        else:
+            path = download_pdf(service, chosen["id"], chosen["name"])
+            if path:
+                with open(path, "rb") as f:
+                    st.session_state.uploaded_file_from_drive = f.read()
+                st.session_state.uploaded_file_name = chosen["name"]
+                st.session_state.last_synced_file_id = chosen["id"]
+                _reset_chat()
+
 
 # ================= Main UI =================
 st.title("Underwriting Agent")
