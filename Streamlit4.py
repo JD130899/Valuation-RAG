@@ -755,6 +755,21 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
                 else:
                     answer = "I couldn’t find a clear Fair Market Value on page 3."      
 
+        if raw_q.strip().lower() in {"good will", "goodwill"}:
+                    page3_text = (st.session_state.page_texts or {}).get(3, "")
+                    if not page3_text:
+                        answer = "I couldn’t find page 3 content in this PDF."
+                    else:
+                        data = etran_extract_from_page3(page3_text)
+                        goodwill = (data.get("Goodwill Value") or "").strip()
+                        company = _company_from_filename(up.name)
+        
+                        if goodwill:
+                            answer = f"Goodwill value of {company} is {goodwill}."
+                        else:
+                            answer = "I couldn’t find a clear Goodwill value on page 3."
+            
+
             thinking.empty()
             with block.container():
                 type_bubble(answer)
