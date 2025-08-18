@@ -634,40 +634,40 @@ components.html("""
   const mark = d.querySelector('#pin-bottom-right');
   if(!mark) return setTimeout(pin, 120);
 
-  // the actual pill block
+  // The actual pill block
   const block = mark.closest('div[data-testid="stVerticalBlock"]');
   if(!block) return setTimeout(pin, 120);
   if(block.dataset.pinned==="1") return;
   block.dataset.pinned="1";
 
-  // Original Streamlit wrapper that occupies layout space
+  // Collapse the host container so it doesn't occupy layout space,
+  // but KEEP the block in the same React tree (no re-parenting!)
   const host = block.closest('div[data-testid="stElementContainer"]');
-
-  // A good top-level container inside the app to re-parent into
-  // (safer than document.body in Streamlit’s iframe setup)
-  const appRoot = d.querySelector('section.main') || d.body;
-
-  // Move the pill out of its host and into the app root
-  if (appRoot && block.parentElement !== appRoot) {
-    appRoot.appendChild(block);
-  }
-
-  // Collapse the old host so it leaves **no gap**
   if (host) {
     host.style.height = '0px';
     host.style.minHeight = '0';
     host.style.margin = '0';
     host.style.padding = '0';
-    host.style.display = 'none';
+    host.style.display = 'contents';   // removes the box but preserves children & events
+    host.style.overflow = 'visible';
   }
 
-  // Style the pill as a floating compact pill
+  // Float the pill at bottom-right
   Object.assign(block.style, {
-    position:'fixed', right:'18px', bottom:'88px', zIndex:'10000',
-    display:'inline-flex', gap:'8px', padding:'6px 8px',
-    borderRadius:'9999px', background:'rgba(17,24,39,.96)',
-    border:'1px solid rgba(255,255,255,.12)', boxShadow:'0 8px 28px rgba(0,0,0,.35)',
-    width:'fit-content', maxWidth:'none'
+    position:'fixed',
+    right:'18px',
+    bottom:'88px',            // above st.chat_input
+    zIndex:'10000',
+    display:'inline-flex',
+    gap:'8px',
+    padding:'6px 8px',
+    borderRadius:'9999px',
+    background:'rgba(17,24,39,.96)',
+    border:'1px solid rgba(255,255,255,.12)',
+    boxShadow:'0 8px 28px rgba(0,0,0,.35)',
+    width:'fit-content',
+    maxWidth:'none',
+    pointerEvents:'auto'
   });
 
   // Prevent Streamlit column wrappers from stretching it & compact buttons
@@ -679,4 +679,5 @@ components.html("""
 })();
 </script>
 """, height=0)
+
 
