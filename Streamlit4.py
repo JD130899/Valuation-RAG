@@ -538,11 +538,7 @@ components.html("""
     maxWidth:'none'
   });
 
-  // prevent streamlit column wrappers from stretching it
-  Array.from(block.children||[]).forEach(ch => {
-    ch.style.width = 'auto';
-    ch.style.margin = '0';
-  });
+ 
 
   // compact buttons
   block.querySelectorAll('button').forEach(b => {
