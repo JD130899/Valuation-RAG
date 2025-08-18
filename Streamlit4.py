@@ -3,7 +3,7 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 st.set_page_config(page_title="Pinned Buttons Chat", layout="wide")
-st.markdown("<style>.block-container{padding-bottom:160px!important}</style>", unsafe_allow_html=True)
+
 
 # ---------------- state ----------------
 if "messages" not in st.session_state:
