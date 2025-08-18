@@ -404,6 +404,8 @@ else:
                 st.session_state.last_synced_file_id = chosen["id"]
                 _reset_chat()
 
+# ================= Main UI =================
+st.title("Underwriting Agent")
 
 if "uploaded_file_from_drive" in st.session_state:
     file_badge_link(
@@ -436,8 +438,7 @@ if st.session_state.get("last_processed_pdf") != up.name:
     ]
     st.session_state.last_processed_pdf = up.name
 
-# ================= Main UI =================
-st.title("Underwriting Agent")
+
 
 # ===== Bottom-right pinned quick actions (compact pill) =====
 if up:
