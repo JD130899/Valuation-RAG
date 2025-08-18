@@ -76,7 +76,7 @@ st.markdown("""
 <style>
 /* give the page a little top room so H1 isn't clipped, and bottom room for the pill */
 .block-container{
-  padding-top: 14px !important;
+  padding-top: 54px !important;
   padding-bottom: 160px !important;
 }
 .block-container h1 { margin-top: 0 !important; }
@@ -499,7 +499,7 @@ if up:
       background:'transparent',
       border:'none',
       boxShadow:'none',
-      minWidth:'700px',           // 👈 ensures a larger bubble
+      minWidth:'350px',           // 👈 ensures a larger bubble
       width:'fit-content',
       whiteSpace:'nowrap',
       pointerEvents:'auto'
