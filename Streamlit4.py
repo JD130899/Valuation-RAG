@@ -1,4 +1,4 @@
-# custom_fab_no_refresh.py
+# custom_fab_bottom_right.py
 import time
 import streamlit as st
 
@@ -53,20 +53,6 @@ st.markdown("""
 <style>
   .block-container { padding-bottom: 140px; }
 
-  .fab-wrap {
-    position: fixed;
-    right: 24px;
-    bottom: 110px;
-    z-index: 1000;
-    display: flex; gap: 10px; align-items: center; justify-content: flex-end;
-  }
-  .fab-btn {
-    background: #000 !important; color: #fff !important;
-    border-radius: 9999px !important; padding: 10px 16px !important; border: none !important;
-    box-shadow: 0 6px 18px rgba(0,0,0,0.25); font-weight: 600; cursor: pointer;
-  }
-  .fab-btn:hover { filter: brightness(1.08); }
-
   /* custom chat bubbles */
   .user-bubble {
     background: #007bff; color: #fff;
@@ -80,44 +66,53 @@ st.markdown("""
     margin: 4px 0; max-width: 60%;
     float: left; clear: both;
   }
+
+  /* ===== Fixed bottom-right Streamlit buttons (horizontal row) =====
+     We pin ONLY the Streamlit block that comes immediately after #fab-anchor. */
+  div[data-testid="stVerticalBlock"]:has(> #fab-anchor) + div[data-testid="stVerticalBlock"]{
+    position: fixed !important;
+    right: 24px;
+    bottom: 20px;             /* sits above st.chat_input */
+    z-index: 1000;
+    display: flex;
+    flex-direction: row;      /* horizontal row like your screenshot */
+    gap: 10px;
+    align-items: center;
+    width: auto !important;
+    pointer-events: none;     /* allow text input below */
+  }
+  /* re-enable clicks for the buttons themselves */
+  div[data-testid="stVerticalBlock"]:has(> #fab-anchor) + div[data-testid="stVerticalBlock"] button{
+    pointer-events: auto;
+  }
+  /* match your FAB look */
+  div[data-testid="stVerticalBlock"]:has(> #fab-anchor) + div[data-testid="stVerticalBlock"] button {
+    background:#000 !important; color:#fff !important;
+    border:none !important; border-radius:9999px !important;
+    padding:10px 16px !important; font-weight:600 !important;
+    box-shadow: 0 6px 18px rgba(0,0,0,0.25);
+  }
 </style>
 """, unsafe_allow_html=True)
 
-# ---------------- Sidebar ----------------
-with st.sidebar:
-    st.header("📑 Underwriting Agent")
-    st.selectbox("Select a PDF from Google Drive", ["JB Tile & Stone Certified Valuation", "Another PDF"])
-    st.button("Load Selected PDF")
-    st.button("➕ New chat")
-
-# ---------------- Main title ----------------
 st.title("Underwriting Agent")
 
-# ---------------- Render full history ----------------
+# ---------------- Render full history with custom bubbles ----------------
 for m in st.session_state.messages:
     cls = "user-bubble" if m["role"] == "user" else "assistant-bubble"
     st.markdown(f"<div class='{cls}'>{m['content']}</div>", unsafe_allow_html=True)
 
-# ---------------- Fixed buttons (NO NAVIGATION) ----------------
-fab1 = st.button("ETRAN Cheatsheet", key="etran", help="Ask about ETRAN", use_container_width=False)
-fab2 = st.button("Valuation", key="valuation", help="Ask about valuation", use_container_width=False)
-fab3 = st.button("Goodwill value", key="goodwill", help="Ask about goodwill", use_container_width=False)
-
-# Place them using CSS
-st.markdown("""
-<style>
-div[data-testid="stButton"] {display:inline-block;}
-</style>
-<div class="fab-wrap"></div>
-""", unsafe_allow_html=True)
-
-# Check which button pressed
-if fab1:
-    queue_question("ETRAN Cheatsheet")
-if fab2:
-    queue_question("What is the valuation?")
-if fab3:
-    queue_question("Goodwill value")
+# ---------------- Fixed buttons (NO NAVIGATION, pinned at bottom) ----------------
+# Place a tiny anchor; the very next Streamlit block is pinned by the CSS above.
+st.markdown('<span id="fab-anchor"></span>', unsafe_allow_html=True)
+fab = st.container()
+with fab:
+    st.button("ETRAN Cheatsheet", key="fab_etran",
+              on_click=queue_question, args=("ETRAN Cheatsheet",))
+    st.button("Valuation", key="fab_val",
+              on_click=queue_question, args=("What is the valuation?",))
+    st.button("Goodwill value", key="fab_gw",
+              on_click=queue_question, args=("Goodwill value",))
 
 # ---------------- Chat input ----------------
 user_q = st.chat_input("Type your question here…")
