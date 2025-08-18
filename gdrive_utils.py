@@ -28,6 +28,17 @@ def _get_folder_meta(service, folder_id: str) -> Dict:
         .execute()
     )
 
+def debug_folder_meta(service, folder_id):
+    try:
+        meta = service.files().get(
+            fileId=folder_id,
+            fields="id, name, mimeType, driveId, parents",
+            supportsAllDrives=True
+        ).execute()
+        return meta
+    except Exception as e:
+        return str(e)
+
 
 def _resolve_folder_id(service, folder_id: str) -> Dict:
     """
