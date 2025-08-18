@@ -731,6 +731,7 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
         is_confirm = (intent == "CONFIRM")
 
         # ===== SPECIAL CASE: ETRAN CHEATSHEET =====
+        # ===== SPECIAL CASE: ETRAN CHEATSHEET =====
         if raw_q.strip().lower() in {"etran cheatsheet", "etran cheat sheet", "etran"}:
             page3_text = (st.session_state.page_texts or {}).get(3, "")
             if not page3_text:
@@ -739,66 +740,122 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
                 extracted = etran_extract_from_page3(page3_text)
                 table_md = render_etran_table(extracted)
                 answer = f"### Etran Cheatsheet\n\n{table_md}"
-
-        if raw_q.strip().lower() == "Valuation":
+        
+            thinking.empty()
+            with block.container():
+                type_bubble(answer)
+                img = st.session_state.page_images.get(3)
+                if img:
+                    entry = {
+                        "id": _new_id(),
+                        "role": "assistant",
+                        "content": answer,
+                        "source": "Page 3",
+                        "source_img": pil_to_base64(img),
+                        "source_pdf_b64": base64.b64encode(st.session_state.pdf_bytes).decode("ascii"),
+                        "source_page": 3,
+                    }
+                    render_reference_card(
+                        label=entry["source"],
+                        img_b64=entry["source_img"],
+                        pdf_b64=entry["source_pdf_b64"],
+                        page=entry["source_page"],
+                        key=entry["id"],
+                    )
+                else:
+                    entry = {"id": _new_id(), "role": "assistant", "content": answer}
+        
+            st.session_state.messages.append(entry)
+            st.session_state.pending_input = None
+            st.session_state.waiting_for_response = False
+            st.stop()  # prevent generic RAG flow
+        
+        # ===== SPECIAL CASE: VALUATION (page 3 only) =====
+        if raw_q.strip().lower() in {"valuation", "fair market value", "fmv", "value"}:
             page3_text = (st.session_state.page_texts or {}).get(3, "")
             if not page3_text:
                 answer = "I couldn’t find page 3 content in this PDF."
             else:
                 data = etran_extract_from_page3(page3_text)
-                # prefer “Concluded Value”; fall back to “Fair Market Value” if you decide to add that key later
                 fmv = (data.get("Concluded Value") or data.get("Fair Market Value") or "").strip()
                 company = _company_from_filename(up.name)
-        
                 if fmv:
                     answer = f"Valuation of {company} is {fmv}."
                 else:
-                    answer = "I couldn’t find a clear Fair Market Value on page 3."      
-
+                    answer = "I couldn’t find a clear Fair Market Value on page 3."
+        
+            thinking.empty()
+            with block.container():
+                type_bubble(answer)
+                img = st.session_state.page_images.get(3)
+                if img:
+                    entry = {
+                        "id": _new_id(),
+                        "role": "assistant",
+                        "content": answer,
+                        "source": "Page 3",
+                        "source_img": pil_to_base64(img),
+                        "source_pdf_b64": base64.b64encode(st.session_state.pdf_bytes).decode("ascii"),
+                        "source_page": 3,
+                    }
+                    render_reference_card(
+                        label=entry["source"],
+                        img_b64=entry["source_img"],
+                        pdf_b64=entry["source_pdf_b64"],
+                        page=entry["source_page"],
+                        key=entry["id"],
+                    )
+                else:
+                    entry = {"id": _new_id(), "role": "assistant", "content": answer}
+        
+            st.session_state.messages.append(entry)
+            st.session_state.pending_input = None
+            st.session_state.waiting_for_response = False
+            st.stop()
+        
+        # ===== SPECIAL CASE: GOODWILL (page 3 only) =====
         if raw_q.strip().lower() in {"good will", "goodwill"}:
-                    page3_text = (st.session_state.page_texts or {}).get(3, "")
-                    if not page3_text:
-                        answer = "I couldn’t find page 3 content in this PDF."
-                    else:
-                        data = etran_extract_from_page3(page3_text)
-                        goodwill = (data.get("Goodwill Value") or "").strip()
-                        company = _company_from_filename(up.name)
+            page3_text = (st.session_state.page_texts or {}).get(3, "")
+            if not page3_text:
+                answer = "I couldn’t find page 3 content in this PDF."
+            else:
+                data = etran_extract_from_page3(page3_text)
+                goodwill = (data.get("Goodwill Value") or "").strip()
+                company = _company_from_filename(up.name)
+                if goodwill:
+                    answer = f"Goodwill value of {company} is {goodwill}."
+                else:
+                    answer = "I couldn’t find a clear Goodwill value on page 3."
         
-                        if goodwill:
-                            answer = f"Goodwill value of {company} is {goodwill}."
-                        else:
-                            answer = "I couldn’t find a clear Goodwill value on page 3."
-            
+            thinking.empty()
+            with block.container():
+                type_bubble(answer)
+                img = st.session_state.page_images.get(3)
+                if img:
+                    entry = {
+                        "id": _new_id(),
+                        "role": "assistant",
+                        "content": answer,
+                        "source": "Page 3",
+                        "source_img": pil_to_base64(img),
+                        "source_pdf_b64": base64.b64encode(st.session_state.pdf_bytes).decode("ascii"),
+                        "source_page": 3,
+                    }
+                    render_reference_card(
+                        label=entry["source"],
+                        img_b64=entry["source_img"],
+                        pdf_b64=entry["source_pdf_b64"],
+                        page=entry["source_page"],
+                        key=entry["id"],
+                    )
+                else:
+                    entry = {"id": _new_id(), "role": "assistant", "content": answer}
+        
+            st.session_state.messages.append(entry)
+            st.session_state.pending_input = None
+            st.session_state.waiting_for_response = False
+            st.stop()
 
-                    thinking.empty()
-                    with block.container():
-                        type_bubble(answer)
-                        # attach a reference preview for page 3 if available
-                        img = st.session_state.page_images.get(3)
-                        if img:
-                            entry = {
-                                "id": _new_id(),
-                                "role": "assistant",
-                                "content": answer,
-                                "source": "Page 3",
-                                "source_img": pil_to_base64(img),
-                                "source_pdf_b64": base64.b64encode(st.session_state.pdf_bytes).decode("ascii"),
-                                "source_page": 3,
-                            }
-                            render_reference_card(
-                                label=entry["source"],
-                                img_b64=entry["source_img"],
-                                pdf_b64=entry["source_pdf_b64"],
-                                page=entry["source_page"],
-                                key=entry["id"],
-                            )
-                        else:
-                            entry = {"id": _new_id(), "role": "assistant", "content": answer}
-        
-                    st.session_state.messages.append(entry)
-                    st.session_state.pending_input = None
-                    st.session_state.waiting_for_response = False
-                    st.stop()  # prevent the generic RAG flow from running too
 
         if is_deny:
             st.session_state.last_suggestion = None
