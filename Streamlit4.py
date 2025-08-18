@@ -413,7 +413,9 @@ def pil_to_base64(img: Image.Image) -> str:
 
 # ================= Sidebar: Google Drive loader =================
 service = get_drive_service()
-pdf_files = get_all_pdfs(service)
+FOLDER = st.secrets.get("GOOGLE_DRIVE_FOLDER", "")
+pdf_files = get_all_pdfs(service, FOLDER)
+
 if pdf_files:
     names = [f["name"] for f in pdf_files]
     sel = st.sidebar.selectbox("📂 Select a PDF from Google Drive", names)
