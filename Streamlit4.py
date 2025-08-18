@@ -435,7 +435,9 @@ if st.session_state.get("last_processed_pdf") != up.name:
         {"role": "assistant", "content": "What can I help you with?"}
     ]
     st.session_state.last_processed_pdf = up.name
-    
+
+# ================= Main UI =================
+st.title("Underwriting Agent")
 
 # ===== Bottom-right pinned quick actions (compact pill) =====
 if up:
@@ -510,8 +512,7 @@ if up:
     </script>
     """, height=0)
 
-# ================= Main UI =================
-st.title("Underwriting Agent")
+
 
 
 # Chat input
