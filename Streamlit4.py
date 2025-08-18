@@ -494,7 +494,7 @@ if up:
       display:'flex',
       flexWrap:'nowrap',
       gap:'12px',           // 👈 spacing between buttons inside
-      padding:'10px 48px',  // 👈 inner padding of the bubble (makes bubble thicker/taller)
+      padding:'10px 118px',  // 👈 inner padding of the bubble (makes bubble thicker/taller)
       borderRadius:'9999px',
       background:'transparent',
       border:'none',
