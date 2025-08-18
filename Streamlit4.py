@@ -5,15 +5,13 @@ import streamlit.components.v1 as components
 st.set_page_config(page_title="Pinned Buttons Chat", layout="wide")
 st.markdown("<style>.block-container{padding-bottom:160px!important}</style>", unsafe_allow_html=True)
 
-# -------- state --------
+# ---------------- state ----------------
 if "messages" not in st.session_state:
-    st.session_state.messages = []   # [{"role": "user"/"assistant", "content": str}]
+    st.session_state.messages = []        # [{"role":"user"/"assistant","content":str}]
 if "quick_action" not in st.session_state:
-    st.session_state.quick_action = None
-if "just_handled" not in st.session_state:
-    st.session_state.just_handled = False
+    st.session_state.quick_action = None  # holds button text for this run only
 
-# -------- model call --------
+# ---------------- model call ----------------
 def call_llm(prompt: str) -> str:
     try:
         from openai import OpenAI
@@ -30,7 +28,7 @@ def call_llm(prompt: str) -> str:
     except Exception as e:
         return f"(LLM error) {e}"
 
-# -------- pinned bottom-right buttons (compact pill) --------
+# ---------------- pinned bottom-right actions (compact pill) ----------------
 pill = st.container()
 with pill:
     st.markdown("<span id='pin-bottom-right'></span>", unsafe_allow_html=True)
@@ -42,6 +40,7 @@ with pill:
         if st.button("Good will", key="qa_gw"):
             st.session_state.quick_action = "Good will"
 
+# compact pill styling (no full-width bar)
 components.html("""
 <script>
 (function pin(){
@@ -67,37 +66,35 @@ components.html("""
 
 st.title("Chat with Pinned Bottom-Right Buttons")
 
-# -------- gather input (buttons > chat) --------
+# ---------------- render full history first ----------------
+for m in st.session_state.messages:
+    with st.chat_message(m["role"]):
+        st.markdown(m["content"])
+
+# ---------------- gather input (buttons > chat) ----------------
 typed = st.chat_input("Type your question…")
 user_text = st.session_state.quick_action or typed
 st.session_state.quick_action = None
 
-# -------- handle one turn with live bubbles (no duplicates) --------
+# ---------------- handle a new turn ----------------
 if user_text:
-    st.session_state.just_handled = True
-
-    # 1) show the user's bubble immediately (right/blue)
+    # 1) persist & show the user bubble (right/blue)
+    st.session_state.messages.append({"role": "user", "content": user_text})
     with st.chat_message("user"):
         st.markdown(user_text)
 
-    # 2) show assistant placeholder and "Thinking…" (left/black)
+    # 2) assistant placeholder (not persisted) → "Thinking…"
     assistant_slot = st.chat_message("assistant").empty()
     assistant_slot.markdown("🧠 *Thinking…*")
 
-    # 3) call LLM and replace the placeholder with the answer
+    # 3) call LLM
     reply = call_llm(user_text)
-    assistant_slot.markdown(reply)
 
-    # 4) persist both to history (so they appear on the next rerun only)
-    st.session_state.messages.append({"role": "user", "content": user_text})
+    # 4) persist assistant message
     st.session_state.messages.append({"role": "assistant", "content": reply})
 
-# -------- render history (single pass) --------
-# Skip in the same run we just handled input (prevents duplicate bubbles now).
-if not st.session_state.just_handled:
-    for m in st.session_state.messages:
-        with st.chat_message(m["role"]):
-            st.markdown(m["content"])
+    # 5) swap placeholder text for the final reply (so you see it immediately)
+    assistant_slot.markdown(reply)
 
-# reset flag so the next rerun renders history as usual
-st.session_state.just_handled = False
+    # 6) rerun to re-render the whole chat *from history* (no duplicates)
+    st.rerun()
