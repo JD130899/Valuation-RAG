@@ -512,9 +512,11 @@ if up:
       // Don’t let Streamlit’s columns stretch
       Array.from(block.children||[]).forEach(ch => { ch.style.width='auto'; ch.style.margin='0'; });
       block.querySelectorAll('button').forEach(b => {
-        b.style.padding='6px 12px';
-        b.style.borderRadius='9999px';
-      });
+      b.style.padding='12px 24px';    // 👈 more padding = larger buttons
+      b.style.fontSize='16px';        // 👈 increase text size
+      b.style.borderRadius='9999px';  // keeps pill shape
+    });
+
     })();
     </script>
     """, height=0)
