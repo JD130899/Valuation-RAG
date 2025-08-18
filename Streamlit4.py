@@ -496,7 +496,7 @@ if up:
       gap:'12px',           // 👈 spacing between buttons inside
       padding:'10px 118px',  // 👈 inner padding of the bubble (makes bubble thicker/taller)
       borderRadius:'9999px',
-      background:'rgba(17,24,39,.96)',
+      background:'transparent',
       border:'none',
       boxShadow:'none',
       minWidth:'350px',     // 👈 ensures minimum width (controls bubble length)
@@ -512,8 +512,8 @@ if up:
       // Don’t let Streamlit’s columns stretch
       Array.from(block.children||[]).forEach(ch => { ch.style.width='auto'; ch.style.margin='0'; });
       block.querySelectorAll('button').forEach(b => {
-      b.style.padding='24px 48px';    // 👈 more padding = larger buttons
-      b.style.fontSize='16px';        // 👈 increase text size
+      b.style.padding='18px 32px';    // 👈 more padding = larger buttons
+      b.style.fontSize='32px';        // 👈 increase text size
       b.style.borderRadius='9999px';  // keeps pill shape
     });
 
