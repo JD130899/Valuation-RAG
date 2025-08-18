@@ -415,7 +415,7 @@ def pil_to_base64(img: Image.Image) -> str:
 # ================= Sidebar: Google Drive loader =================
 service = get_drive_service()
 # Usage
-fid = "IMZHc_WawXZkPAiQcEWR213TVSrxilnC"
+fid = "1XGyBBFhhQjFG4i3jPvJNzZY7C-_I5me"
 result = debug_folder_meta(service, fid)
 st.json(result)
 
@@ -430,7 +430,7 @@ except Exception as e:
     st.error(f"Folder not accessible for the service account. Details: {e}")
 
 # Either keep a constant, or put it in secrets as GOOGLE_DRIVE_FOLDER
-FOLDER = st.secrets.get("GOOGLE_DRIVE_FOLDER", "IMZHc_WawXZkPAiQcEWR213TVSrxilnC")
+FOLDER = st.secrets.get("GOOGLE_DRIVE_FOLDER", "1XGyBBFhhQjFG4i3jPvJNzZY7C-_I5me")
 
 # Either keep a constant, or put it in secrets as GOOGLE_DRIVE_FOLDER
 
