@@ -439,62 +439,7 @@ if st.session_state.get("last_processed_pdf") != up.name:
     st.session_state.last_processed_pdf = up.name
     
 # ===== Bottom-right pinned quick actions (compact pill) =====
-pill = st.container()
-with pill:
-    # sentinel used by the JS to find & pin the block
-    st.markdown("<span id='pin-bottom-right'></span>", unsafe_allow_html=True)
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        st.button("Valuation", key="qa_val",
-                  on_click=queue_question, args=("Valuation",))
-    with c2:
-        st.button("Good will", key="qa_gw",
-                  on_click=queue_question, args=("Good will",))
-    with c3:
-        st.button("Etran Cheatsheet", key="qa_etran",
-                  on_click=queue_question, args=("Etran Cheatsheet",))
 
-# Pin the container AND collapse its original wrapper so no gap is left anywhere
-components.html("""
-<script>
-(function pin(){
-  const d = window.parent.document;
-  const mark = d.querySelector('#pin-bottom-right');
-  if(!mark) return setTimeout(pin,120);
-
-  const block = mark.closest('div[data-testid="stVerticalBlock"]');
-  if(!block) return setTimeout(pin,120);
-  if(block.dataset.pinned==="1") return;
-  block.dataset.pinned="1";
-
-  // Collapse the host container so it doesn't occupy space in the layout
-  const host = block.closest('div[data-testid="stElementContainer"]');
-  if (host) {
-    host.style.height = '0px';
-    host.style.minHeight = '0';
-    host.style.padding = '0';
-    host.style.margin = '0';
-    host.style.display = 'contents';
-  }
-
-  // Float the pill at bottom-right
-  Object.assign(block.style, {
-    position:'fixed', right:'18px', bottom:'88px', zIndex:'10000',
-    display:'inline-flex', gap:'8px', padding:'6px 8px',
-    borderRadius:'9999px', background:'rgba(17,24,39,.96)',
-    border:'1px solid rgba(255,255,255,.12)', boxShadow:'0 8px 28px rgba(0,0,0,.35)',
-    width:'fit-content', maxWidth:'none'
-  });
-
-  // Remove column stretch + compact buttons
-  Array.from(block.children||[]).forEach(ch=>{ ch.style.width='auto'; ch.style.margin='0'; });
-  block.querySelectorAll('button').forEach(b=>{
-    b.style.padding='6px 12px';
-    b.style.borderRadius='9999px';
-  });
-})();
-</script>
-""", height=0)
 
 
 
@@ -664,3 +609,74 @@ Conversation so far:
             st.session_state.messages.append(entry)
             st.session_state.pending_input = None
             st.session_state.waiting_for_response = False
+
+# ===== Bottom-right pinned quick actions (compact pill) =====
+pill = st.container()
+with pill:
+    # sentinel used by the JS to find & move the block
+    st.markdown("<span id='pin-bottom-right'></span>", unsafe_allow_html=True)
+    c1, c2, c3 = st.columns(3)
+    with c1:
+        st.button("Valuation", key="qa_val",
+                  on_click=queue_question, args=("Valuation",))
+    with c2:
+        st.button("Good will", key="qa_gw",
+                  on_click=queue_question, args=("Good will",))
+    with c3:
+        st.button("Etran Cheatsheet", key="qa_etran",
+                  on_click=queue_question, args=("Etran Cheatsheet",))
+
+# Re-parent the pill so its original placeholder takes **zero** space
+components.html("""
+<script>
+(function pin(){
+  const d = window.parent.document;
+  const mark = d.querySelector('#pin-bottom-right');
+  if(!mark) return setTimeout(pin, 120);
+
+  // the actual pill block
+  const block = mark.closest('div[data-testid="stVerticalBlock"]');
+  if(!block) return setTimeout(pin, 120);
+  if(block.dataset.pinned==="1") return;
+  block.dataset.pinned="1";
+
+  // Original Streamlit wrapper that occupies layout space
+  const host = block.closest('div[data-testid="stElementContainer"]');
+
+  // A good top-level container inside the app to re-parent into
+  // (safer than document.body in Streamlit’s iframe setup)
+  const appRoot = d.querySelector('section.main') || d.body;
+
+  // Move the pill out of its host and into the app root
+  if (appRoot && block.parentElement !== appRoot) {
+    appRoot.appendChild(block);
+  }
+
+  // Collapse the old host so it leaves **no gap**
+  if (host) {
+    host.style.height = '0px';
+    host.style.minHeight = '0';
+    host.style.margin = '0';
+    host.style.padding = '0';
+    host.style.display = 'none';
+  }
+
+  // Style the pill as a floating compact pill
+  Object.assign(block.style, {
+    position:'fixed', right:'18px', bottom:'88px', zIndex:'10000',
+    display:'inline-flex', gap:'8px', padding:'6px 8px',
+    borderRadius:'9999px', background:'rgba(17,24,39,.96)',
+    border:'1px solid rgba(255,255,255,.12)', boxShadow:'0 8px 28px rgba(0,0,0,.35)',
+    width:'fit-content', maxWidth:'none'
+  });
+
+  // Prevent Streamlit column wrappers from stretching it & compact buttons
+  Array.from(block.children||[]).forEach(ch => { ch.style.width='auto'; ch.style.margin='0'; });
+  block.querySelectorAll('button').forEach(b => {
+    b.style.padding='6px 12px';
+    b.style.borderRadius='9999px';
+  });
+})();
+</script>
+""", height=0)
+
