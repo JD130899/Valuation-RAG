@@ -377,35 +377,110 @@ def pil_to_base64(img: Image.Image) -> str:
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 # --------- ETRAN CHEATSHEET HELPERS ----------
-def etran_extract_from_page3(page3_text: str) -> dict:
-    """Use the LLM to extract key values from page 3 text. Returns a dict with fixed keys."""
-    want_keys = [
-        "Concluded Value",
-        "Purchase Type",
-        "Fixed Asset Value",
-        "Other Tangible Assets Value",
-        "Goodwill Value",
-        "Free Cash Flow",
-    ]
-    prompt = PromptTemplate(
-        template=(
-            "From the provided report text (this is the exact content of page 3), "
-            "extract the following fields. Return ONLY valid JSON (no code fences), "
-            "with these exact keys (even if value is unknown, use an empty string):\n"
-            f"{want_keys}\n\n"
-            "Text:\n{page3}\n"
-        ),
-        input_variables=["page3"]
-    )
-    llm = ChatOpenAI(model="gpt-4o", temperature=0)
-    raw = llm.invoke(prompt.invoke({"page3": page3_text})).content.strip()
-    try:
-        data = json.loads(raw)
-    except Exception:
-        data = {k: "" for k in want_keys}
-    for k in want_keys:
-        data.setdefault(k, "")
-    return data
+# --------- ETRAN CHEATSHEET HELPERS (REPLACEMENT) ----------
+import re
+import json
+from typing import Dict, List, Optional
+
+_CURRENCY = r"(?P<amt>[$€£]?\s?-?\s?\d{1,3}(?:,\d{3})*(?:\.\d{2})?|[$€£]?\s?-\s?)"
+
+def _norm(s: str) -> str:
+    return re.sub(r"\s+", " ", s or "").strip().lower()
+
+def _find_amount_same_or_next_line(lines: List[str], idx: int) -> Optional[str]:
+    """
+    Search a line for a currency amount; if not found, check the next non-empty line.
+    """
+    for j in [idx, idx + 1]:
+        if 0 <= j < len(lines):
+            m = re.search(_CURRENCY, lines[j])
+            if m:
+                val = m.group("amt")
+                # normalize weird dash-only values to $0 where that’s what the report means
+                if re.fullmatch(r"[$€£]?\s*-\s*", val):
+                    return "$0"
+                return val.strip()
+    return None
+
+def _first_amount_for_label(page_text: str, label_variants: List[str]) -> str:
+    """
+    Find the first amount that occurs on the same line (or immediately next line)
+    as any of the label variants.
+    """
+    lines = [l for l in page_text.splitlines() if l.strip()]
+    lines_lower = [_norm(l) for l in lines]
+
+    for i, low in enumerate(lines_lower):
+        for lab in label_variants:
+            if lab in low:
+                amt = _find_amount_same_or_next_line(lines, i)
+                if amt:
+                    return amt
+    return ""
+
+def etran_extract_from_page3(page3_text: str) -> Dict[str, str]:
+    """
+    Deterministic extraction from page 3 text. Falls back to LLM JSON only if needed.
+    """
+    want = {
+        "Concluded Value":               ["concluded value", "conclusion of value", "concluded valuation"],
+        "Purchase Type":                 ["purchase type", "type of purchase", "asset purchase", "stock purchase"],
+        "Fixed Asset Value":             ["fixed asset", "fixed assets", "fixed tangible assets"],
+        "Other Tangible Assets Value":   ["other tangible assets", "tangible assets assumed", "other tangible"],
+        "Goodwill Value":                ["goodwill"],
+        "Free Cash Flow":                ["free cash flow", "fcf"],
+    }
+
+    out = {k: "" for k in want}
+
+    # Try to pull each field deterministically
+    for key, labels in want.items():
+        if key == "Purchase Type":
+            # Purchase type is often text; take the non-numeric token after label
+            # Same/next line scan, but prefer a short phrase without currency
+            found = ""
+            lines = [l for l in page3_text.splitlines() if l.strip()]
+            for i, ln in enumerate(lines):
+                ln_low = _norm(ln)
+                if any(lab in ln_low for lab in labels):
+                    # text after colon, otherwise next line
+                    m = re.search(r":\s*(.+)$", ln)
+                    cand = (m.group(1) if m else "").strip()
+                    if not cand and i + 1 < len(lines):
+                        cand = lines[i + 1].strip()
+                    # strip currency if any slipped in
+                    if not re.search(_CURRENCY, cand):
+                        found = cand
+                        break
+            out[key] = found
+        else:
+            out[key] = _first_amount_for_label(page3_text, labels)
+
+    # If we still missed anything, fall back to the LLM just for those keys
+    missing = [k for k, v in out.items() if not v]
+    if missing:
+        try:
+            llm = ChatOpenAI(model="gpt-4o", temperature=0)
+            prompt = PromptTemplate(
+                template=(
+                    "From the provided report text (page 3), extract ONLY these fields and "
+                    "return valid JSON with these exact keys:\n{keys}\n\nText:\n{txt}"
+                ),
+                input_variables=["keys", "txt"]
+            )
+            raw = llm.invoke(prompt.invoke({
+                "keys": json.dumps(missing),
+                "txt": page3_text
+            })).content.strip()
+            data = json.loads(raw)
+            for k in missing:
+                if isinstance(data, dict) and data.get(k):
+                    out[k] = str(data[k])
+        except Exception:
+            pass
+
+    return out
+
 
 def render_etran_table(dynamic: dict) -> str:
     static_rows = [
