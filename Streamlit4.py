@@ -499,7 +499,7 @@ if up:
       background:'transparent',
       border:'none',
       boxShadow:'none',
-      minWidth:'350px',           // 👈 ensures a larger bubble
+      minWidth:'700px',           // 👈 ensures a larger bubble
       width:'fit-content',
       whiteSpace:'nowrap',
       pointerEvents:'auto'
