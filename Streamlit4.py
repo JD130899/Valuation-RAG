@@ -459,17 +459,41 @@ if not up:
 
 toolbar = st.container()
 with toolbar:
-    st.markdown('<span id="toolbar-sentinel"></span>', unsafe_allow_html=True)
-    t1, t2, t3 = st.columns([1, 1, 1])
-    with t1:
-        st.button("Valuation", key="top_val",
-                  on_click=queue_question, args=("Valuation",))
-    with t2:
-        st.button("Good will", key="top_gw",
-                  on_click=queue_question, args=("Good will",))
-    with t3:
-        st.button("Etran Cheatsheet", key="top_etran",
-                  on_click=queue_question, args=("Etran Cheatsheet",))
+    # ---------------- Fixed buttons (NO NAVIGATION, pinned at bottom) ----------------
+    st.markdown('<span id="fab-anchor"></span>', unsafe_allow_html=True)
+    
+    st.markdown("""
+    <style>
+      div[data-testid="stVerticalBlock"]:has(> #fab-anchor) + div[data-testid="stVerticalBlock"]{
+        position: fixed !important;
+        right: 24px;
+        bottom: 20px;
+        z-index: 1000;
+        display: flex;
+        gap: 10px;                /* space between buttons */
+        align-items: center;
+        justify-content: flex-end;
+        pointer-events: none;
+      }
+      div[data-testid="stVerticalBlock"]:has(> #fab-anchor) + div[data-testid="stVerticalBlock"] button{
+        pointer-events: auto;
+        background:#000 !important; color:#fff !important;
+        border:none !important; border-radius:9999px !important;
+        padding:10px 16px !important; font-weight:600 !important;
+        box-shadow: 0 6px 18px rgba(0,0,0,0.25);
+      }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    fab_row = st.container()
+    with fab_row:
+        st.button("ETRAN Cheatsheet", key="fab_etran",
+                  on_click=queue_question, args=("ETRAN Cheatsheet",))
+        st.button("Valuation", key="fab_val",
+                  on_click=queue_question, args=("What is the valuation?",))
+        st.button("Goodwill value", key="fab_gw",
+                  on_click=queue_question, args=("Goodwill value",))
+
 
 
 # Rebuild retriever when file changes
