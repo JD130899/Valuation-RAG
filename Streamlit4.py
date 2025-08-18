@@ -413,47 +413,40 @@ def pil_to_base64(img: Image.Image) -> str:
 
 # ================= Sidebar: Google Drive loader =================
 # ===== Sidebar: list ALL PDFs and load chosen one =====
+# ===== Sidebar: minimal picker =====
 service = get_drive_service()
 HARDCODED_FOLDER_LINK = "https://drive.google.com/drive/folders/1XGyBBFhhQFiG43jpYJhNzZYi7C-_l5me"
 
 pdf_files = get_all_pdfs(service, HARDCODED_FOLDER_LINK)
 
 if not pdf_files:
-    st.sidebar.warning("📭 No PDFs found in the hardcoded Drive folder.")
+    st.sidebar.warning("No PDFs found in the folder.")
 else:
-    st.sidebar.success(f"Found {len(pdf_files)} PDFs in the folder")
+    # persist selection across reruns
+    if "selected_pdf_name" not in st.session_state:
+        st.session_state.selected_pdf_name = pdf_files[0]["name"]
 
-    # Optional: quick filter box
-    q = st.sidebar.text_input("Filter by name", "")
-    shown = [f for f in pdf_files if q.lower() in f["name"].lower()] if q else pdf_files
-
-    # Keep selection across reruns
-    if "selected_pdf_name" not in st.session_state and shown:
-        st.session_state.selected_pdf_name = shown[0]["name"]
-
-    names = [f["name"] for f in shown]
+    names = [f["name"] for f in pdf_files]
     sel_name = st.sidebar.selectbox(
-        "📂 Select a PDF to load",
+        "Select a PDF to load",
         names,
-        index=names.index(st.session_state.selected_pdf_name) if names else 0,
-        key="selected_pdf_name"
+        index=names.index(st.session_state.selected_pdf_name) if st.session_state.get("selected_pdf_name") in names else 0,
+        key="selected_pdf_name",
     )
 
-    if sel_name:
-        chosen = next(f for f in shown if f["name"] == sel_name)
-        st.sidebar.caption(f"ID: `{chosen['id']}`")
+    if st.sidebar.button("Load selected PDF"):
+        chosen = next(f for f in pdf_files if f["name"] == sel_name)
+        if chosen["id"] == st.session_state.get("last_synced_file_id"):
+            st.sidebar.info("Already loaded.")
+        else:
+            path = download_pdf(service, chosen["id"], chosen["name"])
+            if path:
+                with open(path, "rb") as f:
+                    st.session_state.uploaded_file_from_drive = f.read()
+                st.session_state.uploaded_file_name = chosen["name"]
+                st.session_state.last_synced_file_id = chosen["id"]
+                _reset_chat()
 
-        if st.sidebar.button("📥 Load selected PDF"):
-            if chosen["id"] == st.session_state.get("last_synced_file_id"):
-                st.sidebar.info("✅ Already loaded.")
-            else:
-                path = download_pdf(service, chosen["id"], chosen["name"])
-                if path:
-                    with open(path, "rb") as f:
-                        st.session_state.uploaded_file_from_drive = f.read()
-                    st.session_state.uploaded_file_name = chosen["name"]
-                    st.session_state.last_synced_file_id = chosen["id"]
-                    _reset_chat()
 
 
 
