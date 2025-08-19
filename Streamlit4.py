@@ -626,6 +626,8 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
         
         2. **Table questions**  
            • Return the full table **with its header row** in GitHub-flavoured markdown.
+           • if user asks about dcf, it stands for Discounted cash flow. So use this while extracting the table
+           
         
         3. **Valuation method / theory / reasoning questions**
             
