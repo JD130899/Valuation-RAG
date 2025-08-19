@@ -6,6 +6,9 @@ import fitz  # PyMuPDF
 from PIL import Image
 from dotenv import load_dotenv
 import streamlit.components.v1 as components
+import numpy as np
+from sklearn.metrics.pairwise import cosine_similarity
+
 
 # LangChain / RAG deps
 from langchain_core.documents import Document
@@ -155,131 +158,6 @@ def file_badge_link(name: str, pdf_bytes: bytes, synced: bool = True):
 }})();</script>''',
         height=0,
     )
-
-# ---------- value-based reference picker (Fix 1) ----------
-def _extract_answer_values(answer: str) -> set[str]:
-    """
-    Pull out $ amounts, plain numbers (incl. negatives), and percents from the final answer.
-    Returns several normalized variants for robust matching.
-    """
-    if not answer:
-        return set()
-    vals = set()
-    # currency / numbers / percents (handles $1,234, 1,234.56, (171,192), 1.75, 12%, etc.)
-    pattern = r"\(?\$?-?\d{1,3}(?:,\d{3})*(?:\.\d+)?\)?%?"
-    for m in re.finditer(pattern, answer):
-        raw = m.group(0).strip()
-        if not any(ch.isdigit() for ch in raw):
-            continue
-        vals.add(raw)
-
-        # normalized variants
-        s = raw.replace(" ", "")
-        s = s.replace(",", "")
-        s = s.replace("(", "-").replace(")", "")
-        if s.startswith("$"):
-            vals.add(s[1:])     # without $
-        vals.add(s.replace("$", ""))  # no $
-        if raw.endswith("%"):
-            vals.add(raw[:-1])  # without %
-            vals.add(s[:-1])    # normalized & without %
-        # also add a $-prefixed version just in case source has currency symbol
-        no_d = s.replace("$", "")
-        if not no_d.startswith("$"):
-            vals.add("$" + no_d)
-
-    # lowercase everything for case-insensitive contains()
-    return {v.lower() for v in vals if v}
-
-
-def _key_terms_from_question(q: str) -> set[str]:
-    """Grab useful phrases/tokens from the question to co-score docs."""
-    ql = (q or "").lower()
-    terms = set()
-    # prefer common multi-word finance phrases if present
-    phrases = [
-        "current ratio", "quick ratio", "debt to equity", "net sales", "revenue",
-        "ebitda", "adjusted ebitda", "sde", "free cash flow", "gross profit",
-        "operating income", "goodwill", "concluded value", "income approach",
-        "market approach", "valuation summary"
-    ]
-    for ph in phrases:
-        if ph in ql:
-            terms.add(ph)
-
-    # add individual tokens (length >= 3) as weak signals
-    for tok in re.findall(r"[a-z]{3,}", ql):
-        terms.add(tok)
-    return terms
-
-
-def _score_doc_for_values(text: str, values: set[str], terms: set[str], rank_index: int) -> int:
-    """
-    Score a document by:
-      - presence of exact numeric/value strings (strong)
-      - presence of key phrases (medium)
-      - presence of individual tokens (weak)
-      - a small bonus for higher-ranked retrieval items
-    """
-    if not text:
-        return -1
-    t = text.lower()
-
-    score = 0
-    # value hits (strong)
-    value_hits = 0
-    # quick normalization for doc text to compare against comma/$ differences
-    t_norm = t.replace(",", "").replace("$", "")
-
-    for v in values:
-        if not v:
-            continue
-        if v in t:
-            score += 6
-            value_hits += 1
-        else:
-            vn = v.replace(",", "").replace("$", "")
-            if vn and vn in t_norm:
-                score += 4
-                value_hits += 1
-    if value_hits:
-        score += 2 * min(3, value_hits - 1)  # small bonus for multiple matching values
-
-    # phrase hits (medium)
-    for ph in [p for p in terms if " " in p]:
-        if ph in t:
-            score += 3
-
-    # token hits (weak, capped)
-    token_hits = sum(1 for tok in terms if " " not in tok and tok in t)
-    score += min(3, token_hits)
-
-    # retrieval rank bonus (earlier == higher)
-    score += max(0, 8 - rank_index)
-
-    return score
-
-
-def pick_reference_doc(answer: str, question: str, docs: list) -> Document | None:
-    """
-    Choose the best doc by matching the values from `answer` and terms from `question`
-    across *all* retrieved docs (not just top-3).
-    Fallback to None if nothing scores > 0 (your existing logic can then kick in).
-    """
-    values = _extract_answer_values(answer)
-    terms = _key_terms_from_question(question)
-
-    best = None
-    best_score = -1
-    for i, d in enumerate(docs or []):
-        s = _score_doc_for_values(d.page_content or "", values, terms, i)
-        if s > best_score:
-            best_score = s
-            best = d
-
-    return best if best_score > 0 else None
-
-
 
 def render_reference_card(label: str, img_b64: str, page: int, key: str):
     """Uses the single shared st.session_state.pdf_b64 (not per-message)."""
@@ -705,31 +583,45 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
                     "pdf_name":     pdf_display,
                 }
                 answer = llm.invoke(PromptTemplate(template = """
-              You are a financial-data extraction assistant.
-              **Use ONLY what appears under “Context”.**
-              ### How to answer
-              1. **Single value questions**
-                • Find the row + column that match the user's words.
-                • Return the answer in a **short, clear sentence** using the exact number from the context.
-                 Example: “The Income (DCF) approach value is $1,150,000.”
-                • **Do NOT repeat the metric name or company name** unless the user asks.
-                
-              2. **Table questions**
-                • Return the full table **with its header row** in GitHub-flavoured markdown.
-                
-              3. **Valuation method / theory / reasoning questions**
-                • If the question involves **valuation methods**, **concluded value**, or topics like **Income Approach**, **Market Approach**, or **Valuation Summary**, do the following:
-                 - Combine and synthesize relevant information across all chunks.
-                 - Pay special attention to how **weights are distributed** (e.g., “50% DCF, 25% EBITDA, 25% SDE”).
-                 - Avoid oversimplifying if more detailed breakdowns (like subcomponents of market approach) are available.
-                 - If a table gives a simplified view (e.g., "50% Market Approach"), but other parts break it down (e.g., 25% EBITDA + 25% SDE), **prefer the detailed breakdown with percent value**.
-                 - When describing weights, also mention the **corresponding dollar values** used in the context (e.g., “50% DCF = $3,712,000, 25% EBITDA = $4,087,000...”)
-                 - **If Market approach is composed of sub-methods like EBITDA and SDE, then explicitly extract and show their individual weights and values, even if not listed together in a single table.**
-                 
-              4. **Theory/textual question**
-                • Try to return an explanation **based on the context**.
-              5. If you cannot find an answer in Context → reply exactly:
-                   "Sorry I didnt understand the question. Did you mean SUGGESTION?"
+        You are a financial-data extraction assistant.
+
+        **IMPORTANT CONDITIONAL FOLLOW-UP**  
+        🛎️ After you answer the user’s question (using steps 1–4), **only if** there is still **unused** relevant report content, **ask**:  
+          “Would you like more detail on [X]?”  
+           Otherwise, **do not** ask any follow-up.
+
+        **HARD RULE (unrelated questions)**
+        If the user's question is unrelated to this PDF or requires information outside the Context, reply exactly:
+        "Sorry I can only answer question related to {pdf_name} pdf document"
+
+         **Use ONLY what appears under “Context”.**
+
+        ### How to answer
+        1. **Single value questions**  
+           • Find the row + column that match the user's words.  
+           • Return the answer in a **short, clear sentence** using the exact number from the context.  
+             Example: “The Income (DCF) approach value is $1,150,000.”  
+           • **Do NOT repeat the metric name or company name** unless the user asks.
+        
+        2. **Table questions**  
+           • Return the full table **with its header row** in GitHub-flavoured markdown.
+        
+        3. **Valuation method / theory / reasoning questions**
+            
+           • If the question involves **valuation methods**, **concluded value**, or topics like **Income Approach**, **Market Approach**, or **Valuation Summary**, do the following:
+             - Combine and synthesize relevant information across all chunks.
+             - Pay special attention to how **weights are distributed** (e.g., “50% DCF, 25% EBITDA, 25% SDE”).
+             - Avoid oversimplifying if more detailed breakdowns (like subcomponents of market approach) are available.
+             - If a table gives a simplified view (e.g., "50% Market Approach"), but other parts break it down (e.g., 25% EBITDA + 25% SDE), **prefer the detailed breakdown with percent value**.   
+             - When describing weights, also mention the **corresponding dollar values** used in the context (e.g., “50% DCF = $3,712,000, 25% EBITDA = $4,087,000...”)
+             - **If Market approach is composed of sub-methods like EBITDA and SDE, then explicitly extract and show their individual weights and values, even if not listed together in a single table.**
+            
+     
+        4. **Theory/textual question**  
+           • Try to return an explanation **based on the context**.
+           
+        5. If you cannot find an answer in Context → reply exactly:
+           "Sorry I didnt understand the question. Did you mean SUGGESTION?"
 
         ---
         Context:
@@ -761,50 +653,65 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
                 skip_reference = is_unrelated or is_clarify
                 if docs and not skip_reference:
                     try:
-                        # ---- Fix 1: value-based picker across ALL docs ----
-                        best_doc = pick_reference_doc(answer, effective_q, docs)
+                        # 1) Embed the FINAL answer and all retrieved chunks
+                        texts = [d.page_content for d in docs]
                 
-                        # ---- Fallback: if nothing scored > 0, use your existing top-3 micro-ranker ----
-                        if best_doc is None:
-                            top3 = docs[:3]
-                            best_doc = top3[0] if top3 else None
-                            if len(top3) >= 3:
-                                ranking_prompt = PromptTemplate(
-                                    template="""
-                                    Given a user question and 3 candidate context chunks, return the number (1-3) of the chunk that best answers it.
-                                    Question:
-                                    {question}
-                                    
-                                    Chunk 1:
-                                    {chunk1}
-                                    
-                                    Chunk 2:
-                                    {chunk2}
-                                    
-                                    Chunk 3:
-                                    {chunk3}
-                                    
-                                    Best Chunk Number:
-                                    """,
-                                    input_variables=["question", "chunk1", "chunk2", "chunk3"]
-                                )
-                                try:
-                                    pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
-                                        ranking_prompt.invoke({
-                                            "question": query_for_retrieval,
-                                            "chunk1": top3[0].page_content,
-                                            "chunk2": top3[1].page_content,
-                                            "chunk3": top3[2].page_content
-                                        })
-                                    ).content.strip()
-                                    if pick.isdigit() and 1 <= int(pick) <= 3:
-                                        best_doc = top3[int(pick) - 1]
-                                except Exception:
-                                    pass
+                        embedder = CohereEmbeddings(
+                            model="embed-english-v3.0",
+                            user_agent="langchain",
+                            cohere_api_key=os.environ["COHERE_API_KEY"]  # use st.secrets["COHERE_API_KEY"] if you prefer
+                        )
+                        emb_query = embedder.embed_query(answer)          # vector for the FINAL answer text
+                        chunk_embs = embedder.embed_documents(texts)      # vectors for the retrieved chunks
                 
+                        # 2) Cosine similarity (sklearn)
+                        sims = cosine_similarity([emb_query], chunk_embs)[0]
+                        ranked = sorted(zip(docs, sims), key=lambda x: x[1], reverse=True)
+                        top3 = [d for d, _ in ranked[:3]]
+                
+                        # 3) LLM micro-ranker among top-3 (same prompt you had)
+                        best_doc = top3[0] if top3 else None
+                        if len(top3) >= 3:
+                            ranking_prompt = PromptTemplate(
+                                template="""
+                Given a user question and 3 candidate context chunks, return the number (1-3) of the chunk that best answers it.
+                
+                Question:
+                {question}
+                
+                Chunk 1:
+                {chunk1}
+                
+                Chunk 2:
+                {chunk2}
+                
+                Chunk 3:
+                {chunk3}
+                
+                Best Chunk Number:
+                """,
+                                input_variables=["question", "chunk1", "chunk2", "chunk3"]
+                            )
+                            try:
+                                pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
+                                    ranking_prompt.invoke({
+                                        "question": effective_q,  # or query_for_retrieval
+                                        "chunk1": top3[0].page_content,
+                                        "chunk2": top3[1].page_content,
+                                        "chunk3": top3[2].page_content
+                                    })
+                                ).content.strip()
+                                if pick.isdigit():
+                                    idx = int(pick) - 1
+                                    if 0 <= idx < len(top3):
+                                        best_doc = top3[idx]
+                            except Exception:
+                                pass
+                
+                        # 4) Attach the reference card using the chosen doc's page
                         if best_doc is not None:
                             ref_page = best_doc.metadata.get("page_number")
-                            img_b64 = st.session_state.page_images.get(ref_page)
+                            img_b64 = st.session_state.page_images.get(ref_page)   # already base64 in your app
                             if img_b64:
                                 entry["source"] = f"Page {ref_page}"
                                 entry["source_img"] = img_b64
