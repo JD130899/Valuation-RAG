@@ -1,56 +1,44 @@
-# gdrive_utils.py
-import os
-import io
-import json
-import re
-from typing import List, Dict, Optional
-
-# Streamlit is optional but we use it if available for st.secrets
+# gdrive_utils.py (only the auth parts changed)
+import os, json, re, io
+from typing import Optional, List, Dict
 try:
     import streamlit as st
-except Exception:  # pragma: no cover
+except Exception:
     st = None
 
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 
-
 SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
 
-# ----------------------- Auth helpers ----------------------- #
 def _creds_from_st_secrets() -> Optional[Credentials]:
-    """
-    Try to load service account credentials from st.secrets["service_account"].
-    Returns Credentials or None if not available.
-    """
     if st is None:
         return None
     try:
-        info = st.secrets.get("service_account", None)
+        info = st.secrets.get("service_account")
         if info:
             return Credentials.from_service_account_info(info, scopes=SCOPES)
     except Exception:
         pass
     return None
 
-
-def _creds_from_env_json() -> Optional[Credentials]:
+def _creds_from_env() -> Optional[Credentials]:
     """
-    Try GOOGLE_SERVICE_ACCOUNT_JSON (inline JSON) or GOOGLE_APPLICATION_CREDENTIALS (path).
-    Returns Credentials or None.
+    Cloud Run / generic env:
+    - GOOGLE_SERVICE_ACCOUNT  (JSON string from Secret Manager)
+    - GOOGLE_SERVICE_ACCOUNT_JSON  (JSON string)
+    - GOOGLE_APPLICATION_CREDENTIALS (path to JSON file)
     """
-    # Inline JSON env var
-    raw = os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON", "").strip()
+    raw = os.getenv("GOOGLE_SERVICE_ACCOUNT") or os.getenv("GOOGLE_SERVICE_ACCOUNT_JSON")
     if raw:
         try:
             info = json.loads(raw)
             return Credentials.from_service_account_info(info, scopes=SCOPES)
         except Exception:
-            # continue to try the file path
+            # fall through to file path
             pass
 
-    # File path env var
     path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS", "").strip()
     if path and os.path.exists(path):
         try:
@@ -60,21 +48,17 @@ def _creds_from_env_json() -> Optional[Credentials]:
 
     return None
 
-
 def get_drive_service():
-    """
-    Build and return a Drive v3 service using the first available source:
-    1) st.secrets["service_account"]
-    2) GOOGLE_SERVICE_ACCOUNT_JSON (inline JSON)
-    3) GOOGLE_APPLICATION_CREDENTIALS (file path)
-    """
-    creds = _creds_from_st_secrets() or _creds_from_env_json()
+    creds = _creds_from_st_secrets() or _creds_from_env()
     if creds is None:
         raise RuntimeError(
-            "Google Drive credentials not found. Provide either st.secrets['service_account'], "
-            "GOOGLE_SERVICE_ACCOUNT_JSON, or GOOGLE_APPLICATION_CREDENTIALS."
+            "Google Drive credentials not found. Provide one of: "
+            "st.secrets['service_account'] (Streamlit Cloud), "
+            "GOOGLE_SERVICE_ACCOUNT / GOOGLE_SERVICE_ACCOUNT_JSON (env JSON), or "
+            "GOOGLE_APPLICATION_CREDENTIALS (file path)."
         )
     return build("drive", "v3", credentials=creds)
+
 
 
 # ----------------------- ID / URL utils ----------------------- #
