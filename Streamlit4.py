@@ -156,6 +156,131 @@ def file_badge_link(name: str, pdf_bytes: bytes, synced: bool = True):
         height=0,
     )
 
+# ---------- value-based reference picker (Fix 1) ----------
+def _extract_answer_values(answer: str) -> set[str]:
+    """
+    Pull out $ amounts, plain numbers (incl. negatives), and percents from the final answer.
+    Returns several normalized variants for robust matching.
+    """
+    if not answer:
+        return set()
+    vals = set()
+    # currency / numbers / percents (handles $1,234, 1,234.56, (171,192), 1.75, 12%, etc.)
+    pattern = r"\(?\$?-?\d{1,3}(?:,\d{3})*(?:\.\d+)?\)?%?"
+    for m in re.finditer(pattern, answer):
+        raw = m.group(0).strip()
+        if not any(ch.isdigit() for ch in raw):
+            continue
+        vals.add(raw)
+
+        # normalized variants
+        s = raw.replace(" ", "")
+        s = s.replace(",", "")
+        s = s.replace("(", "-").replace(")", "")
+        if s.startswith("$"):
+            vals.add(s[1:])     # without $
+        vals.add(s.replace("$", ""))  # no $
+        if raw.endswith("%"):
+            vals.add(raw[:-1])  # without %
+            vals.add(s[:-1])    # normalized & without %
+        # also add a $-prefixed version just in case source has currency symbol
+        no_d = s.replace("$", "")
+        if not no_d.startswith("$"):
+            vals.add("$" + no_d)
+
+    # lowercase everything for case-insensitive contains()
+    return {v.lower() for v in vals if v}
+
+
+def _key_terms_from_question(q: str) -> set[str]:
+    """Grab useful phrases/tokens from the question to co-score docs."""
+    ql = (q or "").lower()
+    terms = set()
+    # prefer common multi-word finance phrases if present
+    phrases = [
+        "current ratio", "quick ratio", "debt to equity", "net sales", "revenue",
+        "ebitda", "adjusted ebitda", "sde", "free cash flow", "gross profit",
+        "operating income", "goodwill", "concluded value", "income approach",
+        "market approach", "valuation summary"
+    ]
+    for ph in phrases:
+        if ph in ql:
+            terms.add(ph)
+
+    # add individual tokens (length >= 3) as weak signals
+    for tok in re.findall(r"[a-z]{3,}", ql):
+        terms.add(tok)
+    return terms
+
+
+def _score_doc_for_values(text: str, values: set[str], terms: set[str], rank_index: int) -> int:
+    """
+    Score a document by:
+      - presence of exact numeric/value strings (strong)
+      - presence of key phrases (medium)
+      - presence of individual tokens (weak)
+      - a small bonus for higher-ranked retrieval items
+    """
+    if not text:
+        return -1
+    t = text.lower()
+
+    score = 0
+    # value hits (strong)
+    value_hits = 0
+    # quick normalization for doc text to compare against comma/$ differences
+    t_norm = t.replace(",", "").replace("$", "")
+
+    for v in values:
+        if not v:
+            continue
+        if v in t:
+            score += 6
+            value_hits += 1
+        else:
+            vn = v.replace(",", "").replace("$", "")
+            if vn and vn in t_norm:
+                score += 4
+                value_hits += 1
+    if value_hits:
+        score += 2 * min(3, value_hits - 1)  # small bonus for multiple matching values
+
+    # phrase hits (medium)
+    for ph in [p for p in terms if " " in p]:
+        if ph in t:
+            score += 3
+
+    # token hits (weak, capped)
+    token_hits = sum(1 for tok in terms if " " not in tok and tok in t)
+    score += min(3, token_hits)
+
+    # retrieval rank bonus (earlier == higher)
+    score += max(0, 8 - rank_index)
+
+    return score
+
+
+def pick_reference_doc(answer: str, question: str, docs: list) -> Document | None:
+    """
+    Choose the best doc by matching the values from `answer` and terms from `question`
+    across *all* retrieved docs (not just top-3).
+    Fallback to None if nothing scores > 0 (your existing logic can then kick in).
+    """
+    values = _extract_answer_values(answer)
+    terms = _key_terms_from_question(question)
+
+    best = None
+    best_score = -1
+    for i, d in enumerate(docs or []):
+        s = _score_doc_for_values(d.page_content or "", values, terms, i)
+        if s > best_score:
+            best_score = s
+            best = d
+
+    return best if best_score > 0 else None
+
+
+
 def render_reference_card(label: str, img_b64: str, page: int, key: str):
     """Uses the single shared st.session_state.pdf_b64 (not per-message)."""
     pdf_b64 = st.session_state.get("pdf_b64", "")
@@ -650,42 +775,47 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
                 skip_reference = is_unrelated or is_clarify
                 if docs and not skip_reference:
                     try:
-                        top3 = docs[:3]
-                        best_doc = top3[0] if top3 else None
-                        if len(top3) >= 3:
-                            ranking_prompt = PromptTemplate(
-                                template="""
-                                Given a user question and 3 candidate context chunks, return the number (1-3) of the chunk that best answers it.
-                                Question:
-                                {question}
-                                
-                                Chunk 1:
-                                {chunk1}
-                                
-                                Chunk 2:
-                                {chunk2}
-                                
-                                Chunk 3:
-                                {chunk3}
-                                
-                                Best Chunk Number:
-                                """,
-                                input_variables=["question", "chunk1", "chunk2", "chunk3"]
-                            )
-                            try:
-                                pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
-                                    ranking_prompt.invoke({
-                                        "question": query_for_retrieval,
-                                        "chunk1": top3[0].page_content,
-                                        "chunk2": top3[1].page_content,
-                                        "chunk3": top3[2].page_content
-                                    })
-                                ).content.strip()
-                                if pick.isdigit() and 1 <= int(pick) <= 3:
-                                    best_doc = top3[int(pick) - 1]
-                            except Exception:
-                                pass
-
+                        # ---- Fix 1: value-based picker across ALL docs ----
+                        best_doc = pick_reference_doc(answer, effective_q, docs)
+                
+                        # ---- Fallback: if nothing scored > 0, use your existing top-3 micro-ranker ----
+                        if best_doc is None:
+                            top3 = docs[:3]
+                            best_doc = top3[0] if top3 else None
+                            if len(top3) >= 3:
+                                ranking_prompt = PromptTemplate(
+                                    template="""
+                                    Given a user question and 3 candidate context chunks, return the number (1-3) of the chunk that best answers it.
+                                    Question:
+                                    {question}
+                                    
+                                    Chunk 1:
+                                    {chunk1}
+                                    
+                                    Chunk 2:
+                                    {chunk2}
+                                    
+                                    Chunk 3:
+                                    {chunk3}
+                                    
+                                    Best Chunk Number:
+                                    """,
+                                    input_variables=["question", "chunk1", "chunk2", "chunk3"]
+                                )
+                                try:
+                                    pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
+                                        ranking_prompt.invoke({
+                                            "question": query_for_retrieval,
+                                            "chunk1": top3[0].page_content,
+                                            "chunk2": top3[1].page_content,
+                                            "chunk3": top3[2].page_content
+                                        })
+                                    ).content.strip()
+                                    if pick.isdigit() and 1 <= int(pick) <= 3:
+                                        best_doc = top3[int(pick) - 1]
+                                except Exception:
+                                    pass
+                
                         if best_doc is not None:
                             ref_page = best_doc.metadata.get("page_number")
                             img_b64 = st.session_state.page_images.get(ref_page)
@@ -701,6 +831,7 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
                                 )
                     except Exception as e:
                         st.info(f"ℹ️ Reference selection skipped: {e}")
+
 
             st.session_state.messages.append(entry)
             st.session_state.pending_input = None
