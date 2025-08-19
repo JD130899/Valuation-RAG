@@ -120,6 +120,10 @@ st.markdown("""
 .block-container{ padding-top:0!important; padding-bottom:160px!important; }
 .block-container h1 { margin-top:0!important; }
 
+header[data-testid="stHeader"] { height:0 !important; }
+header[data-testid="stHeader"] * { display:none !important; }
+[data-testid="stAppViewBlockContainer"] .block-container { padding-top:0 !important; }
+
 /* Chat bubbles */
 .user-bubble {background:#007bff;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:right;margin:4px;}
 .assistant-bubble {background:#1e1e1e;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:left;margin:4px;}
@@ -565,7 +569,7 @@ else:
                 _reset_chat()
 
 # ================= Main UI =================
-st.title("Underwriting Agent")
+st.markdown("<h1 style='margin:0'>Underwriting Agent</h1>", unsafe_allow_html=True)
 
 if "uploaded_file_from_drive" in st.session_state:
     file_badge_link(
