@@ -48,16 +48,54 @@ def _creds_from_env() -> Optional[Credentials]:
 
     return None
 
+# gdrive_utils.py
+import os, json, io, re
+from typing import Optional, List, Dict
+
+try:
+    import streamlit as st
+except Exception:
+    st = None
+
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
+
+SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
+
 def get_drive_service():
-    creds = _creds_from_st_secrets() or _creds_from_env()
+    """Return a Google Drive service, using either st.secrets (Streamlit) or env vars (Cloud Run)."""
+    creds = None
+
+    # --- Streamlit Cloud path ---
+    if st is not None:
+        try:
+            info = st.secrets.get("service_account")
+            if info:
+                creds = service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
+        except Exception:
+            pass
+
+    # --- Cloud Run path (env var contains JSON) ---
     if creds is None:
-        raise RuntimeError(
-            "Google Drive credentials not found. Provide one of: "
-            "st.secrets['service_account'] (Streamlit Cloud), "
-            "GOOGLE_SERVICE_ACCOUNT / GOOGLE_SERVICE_ACCOUNT_JSON (env JSON), or "
-            "GOOGLE_APPLICATION_CREDENTIALS (file path)."
-        )
+        raw = os.getenv("GOOGLE_SERVICE_ACCOUNT")
+        if raw:
+            info = json.loads(raw)
+            creds = service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
+
+    # --- Local dev path (file path) ---
+    if creds is None:
+        path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+        if path and os.path.exists(path):
+            creds = service_account.Credentials.from_service_account_file(path, scopes=SCOPES)
+
+    if creds is None:
+        raise RuntimeError("No Google service account credentials found")
+
     return build("drive", "v3", credentials=creds)
+
+# rest of your helpers (get_all_pdfs, download_pdf, etc) stay the same
+
 
 
 
