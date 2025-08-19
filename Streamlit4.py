@@ -83,11 +83,23 @@ st.markdown("""
 .block-container{ padding-top:54px!important; padding-bottom:160px!important; }
 .block-container h1 { margin-top:0!important; }
 
+.file-badge{ background:#1f2c3a; padding:8px; border-radius:8px; color:#fff; margin:0; }
+div[data-testid="stMarkdownContainer"] > .file-badge { margin-bottom: 0 !important; }
 /* Chat bubbles */
 .user-bubble {background:#007bff;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:right;margin:4px;}
 .assistant-bubble {background:#1e1e1e;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:left;margin:4px;}
 .clearfix::after {content:"";display:table;clear:both;}
 
+
+  div[data-testid="stElementContainer"] iframe[title="streamlit-component"]{
+    display:none !important; height:0 !important; width:0 !important; border:0 !important;
+  }
+
+  div[data-testid="stElementContainer"]:has(> iframe[title="streamlit-component"]) {
+    margin: 0 !important; padding: 0 !important;
+  }
+  div[data-testid="stMarkdownContainer"] { margin-bottom: 8px; }
+  
 /* Reference card */
 .ref{ display:block; width:60%; max-width:900px; margin:6px 0 12px 8px; }
 .ref summary{
@@ -125,51 +137,21 @@ def queue_question(q: str):
 def file_badge_link(name: str, pdf_bytes: bytes, synced: bool = True):
     base = os.path.splitext(name)[0]
     b64 = base64.b64encode(pdf_bytes).decode("ascii")
+    data_url = f"data:application/pdf;base64,{b64}"  # open directly, no JS/iframe
     label = "Using synced file:" if synced else "Using file:"
-    link_id = f"open-file-{uuid.uuid4().hex[:8]}"
-    badge_id = f"file-badge-{uuid.uuid4().hex[:8]}"
 
-    # The <style> rule uses :has() to target the specific markdown container
-    # that contains our badge and removes its default bottom margin.
     st.markdown(
         f'''
-        <div id="{badge_id}" style="margin:0">
-          <div style="background:#1f2c3a;padding:8px;border-radius:8px;color:#fff;margin:0">
-            ✅ <b>{label}</b>
-            <a id="{link_id}" href="#" target="_blank" rel="noopener"
-               style="color:#93c5fd;text-decoration:none;">{base}</a>
-          </div>
+        <div class="file-badge">
+          ✅ <b>{label}</b>
+          <a href="{data_url}" target="_blank" rel="noopener" style="color:#93c5fd;text-decoration:none;">
+            {base}
+          </a>
         </div>
-        <style>
-          /* kill extra gap only under this badge */
-          div[data-testid="stMarkdownContainer"]:has(> #{badge_id}) {{
-            margin-bottom: 0 !important;
-          }}
-        </style>
         ''',
         unsafe_allow_html=True
     )
 
-    # keep your invisible iframe that wires up the blob URL to the link
-    components.html(
-        f'''<!doctype html><meta charset='utf-8'>
-<style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
-<script>(function(){{
-  function b64ToUint8Array(s){{var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}}
-  var blob = new Blob([b64ToUint8Array("{b64}")], {{type:"application/pdf"}});
-  var url  = URL.createObjectURL(blob);
-  function attach(){{
-    var d = window.parent && window.parent.document;
-    if(!d) return setTimeout(attach,120);
-    var a = d.getElementById("{link_id}");
-    if(!a) return setTimeout(attach,120);
-    a.setAttribute("href", url);
-  }}
-  attach();
-  var me = window.frameElement; if(me){{me.style.display="none";me.style.height="0";me.style.border="0";}}
-}})();</script>''',
-        height=0,
-    )
 
 def render_reference_card(label: str, img_b64: str, page: int, key: str):
     """Uses the single shared st.session_state.pdf_b64 (not per-message)."""
