@@ -1,16 +1,17 @@
 # gdrive_utils.py
 import os, io, json
 try:
-    import streamlit as st   # may not exist in some contexts
+    import streamlit as st
 except Exception:
     st = None
 
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
+from google.auth import default as google_auth_default   # <-- ADC
 
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
-FOLDER_ID = "1VglZDFbufOxHTZ4qZ_feUw_XHaxacPxr"  # fallback; not used if a link/id is passed
+FOLDER_ID = "1XGyBBFhhQFiG43jpYJhNzZYi7C-_l5me"  # fallback; ignored if a link/id is provided
 
 
 def _emit(msg, level="info"):
@@ -22,15 +23,22 @@ def _emit(msg, level="info"):
 
 
 def get_drive_service():
-    # If you kept SERVICE_ACCOUNT_JSON in Cloud Run, we’ll use it.
-    # Otherwise ADC (default service account) is used by your app code.
-    service_account_json = os.environ.get("SERVICE_ACCOUNT_JSON")
-    if service_account_json:
-        info = json.loads(service_account_json)
+    """
+    Prefer SERVICE_ACCOUNT_JSON (local/dev). Otherwise use ADC
+    (Cloud Run’s service account). Both are scoped for Drive Readonly.
+    """
+    # 1) Explicit JSON (local/dev or if you kept the secret mapped)
+    saj = os.environ.get("SERVICE_ACCOUNT_JSON")
+    if saj:
+        info = json.loads(saj)
         creds = Credentials.from_service_account_info(info, scopes=SCOPES)
-        return build('drive', 'v3', credentials=creds)
-    # Fall back to default credentials (provided by Cloud Run)
-    return build('drive', 'v3')
+        return build('drive', 'v3', credentials=creds, cache_discovery=False)
+
+    # 2) Application Default Credentials (Cloud Run)
+    creds, _ = google_auth_default(scopes=SCOPES)
+    if not creds:
+        raise RuntimeError("ADC not available (no credentials found)")
+    return build('drive', 'v3', credentials=creds, cache_discovery=False)
 
 
 def _extract_folder_id(folder_id_or_url: str) -> str:
