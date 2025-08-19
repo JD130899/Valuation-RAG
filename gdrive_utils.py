@@ -1,33 +1,36 @@
 # gdrive_utils.py
-import os, json
-from googleapiclient.discovery import build
-from google.oauth2.service_account import Credentials
-from google.auth import default as google_auth_default
+import os, io, json
+try:
+    import streamlit as st   # may not exist in some contexts
+except Exception:
+    st = None
 
-SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
+from google.oauth2.service_account import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
+
+SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
+FOLDER_ID = "1VglZDFbufOxHTZ4qZ_feUw_XHaxacPxr"  # fallback; not used if a link/id is passed
+
+
+def _emit(msg, level="info"):
+    if st:
+        fn = getattr(st, level, st.info)
+        fn(msg)
+    else:
+        print(msg)
+
 
 def get_drive_service():
-    """
-    Prefer Application Default Credentials (ADC) on Cloud Run.
-    Falls back to SERVICE_ACCOUNT_JSON env secret if ADC isn't available.
-    """
-    # Try ADC first (this is the Cloud Run default compute service account)
-    try:
-        creds, _ = google_auth_default(scopes=SCOPES)
-        return build("drive", "v3", credentials=creds, cache_discovery=False)
-    except Exception:
-        pass  # fall back to explicit JSON below
-
-    # Fallback: use the old secret if present
-    sa_json = os.getenv("SERVICE_ACCOUNT_JSON")
-    if not sa_json:
-        raise RuntimeError(
-            "No Google credentials available. ADC failed and SERVICE_ACCOUNT_JSON is not set."
-        )
-    info = json.loads(sa_json)
-    creds = Credentials.from_service_account_info(info, scopes=SCOPES)
-    return build("drive", "v3", credentials=creds, cache_discovery=False)
-
+    # If you kept SERVICE_ACCOUNT_JSON in Cloud Run, we’ll use it.
+    # Otherwise ADC (default service account) is used by your app code.
+    service_account_json = os.environ.get("SERVICE_ACCOUNT_JSON")
+    if service_account_json:
+        info = json.loads(service_account_json)
+        creds = Credentials.from_service_account_info(info, scopes=SCOPES)
+        return build('drive', 'v3', credentials=creds)
+    # Fall back to default credentials (provided by Cloud Run)
+    return build('drive', 'v3')
 
 
 def _extract_folder_id(folder_id_or_url: str) -> str:
@@ -35,7 +38,6 @@ def _extract_folder_id(folder_id_or_url: str) -> str:
     if not s:
         return FOLDER_ID
     if s.startswith("http"):
-        # Handles: https://drive.google.com/drive/folders/<ID>
         s = s.rstrip("/").split("/")[-1]
     return s
 
@@ -55,15 +57,15 @@ def get_all_pdfs(service, folder_id_or_url: str = None):
         files = results.get("files", [])
         return [f for f in files if f["name"].lower().endswith(".pdf")]
     except Exception as e:
-        st.error(f"❌ Error accessing Drive folder: {e}")
+        _emit(f"❌ Error accessing Drive folder: {e}", "error")
         return []
 
 
 def download_pdf(service, file_id, file_name):
     try:
         request = service.files().get_media(fileId=file_id)
-        file_path = os.path.join("uploaded", file_name)
         os.makedirs("uploaded", exist_ok=True)
+        file_path = os.path.join("uploaded", file_name)
         with io.FileIO(file_path, "wb") as f:
             downloader = MediaIoBaseDownload(f, request)
             done = False
@@ -71,5 +73,5 @@ def download_pdf(service, file_id, file_name):
                 _, done = downloader.next_chunk()
         return file_path
     except Exception as e:
-        st.error(f"❌ Failed to download PDF: {e}")
+        _emit(f"❌ Failed to download PDF: {e}", "error")
         return None
