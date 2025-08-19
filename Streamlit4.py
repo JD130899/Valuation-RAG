@@ -30,6 +30,11 @@ load_dotenv()
 st.set_page_config(page_title="Underwriting Agent", layout="wide")
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
+DRIVE_FOLDER_FROM_SECRET = os.getenv("GOOGLE_DRIVE_FOLDER", "").strip()
+HARDCODED_FOLDER_LINK = "https://drive.google.com/drive/folders/1XGyBBFhhQFiG43jpYJhNzZYi7C-_l5me"
+FOLDER_TO_USE = DRIVE_FOLDER_FROM_SECRET or HARDCODED_FOLDER_LINK
+
+
 def type_bubble(text: str, *, base_delay: float = 0.012, cutoff_chars: int = 2000):
     placeholder = st.empty()
     buf = []
@@ -555,7 +560,9 @@ def render_etran_table(dynamic: dict) -> str:
 service = get_drive_service()
 HARDCODED_FOLDER_LINK = "https://drive.google.com/drive/folders/1XGyBBFhhQFiG43jpYJhNzZYi7C-_l5me"
 
-pdf_files = get_all_pdfs(service, HARDCODED_FOLDER_LINK)
+pdf_files = get_all_pdfs(service, FOLDER_TO_USE)
+st.sidebar.caption(f"📁 Using Drive folder: {FOLDER_TO_USE}")
+
 
 if not pdf_files:
     st.sidebar.warning("No PDFs found in the folder.")
