@@ -605,46 +605,40 @@ if st.session_state.get("last_processed_pdf") != up.name:
     _reset_chat()
 
 # ===== Bottom-right pinned quick actions (compact pill) =====
-if "_pill_mounted" not in st.session_state:
-    st.session_state._pill_mounted = True
-    pill = st.empty()  # reserve a stable slot
-    with pill.container():
-        st.markdown("<span id='pin-bottom-right'></span>", unsafe_allow_html=True)
-        c1, c2, c3 = st.columns(3)
-        if c1.button("Valuation", key="qa_val"):        queue_question("Valuation")
-        if c2.button("Good will", key="qa_gw"):         queue_question("Good will")
-        if c3.button("Etran Cheatsheet", key="qa_etran"): queue_question("Etran Cheatsheet")
+# ===== Floating Quick Action Pill (no layout gap) =====
 
-    components.html("""
-    <script>
-    (function pin(){
-      const d = window.parent.document;
-      const mark = d.querySelector('#pin-bottom-right');
-      if(!mark) return setTimeout(pin,120);
-    
-      const block = mark.closest('div[data-testid="stVerticalBlock"]');
-      if(!block) return setTimeout(pin,120);
-      if(block.dataset.pinned === "1") return;
-      block.dataset.pinned = "1";
-    
-      const host = block.closest('div[data-testid="stElementContainer"]');
-      if (host) { host.style.height='0px'; host.style.minHeight='0'; host.style.margin='0';
-                  host.style.padding='0'; host.style.display='contents'; }
-    
-      Object.assign(block.style, {
-        position:'fixed', right:'0px', bottom:'100px', zIndex:'10000',
-        display:'flex', flexWrap:'nowrap', gap:'12px', padding:'10px 118px',
-        borderRadius:'9999px', background:'transparent', border:'none',
-        boxShadow:'none', minWidth:'350px', width:'fit-content', whiteSpace:'nowrap',
-        pointerEvents:'auto'
-      });
-      Array.from(block.children||[]).forEach(ch => { ch.style.width='auto'; ch.style.margin='0'; });
-      block.querySelectorAll('button').forEach(b => {
-        b.style.padding='18px 32px'; b.style.fontSize='18px'; b.style.borderRadius='9999px';
-      });
-    })();
-    </script>
-    """, height=0)
+# 1. Pure HTML pill pinned bottom-right
+st.markdown("""
+<div id="qs-pill" style="
+  position:fixed; right:24px; bottom:100px; z-index:10000;
+  display:flex; gap:12px; padding:10px 20px; border-radius:9999px;">
+  <button onclick="window.parent.postMessage({type:'qs','q':'Valuation'}, '*')">Valuation</button>
+  <button onclick="window.parent.postMessage({type:'qs','q':'Good will'}, '*')">Good will</button>
+  <button onclick="window.parent.postMessage({type:'qs','q':'Etran Cheatsheet'}, '*')">Etran Cheatsheet</button>
+</div>
+""", unsafe_allow_html=True)
+
+# 2. JS listener that posts chosen question into query params
+components.html("""
+<script>
+window.addEventListener('message', (e)=>{
+  if(e?.data?.type === 'qs'){
+    const q = e.data.q || '';
+    const url = new URL(window.parent.location);
+    url.searchParams.set('qs', q);
+    window.parent.history.replaceState({}, '', url);
+    window.parent.location.reload(); // trigger Streamlit rerun
+  }
+});
+</script>
+""", height=0)
+
+# 3. Python side: read and consume that param
+q = st.query_params.get("qs")
+if q:
+    queue_question(q)
+    st.query_params.pop("qs", None)   # clear after use
+
 
 else:
     # Render lightweight, inert placeholder so Streamlit doesn't rebuild widgets
