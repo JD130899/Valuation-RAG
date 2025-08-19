@@ -561,7 +561,7 @@ def render_etran_table(dynamic: dict) -> str:
 
 # ================= Sidebar: Google Drive loader =================
 service = get_drive_service()
-HARDCODED_FOLDER_LINK = "https://drive.google.com/drive/folders/1XGyBBFhhQFiG43jpYJhNzZYi7C-_l5me"
+
 
 pdf_files = get_all_pdfs(service, FOLDER_TO_USE)
 st.sidebar.caption(f"📁 Using Drive folder: {FOLDER_TO_USE}")
