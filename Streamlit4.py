@@ -62,6 +62,22 @@ def _reset_chat():
     st.session_state.waiting_for_response = False
     st.session_state.last_suggestion = None
 
+def _set_active_pdf(name: str, data: bytes):
+    st.session_state.active_pdf_name  = name
+    st.session_state.active_pdf_bytes = data
+    # force rebuild for newly selected file
+    st.session_state.last_processed_pdf = None
+
+def _get_active_pdf():
+    data = st.session_state.get("active_pdf_bytes")
+    name = st.session_state.get("active_pdf_name")
+    if data and name:
+        bio = io.BytesIO(data)
+        bio.name = name
+        return bio
+    return None
+
+
 # ---------- Session state ----------
 if "last_synced_file_id" not in st.session_state:
     st.session_state.last_synced_file_id = None
@@ -475,33 +491,38 @@ else:
             path = download_pdf(service, chosen["id"], chosen["name"])
             if path:
                 with open(path, "rb") as f:
-                    st.session_state.uploaded_file_from_drive = f.read()
-                st.session_state.uploaded_file_name = chosen["name"]
+                    data = f.read()
+                _set_active_pdf(chosen["name"], data)
                 st.session_state.last_synced_file_id = chosen["id"]
                 _reset_chat()
+
 
 # ================= Main UI =================
 st.title("Underwriting Agent")
 
-if "uploaded_file_from_drive" in st.session_state:
-    file_badge_link(
-        st.session_state.uploaded_file_name,
-        st.session_state.uploaded_file_from_drive,
-        synced=True
-    )
-    up = io.BytesIO(st.session_state.uploaded_file_from_drive)
-    up.name = st.session_state.uploaded_file_name
-else:
-    up = st.file_uploader("Upload a valuation report PDF", type="pdf")
-    if up:
-        file_badge_link(up.name, up.getvalue(), synced=False)
-        if up.name != st.session_state.get("last_selected_upload"):
-            st.session_state.last_selected_upload = up.name
-            _reset_chat()
 
-if not up:
+# 1) Uploader can *set* the active PDF
+uploaded = st.file_uploader("Upload a valuation report PDF", type="pdf", key="uploader")
+if uploaded:
+    data = uploaded.getvalue()
+    _set_active_pdf(uploaded.name, data)
+    file_badge_link(uploaded.name, data, synced=False)
+    if uploaded.name != st.session_state.get("last_selected_upload"):
+        st.session_state.last_selected_upload = uploaded.name
+        _reset_chat()
+
+# 2) If a Drive file was chosen earlier, we already set active_pdf_* in the sidebar code
+
+# 3) Always reconstruct the working handle from session state
+up = _get_active_pdf()
+if up:
+    # nice badge if we came from Drive
+    if st.session_state.get("last_synced_file_id"):
+        file_badge_link(st.session_state.get("active_pdf_name"), st.session_state.get("active_pdf_bytes"), synced=True)
+else:
     st.warning("Please upload or load a PDF to continue.")
     st.stop()
+
 
 # Rebuild retriever when file changes (set name early to avoid partial reruns)
 if st.session_state.get("last_processed_pdf") != up.name:
