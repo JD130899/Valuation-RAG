@@ -577,37 +577,24 @@ components.html("""
 (function pin(){
   const d = window.parent.document;
   const mark = d.querySelector('#pin-bottom-right');
-  if (!mark) return setTimeout(pin,120);
+  if(!mark) return setTimeout(pin,120);
 
-  const block = mark.closest('div[data-testid="stVerticalBlock"]');       // the block you fix-position
-  if (!block) return setTimeout(pin,120);
-  if (block.dataset.pinned === "1") return;
+  const block = mark.closest('div[data-testid="stVerticalBlock"]');
+  if(!block) return setTimeout(pin,120);
+  if(block.dataset.pinned === "1") return;
   block.dataset.pinned = "1";
 
-  // Collapse all layout ancestors so they don't reserve space
-  const elc = block.closest('div[data-testid="stElementContainer"]');     // outer element container
-  const vblk = block;                                                     // vertical block itself
-  const hblk = block.querySelector('div[data-testid="stHorizontalBlock"]'); // created by st.columns
+  const host = block.closest('div[data-testid="stElementContainer"]');
+  if (host) { host.style.height='0px'; host.style.minHeight='0'; host.style.margin='0';
+              host.style.padding='0'; host.style.display='contents'; }
 
-  [elc, vblk, hblk].forEach(n => {
-    if (!n) return;
-    n.style.height = '0px';
-    n.style.minHeight = '0';
-    n.style.margin = '0';
-    n.style.padding = '0';
-  });
-  if (elc) { elc.style.display = 'contents'; }  // remove its box entirely
-
-  // Now float the pill
   Object.assign(block.style, {
-    position: 'fixed', right: '0px', bottom: '100px', zIndex: '10000',
-    display: 'flex', flexWrap: 'nowrap', gap: '12px', padding: '10px 118px',
-    borderRadius: '9999px', background: 'transparent', border: 'none',
-    boxShadow: 'none', minWidth: '350px', width: 'fit-content', whiteSpace: 'nowrap',
-    pointerEvents: 'auto'
+    position:'fixed', right:'0px', bottom:'100px', zIndex:'10000',
+    display:'flex', flexWrap:'nowrap', gap:'12px', padding:'10px 118px',
+    borderRadius:'9999px', background:'transparent', border:'none',
+    boxShadow:'none', minWidth:'350px', width:'fit-content', whiteSpace:'nowrap',
+    pointerEvents:'auto'
   });
-
-  // Tidy up column wrappers & buttons
   Array.from(block.children||[]).forEach(ch => { ch.style.width='auto'; ch.style.margin='0'; });
   block.querySelectorAll('button').forEach(b => {
     b.style.padding='18px 32px'; b.style.fontSize='18px'; b.style.borderRadius='9999px';
@@ -615,7 +602,6 @@ components.html("""
 })();
 </script>
 """, height=0)
-
 
 # Chat input
 user_q = st.chat_input("Type your question here…", key="main_chat_input")
