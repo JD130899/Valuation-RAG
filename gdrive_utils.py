@@ -13,7 +13,7 @@ FOLDER_ID = "1VglZDFbufOxHTZ4qZ_feUw_XHaxacPxr"  # Folder to watch
 
 # === Auth ===
 def get_drive_service():
-    service_account_info = st.secrets["service_account"]
+    service_account_info = json.loads(os.environ["SERVICE_ACCOUNT_JSON"])
     creds = Credentials.from_service_account_info(service_account_info, scopes=SCOPES)
     return build('drive', 'v3', credentials=creds)
 
