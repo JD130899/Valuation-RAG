@@ -1,38 +1,33 @@
 # gdrive_utils.py
-import os
-import io
-import json
-import streamlit as st
-
-from google.auth import default as google_auth_default
-from google.oauth2.service_account import Credentials
+import os, json
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload
+from google.oauth2.service_account import Credentials
+from google.auth import default as google_auth_default
 
-# Drive scopes we need (read-only is enough)
 SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
-
-# Optional fallback folder (will be ignored if you pass a link/id)
-FOLDER_ID = "1XGyBBFhhQFiG43jpYJhNzZYi7C-_l5me"
-
-
 
 def get_drive_service():
     """
-    Try explicit SERVICE_ACCOUNT_JSON first (if set),
-    otherwise use Application Default Credentials (Cloud Run runtime SA).
+    Prefer Application Default Credentials (ADC) on Cloud Run.
+    Falls back to SERVICE_ACCOUNT_JSON env secret if ADC isn't available.
     """
-    sa_json = os.environ.get("SERVICE_ACCOUNT_JSON", "").strip()
-
-    if sa_json:
-        # Explicit JSON path (Secret) flow
-        service_account_info = json.loads(sa_json)
-        creds = Credentials.from_service_account_info(service_account_info, scopes=SCOPES)
-    else:
-        # Default credentials (Cloud Run runtime account)
+    # Try ADC first (this is the Cloud Run default compute service account)
+    try:
         creds, _ = google_auth_default(scopes=SCOPES)
+        return build("drive", "v3", credentials=creds, cache_discovery=False)
+    except Exception:
+        pass  # fall back to explicit JSON below
 
-    return build("drive", "v3", credentials=creds)
+    # Fallback: use the old secret if present
+    sa_json = os.getenv("SERVICE_ACCOUNT_JSON")
+    if not sa_json:
+        raise RuntimeError(
+            "No Google credentials available. ADC failed and SERVICE_ACCOUNT_JSON is not set."
+        )
+    info = json.loads(sa_json)
+    creds = Credentials.from_service_account_info(info, scopes=SCOPES)
+    return build("drive", "v3", credentials=creds, cache_discovery=False)
+
 
 
 def _extract_folder_id(folder_id_or_url: str) -> str:
