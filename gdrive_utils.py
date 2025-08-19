@@ -13,6 +13,22 @@ from google.auth import default as google_auth_default   # <-- ADC
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 FOLDER_ID = "1XGyBBFhhQFiG43jpYJhNzZYi7C-_l5me"  # fallback; ignored if a link/id is provided
 
+from functools import lru_cache
+
+@lru_cache(maxsize=32)
+def _list_files_cached(folder_id: str):
+    # The inner function requires a fresh service because creds aren’t serializable.
+    service = get_drive_service()
+    results = service.files().list(
+        q=f"'{folder_id}' in parents and trashed = false",
+        orderBy="createdTime desc",
+        pageSize=100,
+        fields="files(id, name, mimeType)",
+        supportsAllDrives=True,
+        includeItemsFromAllDrives=True,
+    ).execute()
+    return tuple((f["id"], f["name"], f.get("mimeType","")) for f in results.get("files", []))
+    
 
 def _emit(msg, level="info"):
     if st:
@@ -49,21 +65,11 @@ def _extract_folder_id(folder_id_or_url: str) -> str:
         s = s.rstrip("/").split("/")[-1]
     return s
 
-
 def get_all_pdfs(service, folder_id_or_url: str = None):
     folder_id = _extract_folder_id(folder_id_or_url)
-    query = f"'{folder_id}' in parents and trashed = false"
     try:
-        results = service.files().list(
-            q=query,
-            orderBy="createdTime desc",
-            pageSize=100,
-            fields="files(id, name, mimeType)",
-            supportsAllDrives=True,
-            includeItemsFromAllDrives=True,
-        ).execute()
-        files = results.get("files", [])
-        return [f for f in files if f["name"].lower().endswith(".pdf")]
+        files = _list_files_cached(folder_id)
+        return [{"id": i, "name": n} for (i, n, m) in files if n.lower().endswith(".pdf")]
     except Exception as e:
         _emit(f"❌ Error accessing Drive folder: {e}", "error")
         return []
