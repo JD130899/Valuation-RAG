@@ -24,6 +24,7 @@ from langchain_core.prompts import PromptTemplate
 import openai
 from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
 
+
 # ================= Setup =================
 load_dotenv()
 st.set_page_config(page_title="Underwriting Agent", layout="wide")
@@ -32,6 +33,61 @@ openai.api_key = os.getenv("OPENAI_API_KEY")
 DRIVE_FOLDER_FROM_SECRET = os.getenv("GOOGLE_DRIVE_FOLDER", "").strip()
 HARDCODED_FOLDER_LINK = "https://drive.google.com/drive/folders/1XGyBBFhhQFiG43jpYJhNzZYi7C-_l5me"
 FOLDER_TO_USE = DRIVE_FOLDER_FROM_SECRET or HARDCODED_FOLDER_LINK
+
+
+
+
+
+def type_bubble(text: str, *, base_delay: float = 0.012, cutoff_chars: int = 2000):
+    placeholder = st.empty()
+    buf = []
+    count = 0
+    for ch in text:
+        buf.append(ch); count += 1
+        placeholder.markdown(
+            f"<div class='assistant-bubble clearfix'>{''.join(buf)}</div>",
+            unsafe_allow_html=True,
+        )
+        if count <= cutoff_chars:
+            time.sleep(base_delay)
+    return placeholder
+
+def _company_from_filename(pdf_name: str) -> str:
+    base = os.path.splitext(pdf_name)[0]
+    # remove common suffixes like "Certified Valuation Report"
+    base = re.sub(r"\s*[-–—:]?\s*Certified\s+Valuation\s+Report.*$", "", base, flags=re.I)
+    return base.strip() or "the subject company"
+
+
+def _reset_chat():
+    st.session_state.messages = [
+        {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
+        {"role": "assistant", "content": "What can I help you with?"}
+    ]
+    st.session_state.pending_input = None
+    st.session_state.waiting_for_response = False
+    st.session_state.last_suggestion = None
+
+# ---------- Session state ----------
+if "last_synced_file_id" not in st.session_state:
+    st.session_state.last_synced_file_id = None
+if "messages" not in st.session_state:
+    st.session_state.messages = [
+        {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
+        {"role": "assistant", "content": "What can I help you with?"}
+    ]
+if "pending_input" not in st.session_state:
+    st.session_state.pending_input = None
+if "waiting_for_response" not in st.session_state:
+    st.session_state.waiting_for_response = False
+if "page_images" not in st.session_state:
+    st.session_state.page_images = {}
+if "page_texts" not in st.session_state:
+    st.session_state.page_texts = {}
+if "last_suggestion" not in st.session_state:
+    st.session_state.last_suggestion = None
+if "next_msg_id" not in st.session_state:
+    st.session_state.next_msg_id = 0
 
 # ---------- styles (chat + reference styles) ----------
 st.markdown("""
@@ -71,35 +127,16 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ---------- Utilities ----------
-def type_bubble(text: str, *, base_delay: float = 0.012, cutoff_chars: int = 2000):
-    placeholder = st.empty()
-    buf = []
-    count = 0
-    for ch in text:
-        buf.append(ch); count += 1
-        placeholder.markdown(
-            f"<div class='assistant-bubble clearfix'>{''.join(buf)}</div>",
-            unsafe_allow_html=True,
-        )
-        if count <= cutoff_chars:
-            time.sleep(base_delay)
-    return placeholder
-
 def _new_id():
     n = st.session_state.next_msg_id
     st.session_state.next_msg_id += 1
     return f"m{n}"
 
-def _company_from_filename(pdf_name: str) -> str:
-    base = os.path.splitext(pdf_name)[0]
-    base = re.sub(r"\s*[-–—:]?\s*Certified\s+Valuation\s+Report.*$", "", base, flags=re.I)
-    return base.strip() or "the subject company"
-
-def pil_to_base64(img: Image.Image) -> str:
-    buf = io.BytesIO()
-    img.save(buf, format="PNG")
-    return base64.b64encode(buf.getvalue()).decode("ascii")
+# ==================== INTERACTIONS ====================
+def queue_question(q: str):
+    st.session_state.pending_input = q
+    st.session_state.waiting_for_response = True
+    st.session_state.messages.append({"id": _new_id(), "role": "user", "content": q})
 
 def file_badge_link(name: str, pdf_bytes: bytes, synced: bool = True):
     base = os.path.splitext(name)[0]
@@ -180,6 +217,12 @@ def render_reference_card(label: str, img_b64: str, pdf_b64: str, page: int, key
         height=0,
     )
 
+# give IDs to any preloaded messages
+for m in st.session_state.messages:
+    if "id" not in m:
+        m["id"] = _new_id()
+
+# ----------- helpers -----------
 def _clean_heading(text: str) -> str:
     if not text: return text
     text = re.sub(r"^[#>\-\*\d\.\)\(]+\s*", "", text).strip()
@@ -296,6 +339,7 @@ def _detect_selected_pages(doc: fitz.Document):
     want = set()
     total = len(doc)
 
+    # Always include page 3 if it exists
     if total >= 3:
         want.add(3)
 
@@ -304,6 +348,7 @@ def _detect_selected_pages(doc: fitz.Document):
     valuation_summary_page = None
 
     for i in range(total):  # i is 0-based
+        # skip very early clutter if desired; here we scan all
         text = (doc[i].get_text() or "").upper()
 
         if "INCOME APPROACH" in text:
@@ -315,15 +360,18 @@ def _detect_selected_pages(doc: fitz.Document):
         if valuation_summary_page is None and "VALUATION SUMMARY" in text:
             valuation_summary_page = i + 1
 
+    # 1st Income Approach
     if income_hits:
         want.add(income_hits[0])
 
+    # 2nd Market Approach + next
     if len(market_hits) >= 2:
         second = market_hits[1]
         want.add(second)
         if second + 1 <= total:
             want.add(second + 1)
 
+    # Valuation Summary (first)
     if valuation_summary_page:
         want.add(valuation_summary_page)
 
@@ -351,9 +399,16 @@ def _ocr_page_with_gpt4o(img_png_bytes: bytes) -> str:
             max_tokens=800,
         )
         return resp.choices[0].message.content.strip()
-    except Exception:
+    except Exception as e:
+        # fall back to empty string so we keep LlamaParse for that page
         return ""
 
+def pil_to_base64(img: Image.Image) -> str:
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    return base64.b64encode(buf.getvalue()).decode("ascii")
+
+# ================= Builder =================
 @st.cache_resource(show_spinner="📦 Processing & indexing PDF…")
 def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
     """
@@ -394,8 +449,10 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
             if ocr_text:
                 ocr_text_by_page[pnum] = ocr_text
         except Exception:
+            # if anything fails, skip replacement for that page
             pass
 
+    # Done with the PDF object
     doc.close()
 
     # Parse entire document with LlamaParse
@@ -502,43 +559,13 @@ def render_etran_table(dynamic: dict) -> str:
         lines.append(f"| {k} | {val if val else '—'} |")
     return "\n".join(lines)
 
-# ================= Session state =================
-def _reset_chat():
-    st.session_state.messages = [
-        {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
-        {"role": "assistant", "content": "What can I help you with?"}
-    ]
-    st.session_state.pending_input = None
-    st.session_state.waiting_for_response = False
-    st.session_state.last_suggestion = None
-
-if "last_synced_file_id" not in st.session_state:
-    st.session_state.last_synced_file_id = None
-if "messages" not in st.session_state:
-    _reset_chat()
-if "pending_input" not in st.session_state:
-    st.session_state.pending_input = None
-if "waiting_for_response" not in st.session_state:
-    st.session_state.waiting_for_response = False
-if "page_images" not in st.session_state:
-    st.session_state.page_images = {}
-if "page_texts" not in st.session_state:
-    st.session_state.page_texts = {}
-if "last_suggestion" not in st.session_state:
-    st.session_state.last_suggestion = None
-if "next_msg_id" not in st.session_state:
-    st.session_state.next_msg_id = 0
-
-# Latch to stop double-processing on reruns
-if "request_seq" not in st.session_state:
-    st.session_state.request_seq = 0
-if "processed_seq" not in st.session_state:
-    st.session_state.processed_seq = 0
-
-# ================ Sidebar: Google Drive loader =================
+# ================= Sidebar: Google Drive loader =================
 service = get_drive_service()
+HARDCODED_FOLDER_LINK = "https://drive.google.com/drive/folders/1XGyBBFhhQFiG43jpYJhNzZYi7C-_l5me"
+
 pdf_files = get_all_pdfs(service, FOLDER_TO_USE)
 st.sidebar.caption(f"📁 Using Drive folder: {FOLDER_TO_USE}")
+
 
 if not pdf_files:
     st.sidebar.warning("No PDFs found in the folder.")
@@ -554,7 +581,7 @@ else:
         key="selected_pdf_name",
     )
 
-    if st.sidebar.button("Load selected PDF", key="load_from_drive"):
+    if st.sidebar.button("Load selected PDF"):
         chosen = next(f for f in pdf_files if f["name"] == sel_name)
         if chosen["id"] == st.session_state.get("last_synced_file_id"):
             st.sidebar.info("Already loaded.")
@@ -562,147 +589,130 @@ else:
             path = download_pdf(service, chosen["id"], chosen["name"])
             if path:
                 with open(path, "rb") as f:
-                    b = f.read()
-                # Canonical sticky values
-                st.session_state.uploaded_file_from_drive = b
+                    st.session_state.uploaded_file_from_drive = f.read()
                 st.session_state.uploaded_file_name = chosen["name"]
-                st.session_state.pdf_bytes = b
-                st.session_state.pdf_name = chosen["name"]
                 st.session_state.last_synced_file_id = chosen["id"]
-                # Force rebuild on this new file
-                st.session_state.last_processed_pdf = None
                 _reset_chat()
 
 # ================= Main UI =================
 st.title("Underwriting Agent")
 
-# Show badge if we have a sticky PDF already (from Drive)
-if st.session_state.get("pdf_bytes") and st.session_state.get("pdf_name"):
+if "uploaded_file_from_drive" in st.session_state:
     file_badge_link(
-        st.session_state.pdf_name,
-        st.session_state.pdf_bytes,
-        synced=("uploaded_file_from_drive" in st.session_state)
+        st.session_state.uploaded_file_name,
+        st.session_state.uploaded_file_from_drive,
+        synced=True
     )
+    up = io.BytesIO(st.session_state.uploaded_file_from_drive)
+    up.name = st.session_state.uploaded_file_name
+else:
+    up = st.file_uploader("Upload a valuation report PDF", type="pdf")
+    if up:
+        file_badge_link(up.name, up.getvalue(), synced=False)
+        if up.name != st.session_state.get("last_selected_upload"):
+            st.session_state.last_selected_upload = up.name
+            _reset_chat()
 
-# Local uploader mirrors into sticky session state
-up = st.file_uploader("Upload a valuation report PDF", type="pdf")
-if up:
-    # Only react when a *new* file chosen
-    if up.name != st.session_state.get("pdf_name"):
-        st.session_state.pdf_bytes = up.getvalue()
-        st.session_state.pdf_name = up.name
-        st.session_state.last_processed_pdf = None  # force retriever rebuild
-        _reset_chat()
-    file_badge_link(up.name, up.getvalue(), synced=False)
-
-# Gate on sticky state (not the widget)
-if "pdf_bytes" not in st.session_state or not st.session_state.pdf_bytes:
+if not up:
     st.warning("Please upload or load a PDF to continue.")
     st.stop()
 
-# Rebuild retriever when file changes (based on sticky name)
-pdf_name = st.session_state.get("pdf_name")
-pdf_bytes = st.session_state.get("pdf_bytes")
-
-if st.session_state.get("last_processed_pdf") != pdf_name:
+# Rebuild retriever when file changes
+if st.session_state.get("last_processed_pdf") != up.name:
+    pdf_bytes = up.getvalue()
+    st.session_state.pdf_bytes = pdf_bytes
     (st.session_state.retriever,
      st.session_state.page_images,
-     st.session_state.page_texts) = build_retriever_from_pdf(pdf_bytes, pdf_name)
-    _reset_chat()
-    st.session_state.last_processed_pdf = pdf_name
+     st.session_state.page_texts) = build_retriever_from_pdf(pdf_bytes, up.name)
+    st.session_state.messages = [
+        {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
+        {"role": "assistant", "content": "What can I help you with?"}
+    ]
+    st.session_state.last_processed_pdf = up.name
 
 # ===== Bottom-right pinned quick actions (compact pill) - only show when a PDF is present =====
-pill = st.container()
-with pill:
-    # sentinel used by the JS to find & pin the block (but do NOT reparent)
-    st.markdown("<span id='pin-bottom-right'></span>", unsafe_allow_html=True)
+if up:
+    pill = st.container()
+    with pill:
+        # sentinel used by the JS to find & pin the block (but do NOT reparent)
+        st.markdown("<span id='pin-bottom-right'></span>", unsafe_allow_html=True)
 
-    c1, c2, c3 = st.columns(3)
-    if c1.button("Valuation", key="qa_val"):
-        st.session_state.pending_input = "Valuation"
-        st.session_state.waiting_for_response = True
-        st.session_state.request_seq += 1
-        st.session_state.messages.append({"id": _new_id(), "role": "user", "content": "Valuation"})
+        c1, c2, c3 = st.columns(3)
+        if c1.button("Valuation", key="qa_val"):
+            st.session_state.pending_input = "Valuation"
+            st.session_state.waiting_for_response = True
+            st.session_state.messages.append({"id": _new_id(), "role": "user", "content": "Valuation"})
 
-    if c2.button("Good will", key="qa_gw"):
-        st.session_state.pending_input = "Good will"
-        st.session_state.waiting_for_response = True
-        st.session_state.request_seq += 1
-        st.session_state.messages.append({"id": _new_id(), "role": "user", "content": "Good will"})
+        if c2.button("Good will", key="qa_gw"):
+            st.session_state.pending_input = "Good will"
+            st.session_state.waiting_for_response = True
+            st.session_state.messages.append({"id": _new_id(), "role": "user", "content": "Good will"})
 
-    if c3.button("Etran Cheatsheet", key="qa_etran"):
-        st.session_state.pending_input = "Etran Cheatsheet"
-        st.session_state.waiting_for_response = True
-        st.session_state.request_seq += 1
-        st.session_state.messages.append({"id": _new_id(), "role": "user", "content": "Etran Cheatsheet"})
+        if c3.button("Etran Cheatsheet", key="qa_etran"):
+            st.session_state.pending_input = "Etran Cheatsheet"
+            st.session_state.waiting_for_response = True
+            st.session_state.messages.append({"id": _new_id(), "role": "user", "content": "Etran Cheatsheet"})
 
-# Pin & style the pill
-components.html("""
-<script>
-(function pin(){
-  const d = window.parent.document;
-  const mark = d.querySelector('#pin-bottom-right');
-  if(!mark) return setTimeout(pin,120);
+    # Pin & style bubble (transparent container; larger inner buttons)
+    components.html("""
+    <script>
+    (function pin(){
+      const d = window.parent.document;
+      const mark = d.querySelector('#pin-bottom-right');
+      if(!mark) return setTimeout(pin,120);
 
-  const block = mark.closest('div[data-testid="stVerticalBlock"]');
-  if(!block) return setTimeout(pin,120);
-  if(block.dataset.pinned === "1") return;
-  block.dataset.pinned = "1";
+      const block = mark.closest('div[data-testid="stVerticalBlock"]');
+      if(!block) return setTimeout(pin,120);
+      if(block.dataset.pinned === "1") return;
+      block.dataset.pinned = "1";
 
-  // Collapse original host so there's no layout gap (keep React bindings!)
-  const host = block.closest('div[data-testid="stElementContainer"]');
-  if (host) {
-    host.style.height = '0px';
-    host.style.minHeight = '0';
-    host.style.margin = '0';
-    host.style.padding = '0';
-    host.style.display = 'contents';   // NOT 'none'
-  }
+      // Collapse original host so there's no layout gap (keep React bindings!)
+      const host = block.closest('div[data-testid="stElementContainer"]');
+      if (host) {
+        host.style.height = '0px';
+        host.style.minHeight = '0';
+        host.style.margin = '0';
+        host.style.padding = '0';
+        host.style.display = 'contents';   // NOT 'none'
+      }
 
-  // Float the pill container (transparent)
-  Object.assign(block.style, {
-    position:'fixed',
-    right:'0px',
-    bottom:'100px',
-    zIndex:'10000',
-    display:'flex',
-    flexWrap:'nowrap',
-    gap:'12px',
-    padding:'10px 118px',
-    borderRadius:'9999px',
-    background:'transparent',
-    border:'none',
-    boxShadow:'none',
-    minWidth:'350px',
-    width:'fit-content',
-    whiteSpace:'nowrap',
-    pointerEvents:'auto'
-  });
+      // Float the pill container (transparent)
+      Object.assign(block.style, {
+        position:'fixed',
+        right:'0px',
+        bottom:'100px',
+        zIndex:'10000',
+        display:'flex',
+        flexWrap:'nowrap',
+        gap:'12px',
+        padding:'10px 118px',
+        borderRadius:'9999px',
+        background:'transparent',  // invisible container
+        border:'none',
+        boxShadow:'none',
+        minWidth:'350px',
+        width:'fit-content',
+        whiteSpace:'nowrap',
+        pointerEvents:'auto'
+      });
 
-  // Tighten Streamlit column wrappers; enlarge the inner button pills only
-  Array.from(block.children||[]).forEach(ch => { ch.style.width='auto'; ch.style.margin='0'; });
-  block.querySelectorAll('button').forEach(b => {
-    b.style.padding='18px 32px';
-    b.style.fontSize='18px';
-    b.style.borderRadius='9999px';
-  });
-})();
-</script>
-""", height=0)
-
-# ---------------- Session helpers ----------------
-def queue_question(q: str):
-    st.session_state.pending_input = q
-    st.session_state.waiting_for_response = True
-    st.session_state.request_seq += 1
-    st.session_state.messages.append({"id": _new_id(), "role": "user", "content": q})
+      // Tighten Streamlit column wrappers; enlarge the inner button pills only
+      Array.from(block.children||[]).forEach(ch => { ch.style.width='auto'; ch.style.margin='0'; });
+      block.querySelectorAll('button').forEach(b => {
+        b.style.padding='18px 32px';     // larger button pills
+        b.style.fontSize='18px';
+        b.style.borderRadius='9999px';
+      });
+    })();
+    </script>
+    """, height=0)
 
 # Chat input
 user_q = st.chat_input("Type your question here…", key="main_chat_input")
 if user_q:
     queue_question(user_q)
 
-# ============== Render history ==============
+# ========================== RENDER HISTORY ==========================
 for msg in st.session_state.messages:
     cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
     st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
@@ -715,13 +725,8 @@ for msg in st.session_state.messages:
             key=msg.get("id", "k0"),
         )
 
-# ============== Answer engine (latched) ==============
+# ========================== ANSWER ==========================
 if st.session_state.waiting_for_response and st.session_state.pending_input:
-    # Prevent reprocessing same request id on incidental reruns
-    if st.session_state.processed_seq == st.session_state.request_seq:
-        st.stop()
-    st.session_state.processed_seq = st.session_state.request_seq
-
     block = st.empty()
     with block.container():
         thinking = st.empty()
@@ -729,12 +734,13 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
 
         raw_q = st.session_state.pending_input or ""
         history_to_use = st.session_state.messages[-10:]
-        pdf_display = os.path.splitext(st.session_state.pdf_name)[0]
+        pdf_display = os.path.splitext(up.name)[0]
 
         intent = classify_reply_intent(raw_q, _last_assistant_text(history_to_use))
         is_deny = (intent == "DENY")
         is_confirm = (intent == "CONFIRM")
 
+        # ===== SPECIAL CASE: ETRAN CHEATSHEET =====
         # ===== SPECIAL CASE: ETRAN CHEATSHEET =====
         if raw_q.strip().lower() in {"etran cheatsheet", "etran cheat sheet", "etran"}:
             page3_text = (st.session_state.page_texts or {}).get(3, "")
@@ -744,7 +750,7 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
                 extracted = etran_extract_from_page3(page3_text)
                 table_md = render_etran_table(extracted)
                 answer = f"### Etran Cheatsheet\n\n{table_md}"
-
+        
             thinking.empty()
             with block.container():
                 type_bubble(answer)
@@ -768,12 +774,12 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
                     )
                 else:
                     entry = {"id": _new_id(), "role": "assistant", "content": answer}
-
+        
             st.session_state.messages.append(entry)
             st.session_state.pending_input = None
             st.session_state.waiting_for_response = False
-            st.stop()
-
+            st.stop()  # prevent generic RAG flow
+        
         # ===== SPECIAL CASE: VALUATION (page 3 only) =====
         if raw_q.strip().lower() in {"valuation", "fair market value", "fmv", "value"}:
             page3_text = (st.session_state.page_texts or {}).get(3, "")
@@ -782,12 +788,12 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
             else:
                 data = etran_extract_from_page3(page3_text)
                 fmv = (data.get("Concluded Value") or data.get("Fair Market Value") or "").strip()
-                company = _company_from_filename(st.session_state.pdf_name)
+                company = _company_from_filename(up.name)
                 if fmv:
                     answer = f"Valuation of {company} is {fmv}."
                 else:
                     answer = "I couldn’t find a clear Fair Market Value on page 3."
-
+        
             thinking.empty()
             with block.container():
                 type_bubble(answer)
@@ -811,12 +817,12 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
                     )
                 else:
                     entry = {"id": _new_id(), "role": "assistant", "content": answer}
-
+        
             st.session_state.messages.append(entry)
             st.session_state.pending_input = None
             st.session_state.waiting_for_response = False
             st.stop()
-
+        
         # ===== SPECIAL CASE: GOODWILL (page 3 only) =====
         if raw_q.strip().lower() in {"good will", "goodwill"}:
             page3_text = (st.session_state.page_texts or {}).get(3, "")
@@ -825,12 +831,12 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
             else:
                 data = etran_extract_from_page3(page3_text)
                 goodwill = (data.get("Goodwill Value") or "").strip()
-                company = _company_from_filename(st.session_state.pdf_name)
+                company = _company_from_filename(up.name)
                 if goodwill:
                     answer = f"Goodwill value of {company} is {goodwill}."
                 else:
                     answer = "I couldn’t find a clear Goodwill value on page 3."
-
+        
             thinking.empty()
             with block.container():
                 type_bubble(answer)
@@ -854,13 +860,13 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
                     )
                 else:
                     entry = {"id": _new_id(), "role": "assistant", "content": answer}
-
+        
             st.session_state.messages.append(entry)
             st.session_state.pending_input = None
             st.session_state.waiting_for_response = False
             st.stop()
 
-        # -------- Generic RAG flow --------
+
         if is_deny:
             st.session_state.last_suggestion = None
             answer = "Alright, if you have any more questions or need further assistance, feel free to ask!"
@@ -871,6 +877,7 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
             st.session_state.messages.append(entry)
             st.session_state.pending_input = None
             st.session_state.waiting_for_response = False
+
         else:
             effective_q = st.session_state.last_suggestion if (is_confirm and st.session_state.last_suggestion) else raw_q
             query_for_retrieval = condense_query(history_to_use, effective_q, pdf_display)
@@ -930,6 +937,7 @@ Conversation so far:
             ).content
 
             answer = sanitize_suggestion(answer, effective_q, docs)
+
             sug = extract_suggestion(answer)
             st.session_state.last_suggestion = _clean_heading(sug) if sug else None
 
