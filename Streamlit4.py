@@ -24,43 +24,6 @@ from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
 # ================= Setup =================
 load_dotenv()
 st.set_page_config(page_title="Underwriting Agent", layout="wide")
-
-# ---- No-dim, no-fade, no-anim while reruns happen ----
-if "_no_flicker_css" not in st.session_state:
-    st.session_state._no_flicker_css = True
-    st.markdown("""
-    <style>
-      /* Streamlit temporarily disables widgets during a rerun; keep them looking normal */
-      button:disabled,
-      .stButton button:disabled,
-      [data-testid="baseButton-secondary"]:disabled,
-      [data-testid="baseButton-primary"]:disabled,
-      [data-testid="stBaseButton-secondary"]:disabled,
-      [data-testid="stBaseButton-primary"]:disabled {
-        opacity: 1 !important;
-        filter: none !important;
-      }
-
-      /* Prevent any global fade/transition while app is running */
-      * {
-        transition: none !important;
-        animation: none !important;
-      }
-
-      /* Ensure the main view never fades */
-      [data-testid="stAppViewContainer"] {
-        opacity: 1 !important;
-      }
-
-      /* Disable any 'running' overlay effects some themes inject */
-      [data-testid="stAppViewContainer"]::before,
-      [data-testid="stDecoration"] {
-        display: none !important;
-      }
-    </style>
-    """, unsafe_allow_html=True)
-
-
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 DRIVE_FOLDER_FROM_SECRET = os.getenv("GOOGLE_DRIVE_FOLDER", "").strip()
@@ -117,12 +80,8 @@ if "next_msg_id" not in st.session_state:
 # ---------- styles (chat + reference styles) ----------
 st.markdown("""
 <style>
-.block-container{ padding-top:0!important; padding-bottom:160px!important; }
+.block-container{ padding-top:54px!important; padding-bottom:160px!important; }
 .block-container h1 { margin-top:0!important; }
-
-header[data-testid="stHeader"] { height:0 !important; }
-header[data-testid="stHeader"] * { display:none !important; }
-[data-testid="stAppViewBlockContainer"] .block-container { padding-top:0 !important; }
 
 /* Chat bubbles */
 .user-bubble {background:#007bff;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:right;margin:4px;}
@@ -398,7 +357,7 @@ def _ocr_page_with_gpt4o(img_png_bytes: bytes) -> str:
         return ""
 
 # ================= Builder =================
-@st.cache_resource(show_spinner=False)
+@st.cache_resource(show_spinner="📦 Processing & indexing PDF…")
 def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
     """
     Heavy work: page previews (base64 strings), selective OCR, LlamaParse, embeddings, FAISS, retriever
@@ -569,7 +528,7 @@ else:
                 _reset_chat()
 
 # ================= Main UI =================
-st.markdown("<h1 style='margin:0'>Underwriting Agent</h1>", unsafe_allow_html=True)
+st.title("Underwriting Agent")
 
 if "uploaded_file_from_drive" in st.session_state:
     file_badge_link(
@@ -605,45 +564,44 @@ if st.session_state.get("last_processed_pdf") != up.name:
     _reset_chat()
 
 # ===== Bottom-right pinned quick actions (compact pill) =====
-# ===== Floating Quick Action Pill (no layout gap) =====
+pill = st.container()
+with pill:
+    st.markdown("<span id='pin-bottom-right'></span>", unsafe_allow_html=True)
+    c1, c2, c3 = st.columns(3)
+    if c1.button("Valuation", key="qa_val"):        queue_question("Valuation")
+    if c2.button("Good will", key="qa_gw"):         queue_question("Good will")
+    if c3.button("Etran Cheatsheet", key="qa_etran"): queue_question("Etran Cheatsheet")
 
-# 1. Pure HTML pill pinned bottom-right
-st.markdown("""
-<div id="qs-pill" style="
-  position:fixed; right:24px; bottom:100px; z-index:10000;
-  display:flex; gap:12px; padding:10px 20px; border-radius:9999px;">
-  <button onclick="window.parent.postMessage({type:'qs','q':'Valuation'}, '*')">Valuation</button>
-  <button onclick="window.parent.postMessage({type:'qs','q':'Good will'}, '*')">Good will</button>
-  <button onclick="window.parent.postMessage({type:'qs','q':'Etran Cheatsheet'}, '*')">Etran Cheatsheet</button>
-</div>
-""", unsafe_allow_html=True)
-
-# 2. JS listener that posts chosen question into query params
 components.html("""
 <script>
-window.addEventListener('message', (e)=>{
-  if(e?.data?.type === 'qs'){
-    const q = e.data.q || '';
-    const url = new URL(window.parent.location);
-    url.searchParams.set('qs', q);
-    window.parent.history.replaceState({}, '', url);
-    window.parent.location.reload(); // trigger Streamlit rerun
-  }
-});
+(function pin(){
+  const d = window.parent.document;
+  const mark = d.querySelector('#pin-bottom-right');
+  if(!mark) return setTimeout(pin,120);
+
+  const block = mark.closest('div[data-testid="stVerticalBlock"]');
+  if(!block) return setTimeout(pin,120);
+  if(block.dataset.pinned === "1") return;
+  block.dataset.pinned = "1";
+
+  const host = block.closest('div[data-testid="stElementContainer"]');
+  if (host) { host.style.height='0px'; host.style.minHeight='0'; host.style.margin='0';
+              host.style.padding='0'; host.style.display='contents'; }
+
+  Object.assign(block.style, {
+    position:'fixed', right:'0px', bottom:'100px', zIndex:'10000',
+    display:'flex', flexWrap:'nowrap', gap:'12px', padding:'10px 118px',
+    borderRadius:'9999px', background:'transparent', border:'none',
+    boxShadow:'none', minWidth:'350px', width:'fit-content', whiteSpace:'nowrap',
+    pointerEvents:'auto'
+  });
+  Array.from(block.children||[]).forEach(ch => { ch.style.width='auto'; ch.style.margin='0'; });
+  block.querySelectorAll('button').forEach(b => {
+    b.style.padding='18px 32px'; b.style.fontSize='18px'; b.style.borderRadius='9999px';
+  });
+})();
 </script>
 """, height=0)
-
-# 3. Python side: read and consume that param
-q = st.query_params.get("qs")
-if q:
-    queue_question(q)
-    st.query_params.pop("qs", None)   # clear after use
-
-
-else:
-    # Render lightweight, inert placeholder so Streamlit doesn't rebuild widgets
-    st.markdown("<span id='pin-bottom-right'></span>", unsafe_allow_html=True)
-
 
 # Chat input
 user_q = st.chat_input("Type your question here…", key="main_chat_input")
