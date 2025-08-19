@@ -89,6 +89,22 @@ if "last_suggestion" not in st.session_state:
 if "next_msg_id" not in st.session_state:
     st.session_state.next_msg_id = 0
 
+# --- Sticky PDF helpers ---
+def _set_current_pdf(pdf_bytes: bytes, name: str):
+    st.session_state.pdf_bytes = pdf_bytes
+    st.session_state.pdf_name = name
+
+def _get_current_pdf_io():
+    """Return a BytesIO with .name set when a current PDF is in session, else None."""
+    b = st.session_state.get("pdf_bytes")
+    n = st.session_state.get("pdf_name")
+    if not b or not n:
+        return None
+    bio = io.BytesIO(b)
+    bio.name = n
+    return bio
+
+
 # ---------- styles (chat + reference styles) ----------
 st.markdown("""
 <style>
@@ -589,46 +605,57 @@ else:
             path = download_pdf(service, chosen["id"], chosen["name"])
             if path:
                 with open(path, "rb") as f:
-                    st.session_state.uploaded_file_from_drive = f.read()
-                st.session_state.uploaded_file_name = chosen["name"]
+                    _set_current_pdf(f.read(), chosen["name"])   # <— sticky
                 st.session_state.last_synced_file_id = chosen["id"]
+                st.session_state.uploaded_file_from_drive = st.session_state.pdf_bytes  # keep if you like
+                st.session_state.uploaded_file_name = chosen["name"]
                 _reset_chat()
+
 
 # ================= Main UI =================
 st.title("Underwriting Agent")
 
-if "uploaded_file_from_drive" in st.session_state:
-    file_badge_link(
-        st.session_state.uploaded_file_name,
-        st.session_state.uploaded_file_from_drive,
-        synced=True
-    )
-    up = io.BytesIO(st.session_state.uploaded_file_from_drive)
-    up.name = st.session_state.uploaded_file_name
-else:
-    up = st.file_uploader("Upload a valuation report PDF", type="pdf")
-    if up:
-        file_badge_link(up.name, up.getvalue(), synced=False)
-        if up.name != st.session_state.get("last_selected_upload"):
-            st.session_state.last_selected_upload = up.name
-            _reset_chat()
+# 1) Always try to restore from session first (survives reruns/keystrokes)
+up = _get_current_pdf_io()
 
-if not up:
+# 2) If nothing in session, show uploader.
+if up is None:
+    uploaded = st.file_uploader("Upload a valuation report PDF", type="pdf")
+    if uploaded is not None:
+        _set_current_pdf(uploaded.getvalue(), uploaded.name)
+        _reset_chat()
+        up = _get_current_pdf_io()
+
+# 3) If still nothing, block the app (no PDF selected yet)
+if up is None:
     st.warning("Please upload or load a PDF to continue.")
     st.stop()
 
+# 4) Badge for whichever source is active
+file_badge_link(up.name, st.session_state["pdf_bytes"], synced="uploaded_file_from_drive" in st.session_state)
+
+
 # Rebuild retriever when file changes
-if st.session_state.get("last_processed_pdf") != up.name:
-    pdf_bytes = up.getvalue()
-    st.session_state.pdf_bytes = pdf_bytes
+import hashlib
+
+def _hash(b: bytes) -> str:
+    return hashlib.sha256(b or b"").hexdigest()
+
+pdf_bytes = st.session_state["pdf_bytes"]
+curr_sig = (up.name, _hash(pdf_bytes))
+
+if st.session_state.get("last_processed_sig") != curr_sig:
     (st.session_state.retriever,
      st.session_state.page_images,
      st.session_state.page_texts) = build_retriever_from_pdf(pdf_bytes, up.name)
+
+    # reset chat to the two greetings
     st.session_state.messages = [
         {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
         {"role": "assistant", "content": "What can I help you with?"}
     ]
-    st.session_state.last_processed_pdf = up.name
+    st.session_state.last_processed_sig = curr_sig
+
 
 # ===== Bottom-right pinned quick actions (compact pill) - only show when a PDF is present =====
 if up:
