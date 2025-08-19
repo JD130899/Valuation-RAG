@@ -127,15 +127,30 @@ def file_badge_link(name: str, pdf_bytes: bytes, synced: bool = True):
     b64 = base64.b64encode(pdf_bytes).decode("ascii")
     label = "Using synced file:" if synced else "Using file:"
     link_id = f"open-file-{uuid.uuid4().hex[:8]}"
+    badge_id = f"file-badge-{uuid.uuid4().hex[:8]}"
+
+    # The <style> rule uses :has() to target the specific markdown container
+    # that contains our badge and removes its default bottom margin.
     st.markdown(
         f'''
-        <div style="background:#1f2c3a; padding:8px; border-radius:8px; color:#fff;">
-          ✅ <b>{label}</b>
-          <a id="{link_id}" href="#" target="_blank" rel="noopener" style="color:#93c5fd; text-decoration:none;">{base}</a>
+        <div id="{badge_id}" style="margin:0">
+          <div style="background:#1f2c3a;padding:8px;border-radius:8px;color:#fff;margin:0">
+            ✅ <b>{label}</b>
+            <a id="{link_id}" href="#" target="_blank" rel="noopener"
+               style="color:#93c5fd;text-decoration:none;">{base}</a>
+          </div>
         </div>
+        <style>
+          /* kill extra gap only under this badge */
+          div[data-testid="stMarkdownContainer"]:has(> #{badge_id}) {{
+            margin-bottom: 0 !important;
+          }}
+        </style>
         ''',
         unsafe_allow_html=True
     )
+
+    # keep your invisible iframe that wires up the blob URL to the link
     components.html(
         f'''<!doctype html><meta charset='utf-8'>
 <style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
