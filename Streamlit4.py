@@ -474,7 +474,7 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
     embedder = CohereEmbeddings(
         model="embed-english-v3.0",
         user_agent="langchain",
-        cohere_api_key=st.secrets["COHERE_API_KEY"]
+        cohere_api_key=os.environ["COHERE_API_KEY"]
     )
     vs = FAISS.from_documents(chunks, embedder)
 
@@ -487,7 +487,7 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
     reranker = CohereRerank(
         model="rerank-english-v3.0",
         user_agent="langchain",
-        cohere_api_key=st.secrets["COHERE_API_KEY"],
+        cohere_api_key=os.environ["COHERE_API_KEY"],
         top_n=20
     )
     retriever = ContextualCompressionRetriever(
