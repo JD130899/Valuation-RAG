@@ -1,56 +1,53 @@
+# gdrive_utils.py
 import os
 import io
 import json
 import streamlit as st
+
+from google.auth import default as google_auth_default
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 
-# === CONFIG ===
-SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
+# Drive scopes we need (read-only is enough)
+SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
+
+# Optional fallback folder (will be ignored if you pass a link/id)
+FOLDER_ID = "1XGyBBFhhQFiG43jpYJhNzZYi7C-_l5me"
 
 
 
-# === Auth ===
 def get_drive_service():
-    service_account_info = json.loads(os.environ["SERVICE_ACCOUNT_JSON"])
-    creds = Credentials.from_service_account_info(service_account_info, scopes=SCOPES)
-    return build('drive', 'v3', credentials=creds)
+    """
+    Try explicit SERVICE_ACCOUNT_JSON first (if set),
+    otherwise use Application Default Credentials (Cloud Run runtime SA).
+    """
+    sa_json = os.environ.get("SERVICE_ACCOUNT_JSON", "").strip()
 
-# === Fetch Latest PDF ===
-# gdrive_utils.py
-# ...
-#FOLDER_ID = "1VglZDFbufOxHTZ4qZ_feUw_XHaxacPxr"  # default
+    if sa_json:
+        # Explicit JSON path (Secret) flow
+        service_account_info = json.loads(sa_json)
+        creds = Credentials.from_service_account_info(service_account_info, scopes=SCOPES)
+    else:
+        # Default credentials (Cloud Run runtime account)
+        creds, _ = google_auth_default(scopes=SCOPES)
+
+    return build("drive", "v3", credentials=creds)
+
 
 def _extract_folder_id(folder_id_or_url: str) -> str:
-    """
-    Resolve folder ID. Preference order:
-      1) explicit argument (ID or full URL)
-      2) env var GOOGLE_DRIVE_FOLDER (from Secret)
-    """
-    # 1) explicit arg wins
     s = (folder_id_or_url or "").strip()
-    if s:
-        if s.startswith("http"):
-            return s.rstrip("/").split("/")[-1]
-        return s
+    if not s:
+        return FOLDER_ID
+    if s.startswith("http"):
+        # Handles: https://drive.google.com/drive/folders/<ID>
+        s = s.rstrip("/").split("/")[-1]
+    return s
 
-    # 2) env var fallback
-    env_val = os.getenv("GOOGLE_DRIVE_FOLDER", "").strip()
-    if env_val:
-        if env_val.startswith("http"):
-            return env_val.rstrip("/").split("/")[-1]
-        return env_val
-
-    raise ValueError("No Google Drive folder ID provided (argument or GOOGLE_DRIVE_FOLDER).")
 
 def get_all_pdfs(service, folder_id_or_url: str = None):
     folder_id = _extract_folder_id(folder_id_or_url)
-    query = (
-        f"'{folder_id}' in parents and "
-        "trashed = false and "
-        "mimeType = 'application/pdf'"
-    )
+    query = f"'{folder_id}' in parents and trashed = false"
     try:
         results = service.files().list(
             q=query,
@@ -61,17 +58,12 @@ def get_all_pdfs(service, folder_id_or_url: str = None):
             includeItemsFromAllDrives=True,
         ).execute()
         files = results.get("files", [])
-        if not files:
-            st.sidebar.warning("No PDFs returned by Drive for that folder ID.")
-        return files
+        return [f for f in files if f["name"].lower().endswith(".pdf")]
     except Exception as e:
-        st.sidebar.error(f"❌ Drive list error: {e}")
-        raise
+        st.error(f"❌ Error accessing Drive folder: {e}")
+        return []
 
 
-
-
-# === Download PDF ===
 def download_pdf(service, file_id, file_name):
     try:
         request = service.files().get_media(fileId=file_id)
@@ -81,8 +73,7 @@ def download_pdf(service, file_id, file_name):
             downloader = MediaIoBaseDownload(f, request)
             done = False
             while not done:
-                status, done = downloader.next_chunk()
-        #st.success(f"📥 Downloaded {file_name} to {file_path}")
+                _, done = downloader.next_chunk()
         return file_path
     except Exception as e:
         st.error(f"❌ Failed to download PDF: {e}")
