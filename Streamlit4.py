@@ -117,7 +117,7 @@ if "next_msg_id" not in st.session_state:
 # ---------- styles (chat + reference styles) ----------
 st.markdown("""
 <style>
-.block-container{ padding-top:54px!important; padding-bottom:160px!important; }
+.block-container{ padding-top:0!important; padding-bottom:160px!important; }
 .block-container h1 { margin-top:0!important; }
 
 /* Chat bubbles */
