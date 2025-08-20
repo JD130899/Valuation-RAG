@@ -9,7 +9,7 @@ import fitz  # PyMuPDF
 from PIL import Image
 from dotenv import load_dotenv
 import streamlit.components.v1 as components
-
+from sklearn.metrics.pairwise import cosine_similarity
 # LangChain / RAG deps
 from langchain_core.documents import Document
 from llama_cloud_services import LlamaParse
