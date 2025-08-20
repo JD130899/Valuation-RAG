@@ -538,25 +538,30 @@ If the user's question is unrelated to this PDF or requires information outside 
    • Return the answer in a **short, clear sentence** using the exact number from the context.  
      Example: “The Income (DCF) approach value is $1,150,000.”  
    • **Do NOT repeat the metric name or company name** unless the user asks.
-   
+
 
 2. **Table questions**  
    • PLEASE Return the full table (SHOULD'NT BE BROKEN) **with its header row** in GitHub-flavoured markdown.
 
-3. **Valuation method / theory / reasoning questions**
+3.Market Approach weights/valuation (router)
+If the question mentions weight/split/% or Market Approach (Net Sales, Gross Profit, EBITDA, EBIT, SDE):
+- Use ONLY the chunk that contains “MARKET APPROACH” and “Rounded Overall Method Weights”.
+- Output a table: | Method | Weight % | $ Value | (include 0% rows if shown).
+- Prefer exact numbers from that page and cite that page.
+- If not in Context, say: “Market Approach weights not found in the provided context.”
+   
+4. **Valuation method / theory / reasoning questions**
     
    • If the question involves **valuation methods**, **concluded value**, or topics like **Income Approach**, **Market Approach**, or **Valuation Summary**, do the following:
      - Combine and synthesize relevant information across all chunks.
      - Pay special attention to how **weights are distributed** (e.g., “50% DCF, 25% EBITDA, 25% SDE”).
      - Avoid oversimplifying if more detailed breakdowns (like subcomponents of market approach) are available.
-     - If a table gives a simplified view (e.g., "50% Market Approach"), but other parts break it down (e.g., 25% EBITDA + 25% SDE), **prefer the detailed breakdown with percent value**.   
-     - When describing weights, also mention the **corresponding dollar values** used in the context (e.g., “50% DCF = $3,712,000, 25% EBITDA = $4,087,000...”)
-     - **If Market approach is composed of sub-methods like EBITDA and SDE, then explicitly extract and show their individual weights and values, even if not listed together in a single table.**
 
-4. **Theory/textual question**  
+
+5. **Theory/textual question**  
    • Try to return an explanation **based on the context**.
    
-5. If you cannot find an answer in Context → reply exactly:
+6. If you cannot find an answer in Context → reply exactly:
    "Sorry I didnt understand the question. Did you mean SUGGESTION?"
 
 ---
