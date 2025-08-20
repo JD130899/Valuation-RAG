@@ -751,31 +751,31 @@ Conversation so far:
                         sims = cosine_similarity([emb_query], chunk_embs)[0]
                         ranked = sorted(list(zip(docs, sims)), key=lambda x: x[1], reverse=True)
                         top3 = [d for d,_ in ranked[:3]]
-                            ranking_prompt = PromptTemplate(
-                                template=(
-                                    "Given the user's question and 3 candidate context chunks, "
-                                    "reply with only the number (1, 2, or 3) of the chunk that best answers it.\n\n"
-                                    "Question:\n{question}\n\n"
-                                    "Chunk 1:\n{chunk1}\n\n"
-                                    "Chunk 2:\n{chunk2}\n\n"
-                                    "Chunk 3:\n{chunk3}\n\n"
-                                    "Best Chunk Number:"
-                                ),
-                                input_variables=["question", "chunk1", "chunk2", "chunk3"]
-                            )
-                            try:
-                                pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
-                                    ranking_prompt.invoke({
-                                        "question": query_for_retrieval,
-                                        "chunk1": top3[0].page_content,
-                                        "chunk2": top3[1].page_content,
-                                        "chunk3": top3[2].page_content
-                                    })
-                                ).content.strip()
-                                if pick.isdigit() and 1 <= int(pick) <= 3:
-                                    best_doc = top3[int(pick) - 1]
-                            except Exception:
-                                pass
+                        ranking_prompt = PromptTemplate(
+                            template=(
+                                "Given the user's question and 3 candidate context chunks, "
+                                "reply with only the number (1, 2, or 3) of the chunk that best answers it.\n\n"
+                                "Question:\n{question}\n\n"
+                                "Chunk 1:\n{chunk1}\n\n"
+                                "Chunk 2:\n{chunk2}\n\n"
+                                "Chunk 3:\n{chunk3}\n\n"
+                                "Best Chunk Number:"
+                            ),
+                            input_variables=["question", "chunk1", "chunk2", "chunk3"]
+                        )
+                        try:
+                            pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
+                                ranking_prompt.invoke({
+                                    "question": query_for_retrieval,
+                                    "chunk1": top3[0].page_content,
+                                    "chunk2": top3[1].page_content,
+                                    "chunk3": top3[2].page_content
+                                })
+                            ).content.strip()
+                            if pick.isdigit() and 1 <= int(pick) <= 3:
+                                best_doc = top3[int(pick) - 1]
+                        except Exception:
+                            pass
 
                         if best_doc is not None:
                             ref_page = best_doc.metadata.get("page_number")
