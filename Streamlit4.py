@@ -77,6 +77,24 @@ def _get_active_pdf():
         return bio
     return None
 
+def _rehydrate_active_pdf_from_disk():
+    """If the active PDF vanished (after rerun/restart), restore it from the
+    last persisted path on disk so the app doesn't bounce back to the landing screen."""
+    if st.session_state.get("active_pdf_bytes") and st.session_state.get("active_pdf_name"):
+        return  # we're fine
+
+    path = st.session_state.get("persisted_pdf_path")
+    if path and os.path.exists(path):
+        try:
+            with open(path, "rb") as f:
+                data = f.read()
+            _set_active_pdf(os.path.basename(path), data)
+        except Exception:
+            # If anything goes wrong, just leave things as-is;
+            # the UI will still show the uploader.
+            pass
+
+
 
 # ---------- Session state ----------
 if "last_synced_file_id" not in st.session_state:
@@ -386,6 +404,9 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
     with open(pdf_path, "wb") as f:
         f.write(pdf_bytes)
 
+    # ▼ ADD THIS:
+    st.session_state["persisted_pdf_path"] = pdf_path
+
     # Open with PyMuPDF
     doc = fitz.open(pdf_path)
 
@@ -514,6 +535,7 @@ if uploaded:
 # 2) If a Drive file was chosen earlier, we already set active_pdf_* in the sidebar code
 
 # 3) Always reconstruct the working handle from session state
+_rehydrate_active_pdf_from_disk()
 up = _get_active_pdf()
 if up:
     # nice badge if we came from Drive
