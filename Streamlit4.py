@@ -1,4 +1,4 @@
-# app.py  (stable upload + Drive + sticky state)
+# app.py  (Cloud Run safe: writes go to /tmp, safer memory, error-surfacing)
 
 import os, io, pickle, base64, re, uuid, time, json, hashlib
 import streamlit as st
@@ -37,12 +37,13 @@ VECTOR_DIR   = os.path.join(DATA_DIR, "vectorstore")
 os.makedirs(UPLOADED_DIR, exist_ok=True)
 os.makedirs(VECTOR_DIR,   exist_ok=True)
 
+# quick visibility if instance restarts
+st.sidebar.caption(f"PID: {os.getpid()}")
 
 # ---------- small helpers ----------
 def type_bubble(text: str, *, base_delay: float = 0.012, cutoff_chars: int = 2000):
     placeholder = st.empty()
-    buf = []
-    count = 0
+    buf, count = [], 0
     for ch in text:
         buf.append(ch); count += 1
         placeholder.markdown(
@@ -335,8 +336,7 @@ def condense_query(chat_history, user_input: str, pdf_name: str) -> str:
 def _detect_selected_pages(doc: fitz.Document):
     want = set()
     total = len(doc)
-    if total >= 3:
-        want.add(3)
+    if total >= 3: want.add(3)
     income_hits, market_hits, valuation_summary_page = [], [], None
     for i in range(total):
         text = (doc[i].get_text() or "").upper()
@@ -379,7 +379,7 @@ def _parse_with_retry(pdf_path: str, attempts: int = 3, delay: float = 2.0):
     last_err = None
     for i in range(attempts):
         try:
-            parser = LlamaParse(api_key=os.environ["LLAMA_CLOUD_API_KEY"], num_workers=2)  # gentler
+            parser = LlamaParse(api_key=os.environ["LLAMA_CLOUD_API_KEY"], num_workers=2)
             return parser.parse(pdf_path)
         except Exception as e:
             last_err = e
@@ -435,9 +435,14 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str, file_hash: str):
             pages.append(Document(page_content=text, metadata={"page_number": pnum}))
             page_texts[pnum] = text
 
-    # Split → Embed → Index
-    splitter = RecursiveCharacterTextSplitter(chunk_size=3300, chunk_overlap=0)
+    # Split → (cap) → Embed → Index (lower memory)
+    splitter = RecursiveCharacterTextSplitter(chunk_size=2200, chunk_overlap=200)
     chunks = splitter.split_documents(pages)
+
+    MAX_CHUNKS = int(os.getenv("MAX_CHUNKS", "800"))  # cap for Cloud Run memory safety
+    if len(chunks) > MAX_CHUNKS:
+        chunks = chunks[:MAX_CHUNKS]
+
     for idx, c in enumerate(chunks):
         c.metadata["chunk_id"] = idx + 1
 
@@ -458,16 +463,24 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str, file_hash: str):
         model="rerank-english-v3.0",
         user_agent="langchain",
         cohere_api_key=os.environ["COHERE_API_KEY"],
-        top_n=20
+        top_n=10
     )
     retriever = ContextualCompressionRetriever(
         base_retriever=vs.as_retriever(
             search_type="mmr",
-            search_kwargs={"k": 50, "fetch_k": 100, "lambda_mult": 0.9}
+            search_kwargs={"k": 20, "fetch_k": 40, "lambda_mult": 0.9}
         ),
         base_compressor=reranker
     )
     return retriever, page_images_b64, page_texts
+
+# Safety wrapper so errors don’t crash the process (which would reset state)
+def _safe_build(pdf_bytes: bytes, name: str, hsh: str):
+    try:
+        return build_retriever_from_pdf(pdf_bytes, name, hsh)
+    except Exception as e:
+        st.error(f"PDF processing failed: {e}")
+        return None, None, None
 
 # --------- ETRAN helpers ----------
 def etran_extract_from_page3(page3_text: str) -> dict:
@@ -568,18 +581,22 @@ if st.session_state.get("active_pdf_from_drive"):
 else:
     file_badge_link(st.session_state.active_pdf_name, st.session_state.active_pdf_bytes, synced=False)
 
-# Rebuild retriever when file content changes
+# Rebuild retriever when file content changes (safe, non-crashing)
 if st.session_state.get("last_processed_hash") != st.session_state.active_pdf_hash:
     st.session_state.last_processed_hash = st.session_state.active_pdf_hash
     pdf_bytes = up.getvalue()
     st.session_state.pdf_bytes = pdf_bytes
-    st.session_state.pdf_b64 = base64.b64encode(pdf_bytes).decode("ascii")
+    st.session_state.pdf_b64  = base64.b64encode(pdf_bytes).decode("ascii")
 
-    (st.session_state.retriever,
-     st.session_state.page_images,
-     st.session_state.page_texts) = build_retriever_from_pdf(
-        pdf_bytes, up.name, st.session_state.active_pdf_hash
-    )
+    retr, imgs, texts = _safe_build(pdf_bytes, up.name, st.session_state.active_pdf_hash)
+    if retr is None:
+        # allow retry without reloading the app
+        st.session_state.last_processed_hash = None
+        st.stop()
+
+    st.session_state.retriever   = retr
+    st.session_state.page_images = imgs
+    st.session_state.page_texts  = texts
     _reset_chat()
 
 # Chat input
@@ -757,16 +774,15 @@ Conversation so far:
             with block.container():
                 type_bubble(answer)
                 skip_reference = is_unrelated or is_clarify
-                best_doc = None  # <--- define up front
+                best_doc = None
                 if docs and not skip_reference:
                     try:
                         texts = [d.page_content for d in docs]
-                        emb_query = CohereEmbeddings(
+                        emb = CohereEmbeddings(
                             model="embed-english-v3.0", user_agent="langchain", cohere_api_key=os.environ["COHERE_API_KEY"]
-                        ).embed_query(answer)
-                        chunk_embs = CohereEmbeddings(
-                            model="embed-english-v3.0", user_agent="langchain", cohere_api_key=os.environ["COHERE_API_KEY"]
-                        ).embed_documents(texts)
+                        )
+                        emb_query = emb.embed_query(answer)
+                        chunk_embs = emb.embed_documents(texts)
                         sims = cosine_similarity([emb_query], chunk_embs)[0]
                         ranked = sorted(list(zip(docs, sims)), key=lambda x: x[1], reverse=True)
                         top3 = [d for d,_ in ranked[:3]]
@@ -799,7 +815,7 @@ Conversation so far:
                                 pass
 
                         if best_doc is None and top3:
-                            best_doc = top3[0]  # graceful fallback
+                            best_doc = top3[0]  # fallback
 
                         if best_doc is not None:
                             ref_page = best_doc.metadata.get("page_number")
