@@ -13,6 +13,12 @@ from google.auth import default as google_auth_default
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 FOLDER_ID = "1XGyBBFhhQFiG43jpYJhNzZYi7C-_l5me"
 
+DATA_DIR = os.getenv("DATA_DIR", "/tmp/uw_agent")
+UPLOADED_DIR = os.path.join(DATA_DIR, "uploaded")
+os.makedirs(UPLOADED_DIR, exist_ok=True)
+
+
+
 def _emit(msg, level="info"):
     if st:
         fn = getattr(st, level, st.info)
@@ -60,8 +66,7 @@ def get_all_pdfs(service, folder_id_or_url: str = None):
 def download_pdf(service, file_id, file_name):
     try:
         request = service.files().get_media(fileId=file_id)
-        os.makedirs("uploaded", exist_ok=True)
-        file_path = os.path.join("uploaded", file_name)
+        file_path = os.path.join(UPLOADED_DIR, file_name)   # << changed
         with io.FileIO(file_path, "wb") as f:
             downloader = MediaIoBaseDownload(f, request)
             done = False
