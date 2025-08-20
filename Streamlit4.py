@@ -639,36 +639,35 @@ Conversation so far:
                     try:
                         top5 = docs[:5]
                         best_doc = top5[0] if top5 else None
-                        if len(top5) >= 5:
+                        if len(top5) >= 2:   # allow ranking even if we have only 2–4
                             ranking_prompt = PromptTemplate(
                                 template=(
-                                    "Given the user's question and 3 candidate context chunks, "
-                                    "reply with only the number (1, 2,3,4 or 5) of the chunk that best answers it.\n\n"
+                                    "Given the user's question and {n} candidate context chunks, "
+                                    "reply with only the number (1–{n}) of the chunk that best answers it.\n\n"
                                     "Question:\n{question}\n\n"
-                                    "Chunk 1:\n{chunk1}\n\n"
-                                    "Chunk 2:\n{chunk2}\n\n"
-                                    "Chunk 3:\n{chunk3}\n\n"
-                                    "Chunk 4:\n{chunk4}\n\n"
-                                    "Chunk 5:\n{chunk5}\n\n"
+                                    "{chunks}\n\n"
                                     "Best Chunk Number:"
                                 ),
-                                input_variables=["question", "chunk1", "chunk2", "chunk3", "chunk4", "chunk5"]
+                                input_variables=["n", "question", "chunks"]
+                            )
+                            chunks_block = "\n\n".join(
+                                [f"Chunk {i+1}:\n{d.page_content}" for i, d in enumerate(top5)]
                             )
                             try:
                                 pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
                                     ranking_prompt.invoke({
+                                        "n": len(top5),
                                         "question": query_for_retrieval,
-                                        "chunk1": top5[0].page_content,
-                                        "chunk2": top5[1].page_content,
-                                        "chunk3": top5[2].page_content,
-                                        "chunk4": top5[3].page_content,
-                                        "chunk5": top5[4].page_content
+                                        "chunks": chunks_block
                                     })
                                 ).content.strip()
-                                if pick.isdigit() and 1 <= int(pick) <= 5:
-                                    best_doc = top5[int(pick) - 1]
+                                import re
+                                m = re.search(r"\b([1-" + str(len(top5)) + r"])\b", pick)
+                                if m:
+                                    best_doc = top5[int(m.group(1)) - 1]
                             except Exception:
                                 pass
+
 
                         if best_doc is not None:
                             ref_page = best_doc.metadata.get("page_number")
