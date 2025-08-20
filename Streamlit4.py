@@ -30,6 +30,14 @@ DRIVE_FOLDER_FROM_SECRET = os.getenv("GOOGLE_DRIVE_FOLDER", "").strip()
 HARDCODED_FOLDER_LINK = "https://drive.google.com/drive/folders/1XGyBBFhhQFiG43jpYJhNzZYi7C-_l5me"
 FOLDER_TO_USE = DRIVE_FOLDER_FROM_SECRET or HARDCODED_FOLDER_LINK
 
+# Writable base dir (Cloud Run allows /tmp)
+DATA_DIR = os.getenv("DATA_DIR", "/tmp/uw_agent")
+UPLOADED_DIR = os.path.join(DATA_DIR, "uploaded")
+VECTOR_DIR   = os.path.join(DATA_DIR, "vectorstore")
+os.makedirs(UPLOADED_DIR, exist_ok=True)
+os.makedirs(VECTOR_DIR,   exist_ok=True)
+
+
 # ---------- small helpers ----------
 def type_bubble(text: str, *, base_delay: float = 0.012, cutoff_chars: int = 2000):
     placeholder = st.empty()
@@ -384,8 +392,7 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str, file_hash: str):
     Heavy work: page previews (base64 strings), selective OCR, LlamaParse, embeddings, FAISS, retriever
     Cache key includes file_hash so same-named-but-different-content rebuilds.
     """
-    os.makedirs("uploaded", exist_ok=True)
-    pdf_path = os.path.join("uploaded", f"{file_hash[:8]}_{file_name}")
+    pdf_path = os.path.join(UPLOADED_DIR, f"{file_hash[:8]}_{file_name}")
     with open(pdf_path, "wb") as f:
         f.write(pdf_bytes)
 
@@ -441,7 +448,7 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str, file_hash: str):
     )
     vs = FAISS.from_documents(chunks, embedder)
 
-    store = os.path.join("vectorstore", file_hash)
+    store = os.path.join(VECTOR_DIR, file_hash)
     os.makedirs(store, exist_ok=True)
     vs.save_local(store, index_name="faiss")
     with open(os.path.join(store, "metadata.pkl"), "wb") as mf:
