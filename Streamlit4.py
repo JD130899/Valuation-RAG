@@ -469,6 +469,9 @@ else:
                     st.session_state.uploaded_file_from_drive = f.read()
                 st.session_state.uploaded_file_name = chosen["name"]
                 st.session_state.last_synced_file_id = chosen["id"]
+                # NEW: persist a canonical copy used across reruns
+                st.session_state.pdf_bytes = st.session_state.uploaded_file_from_drive
+                st.session_state.pdf_name  = st.session_state.uploaded_file_name
                 _reset_chat()
 
 # ================= Main UI =================
@@ -483,12 +486,21 @@ if "uploaded_file_from_drive" in st.session_state:
     up = io.BytesIO(st.session_state.uploaded_file_from_drive)
     up.name = st.session_state.uploaded_file_name
 else:
-    up = st.file_uploader("Upload a valuation report PDF", type="pdf")
+    up = st.file_uploader("Upload a valuation report PDF", type="pdf", key="main_uploader")
     if up:
         file_badge_link(up.name, up.getvalue(), synced=False)
+        st.session_state.pdf_bytes = up.getvalue()
+        st.session_state.pdf_name  = up.name
         if up.name != st.session_state.get("last_selected_upload"):
             st.session_state.last_selected_upload = up.name
             _reset_chat()
+
+# Reconstruct `up` if widget temporarily returns None on a rerun
+if not ("uploaded_file_from_drive" in st.session_state):
+    if up is None and "pdf_bytes" in st.session_state and "pdf_name" in st.session_state:
+        up = io.BytesIO(st.session_state.pdf_bytes)
+        up.name = st.session_state.pdf_name
+
 
 if not up:
     st.warning("Please upload or load a PDF to continue.")
@@ -500,12 +512,17 @@ if st.session_state.get("last_processed_pdf") != up.name:
     pdf_bytes = up.getvalue()
     st.session_state.pdf_bytes = pdf_bytes
     st.session_state.pdf_b64 = base64.b64encode(pdf_bytes).decode("ascii")
+    st.write("debug:", bool(up), "has_pdf_bytes:", "pdf_bytes" in st.session_state)
 
-    (st.session_state.retriever,
-     st.session_state.page_images,
-     st.session_state.page_texts) = build_retriever_from_pdf(pdf_bytes, up.name)
 
-    _reset_chat()
+    try:
+        (st.session_state.retriever,
+         st.session_state.page_images,
+         st.session_state.page_texts) = build_retriever_from_pdf(st.session_state.pdf_bytes, st.session_state.pdf_name)
+    except Exception as e:
+        st.error("Couldn’t finish building the index. You can still try questions; I’ll use partial context.")
+        st.exception(e)
+
 
 
 # Chat input
