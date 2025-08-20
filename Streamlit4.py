@@ -1,11 +1,11 @@
-# app.py  (Cloud Run safe; /tmp storage; memory-capped; auto-resume; error-surfacing)
+# app.py  (drop-in replacement)
 
-import os, io, pickle, base64, re, uuid, time, json, hashlib
+import os, io, pickle, base64, re, uuid, time, json
 import streamlit as st
 import fitz  # PyMuPDF
+from PIL import Image
 from dotenv import load_dotenv
 import streamlit.components.v1 as components
-from sklearn.metrics.pairwise import cosine_similarity
 
 # LangChain / RAG deps
 from langchain_core.documents import Document
@@ -24,32 +24,17 @@ from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
 # ================= Setup =================
 load_dotenv()
 st.set_page_config(page_title="Underwriting Agent", layout="wide")
-
 openai.api_key = os.getenv("OPENAI_API_KEY")
+
 DRIVE_FOLDER_FROM_SECRET = os.getenv("GOOGLE_DRIVE_FOLDER", "").strip()
 HARDCODED_FOLDER_LINK = "https://drive.google.com/drive/folders/1XGyBBFhhQFiG43jpYJhNzZYi7C-_l5me"
 FOLDER_TO_USE = DRIVE_FOLDER_FROM_SECRET or HARDCODED_FOLDER_LINK
 
-# Writable base dir (Cloud Run allows /tmp)
-DATA_DIR     = os.getenv("DATA_DIR", "/tmp/uw_agent")
-UPLOADED_DIR = os.path.join(DATA_DIR, "uploaded")
-VECTOR_DIR   = os.path.join(DATA_DIR, "vectorstore")
-os.makedirs(UPLOADED_DIR, exist_ok=True)
-os.makedirs(VECTOR_DIR,   exist_ok=True)
-
-# tuning knobs (env-configurable)
-ENABLE_OCR  = os.getenv("ENABLE_OCR", "0") == "1"     # off by default to save time/memory
-MAX_CHUNKS  = int(os.getenv("MAX_CHUNKS", "600"))     # cap chunks to avoid OOM
-CHUNK_SIZE  = int(os.getenv("CHUNK_SIZE", "2000"))
-CHUNK_OVERL = int(os.getenv("CHUNK_OVERLAP", "150"))
-
-# quick visibility if instance restarts
-st.sidebar.caption(f"PID: {os.getpid()}")
-
 # ---------- small helpers ----------
 def type_bubble(text: str, *, base_delay: float = 0.012, cutoff_chars: int = 2000):
     placeholder = st.empty()
-    buf, count = [], 0
+    buf = []
+    count = 0
     for ch in text:
         buf.append(ch); count += 1
         placeholder.markdown(
@@ -74,85 +59,36 @@ def _reset_chat():
     st.session_state.waiting_for_response = False
     st.session_state.last_suggestion = None
 
-# ---- Sticky active PDF (single source of truth) ----
-def _set_active_pdf(name: str, data: bytes, *, came_from_drive: bool):
-    st.session_state.active_pdf_name  = name
-    st.session_state.active_pdf_bytes = data
-    st.session_state.active_pdf_hash  = hashlib.md5(data).hexdigest()
-    st.session_state.active_pdf_from_drive = bool(came_from_drive)
-    # also persist to a local temp file so we can re-open after soft restarts
-    path = os.path.join(UPLOADED_DIR, f"{st.session_state.active_pdf_hash[:8]}_{name}")
-    with open(path, "wb") as f:
-        f.write(data)
-    st.session_state.active_pdf_path = path
-    # Force (re)build for new content
-    st.session_state.last_processed_hash = None
-
-def _get_active_pdf():
-    """Return a BytesIO of the active PDF or try to recover it from disk/Drive."""
-    data = st.session_state.get("active_pdf_bytes")
-    name = st.session_state.get("active_pdf_name")
-
-    # If still in memory, return it
-    if data and name:
-        bio = io.BytesIO(data); bio.name = name
-        return bio
-
-    # Try local temp file (same instance restarts but /tmp survives)
-    p = st.session_state.get("active_pdf_path")
-    if p and os.path.exists(p):
-        with open(p, "rb") as f:
-            data = f.read()
-        st.session_state.active_pdf_bytes = data
-        if not name:
-            # best-effort recover
-            st.session_state.active_pdf_name = os.path.basename(p).split("_", 1)[-1]
-        bio = io.BytesIO(data); bio.name = st.session_state.active_pdf_name
-        return bio
-
-    # Auto-reload from Drive if we know the last synced file id
-    if st.session_state.get("active_pdf_from_drive") and st.session_state.get("last_synced_file_id"):
-        try:
-            service = get_drive_service()
-            # we also stored the name when it was loaded
-            nm = st.session_state.get("active_pdf_name") or "file.pdf"
-            path = download_pdf(service, st.session_state["last_synced_file_id"], nm)
-            if path and os.path.exists(path):
-                with open(path, "rb") as f:
-                    _set_active_pdf(nm, f.read(), came_from_drive=True)
-                bio = io.BytesIO(st.session_state.active_pdf_bytes); bio.name = nm
-                return bio
-        except Exception:
-            pass
-
-    # Give up
-    return None
-
 # ---------- Session state ----------
-defaults = {
-    "last_synced_file_id": None,
-    "messages": None,
-    "pending_input": None,
-    "waiting_for_response": False,
-    "page_images": {},
-    "page_texts": {},
-    "last_suggestion": None,
-    "next_msg_id": 0,
-}
-for k,v in defaults.items():
-    if k not in st.session_state:
-        st.session_state[k] = v
-if st.session_state["messages"] is None:
+if "last_synced_file_id" not in st.session_state:
+    st.session_state.last_synced_file_id = None
+if "messages" not in st.session_state:
     _reset_chat()
+if "pending_input" not in st.session_state:
+    st.session_state.pending_input = None
+if "waiting_for_response" not in st.session_state:
+    st.session_state.waiting_for_response = False
+if "page_images" not in st.session_state:
+    st.session_state.page_images = {}  # {page_number:int -> base64 PNG string}
+if "page_texts" not in st.session_state:
+    st.session_state.page_texts = {}
+if "last_suggestion" not in st.session_state:
+    st.session_state.last_suggestion = None
+if "next_msg_id" not in st.session_state:
+    st.session_state.next_msg_id = 0
 
-# ---------- styles ----------
+# ---------- styles (chat + reference styles) ----------
 st.markdown("""
 <style>
 .block-container{ padding-top:54px!important; padding-bottom:160px!important; }
 .block-container h1 { margin-top:0!important; }
+
+/* Chat bubbles */
 .user-bubble {background:#007bff;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:right;margin:4px;}
 .assistant-bubble {background:#1e1e1e;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:left;margin:4px;}
 .clearfix::after {content:"";display:table;clear:both;}
+
+/* Reference card */
 .ref{ display:block; width:60%; max-width:900px; margin:6px 0 12px 8px; }
 .ref summary{
   display:inline-flex; align-items:center; gap:8px; cursor:pointer; list-style:none; outline:none;
@@ -176,8 +112,9 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 def _new_id():
+    n = st.session_state.next_msg_id
     st.session_state.next_msg_id += 1
-    return f"m{st.session_state.next_msg_id}"
+    return f"m{n}"
 
 # ==================== INTERACTIONS ====================
 def queue_question(q: str):
@@ -220,6 +157,7 @@ def file_badge_link(name: str, pdf_bytes: bytes, synced: bool = True):
     )
 
 def render_reference_card(label: str, img_b64: str, page: int, key: str):
+    """Uses the single shared st.session_state.pdf_b64 (not per-message)."""
     pdf_b64 = st.session_state.get("pdf_b64", "")
     st.markdown(
         f"""
@@ -379,7 +317,8 @@ def condense_query(chat_history, user_input: str, pdf_name: str) -> str:
 def _detect_selected_pages(doc: fitz.Document):
     want = set()
     total = len(doc)
-    if total >= 3: want.add(3)
+    if total >= 3:
+        want.add(3)
     income_hits, market_hits, valuation_summary_page = [], [], None
     for i in range(total):
         text = (doc[i].get_text() or "").upper()
@@ -418,24 +357,13 @@ def _ocr_page_with_gpt4o(img_png_bytes: bytes) -> str:
         return ""
 
 # ================= Builder =================
-def _parse_with_retry(pdf_path: str, attempts: int = 3, delay: float = 2.0):
-    last_err = None
-    for i in range(attempts):
-        try:
-            parser = LlamaParse(api_key=os.environ["LLAMA_CLOUD_API_KEY"], num_workers=2)
-            return parser.parse(pdf_path)
-        except Exception as e:
-            last_err = e
-            time.sleep(delay * (2**i))
-    raise last_err if last_err else RuntimeError("Unknown parse error")
-
 @st.cache_resource(show_spinner="📦 Processing & indexing PDF…")
-def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str, file_hash: str):
+def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
     """
-    Heavy work: page previews, (optional) OCR, LlamaParse, embeddings, FAISS, retriever.
-    Cache key includes file_hash so same-named-but-different-content rebuilds.
+    Heavy work: page previews (base64 strings), selective OCR, LlamaParse, embeddings, FAISS, retriever
     """
-    pdf_path = os.path.join(UPLOADED_DIR, f"{file_hash[:8]}_{file_name}")
+    os.makedirs("uploaded", exist_ok=True)
+    pdf_path = os.path.join("uploaded", file_name)
     with open(pdf_path, "wb") as f:
         f.write(pdf_bytes)
 
@@ -445,26 +373,28 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str, file_hash: str):
     # Build base64 PNG previews (reduced DPI to save memory)
     page_images_b64 = {}
     for i, page in enumerate(doc):
-        pix = page.get_pixmap(dpi=110)
+        pix = page.get_pixmap(dpi=120)  # 96–120 is plenty
         img_b64 = base64.b64encode(pix.tobytes("png")).decode("ascii")
         page_images_b64[i + 1] = img_b64
 
-    # OCR only if enabled
+    # Detect which pages to override with OCR
+    selected_pages = _detect_selected_pages(doc)
     ocr_text_by_page = {}
-    if ENABLE_OCR:
-        selected_pages = _detect_selected_pages(doc)
-        for pnum in sorted(selected_pages):
-            try:
-                img_b = base64.b64decode(page_images_b64[pnum])
-                ocr_text = _ocr_page_with_gpt4o(img_b)
-                if ocr_text:
-                    ocr_text_by_page[pnum] = ocr_text
-            except Exception:
-                pass
+    for pnum in sorted(selected_pages):
+        try:
+            # Use the already-rendered preview (saves memory)
+            img_b = base64.b64decode(page_images_b64[pnum])
+            ocr_text = _ocr_page_with_gpt4o(img_b)
+            if ocr_text:
+                ocr_text_by_page[pnum] = ocr_text
+        except Exception:
+            pass
+
     doc.close()
 
-    # Parse entire document with LlamaParse (with retry)
-    result = _parse_with_retry(pdf_path)
+    # Parse entire document with LlamaParse
+    parser = LlamaParse(api_key=os.environ["LLAMA_CLOUD_API_KEY"], num_workers=4)
+    result = parser.parse(pdf_path)
 
     # Build pages array with OCR overrides
     pages, page_texts = [], {}
@@ -479,13 +409,9 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str, file_hash: str):
             pages.append(Document(page_content=text, metadata={"page_number": pnum}))
             page_texts[pnum] = text
 
-    # Split → (cap) → Embed → Index (lower memory)
-    splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERL)
+    # Split → Embed → Index
+    splitter = RecursiveCharacterTextSplitter(chunk_size=3300, chunk_overlap=0)
     chunks = splitter.split_documents(pages)
-
-    if len(chunks) > MAX_CHUNKS:
-        chunks = chunks[:MAX_CHUNKS]
-
     for idx, c in enumerate(chunks):
         c.metadata["chunk_id"] = idx + 1
 
@@ -496,7 +422,7 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str, file_hash: str):
     )
     vs = FAISS.from_documents(chunks, embedder)
 
-    store = os.path.join(VECTOR_DIR, file_hash)
+    store = os.path.join("vectorstore", file_name)
     os.makedirs(store, exist_ok=True)
     vs.save_local(store, index_name="faiss")
     with open(os.path.join(store, "metadata.pkl"), "wb") as mf:
@@ -506,26 +432,18 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str, file_hash: str):
         model="rerank-english-v3.0",
         user_agent="langchain",
         cohere_api_key=os.environ["COHERE_API_KEY"],
-        top_n=10
+        top_n=20
     )
     retriever = ContextualCompressionRetriever(
         base_retriever=vs.as_retriever(
             search_type="mmr",
-            search_kwargs={"k": 15, "fetch_k": 30, "lambda_mult": 0.9}
+            search_kwargs={"k": 50, "fetch_k": 100, "lambda_mult": 0.9}
         ),
         base_compressor=reranker
     )
     return retriever, page_images_b64, page_texts
 
-# Safety wrapper so errors don’t crash the process (which would reset state)
-def _safe_build(pdf_bytes: bytes, name: str, hsh: str):
-    try:
-        return build_retriever_from_pdf(pdf_bytes, name, hsh)
-    except Exception as e:
-        st.error(f"PDF processing failed: {e}")
-        return None, None, None
-
-# --------- ETRAN helpers ----------
+# --------- ETRAN CHEATSHEET HELPERS ----------
 def etran_extract_from_page3(page3_text: str) -> dict:
     want_keys = [
         "Concluded Value",
@@ -578,6 +496,7 @@ def render_etran_table(dynamic: dict) -> str:
 
 # ================= Sidebar: Google Drive loader =================
 service = get_drive_service()
+
 pdf_files = get_all_pdfs(service, FOLDER_TO_USE)
 st.sidebar.caption(f"📁 Using Drive folder: {FOLDER_TO_USE}")
 
@@ -597,50 +516,92 @@ else:
 
     if st.sidebar.button("Load selected PDF"):
         chosen = next(f for f in pdf_files if f["name"] == sel_name)
-        path = download_pdf(service, chosen["id"], chosen["name"])
-        if path:
-            with open(path, "rb") as f:
-                _set_active_pdf(chosen["name"], f.read(), came_from_drive=True)
-            st.session_state.last_synced_file_id = chosen["id"]
-            _reset_chat()
+        if chosen["id"] == st.session_state.get("last_synced_file_id"):
+            st.sidebar.info("Already loaded.")
+        else:
+            path = download_pdf(service, chosen["id"], chosen["name"])
+            if path:
+                with open(path, "rb") as f:
+                    st.session_state.uploaded_file_from_drive = f.read()
+                st.session_state.uploaded_file_name = chosen["name"]
+                st.session_state.last_synced_file_id = chosen["id"]
+                _reset_chat()
 
 # ================= Main UI =================
 st.title("Underwriting Agent")
 
-# Uploader (always same key; we copy into sticky state)
-uploaded = st.file_uploader("Upload a valuation report PDF", type="pdf", key="uploader")
-if uploaded is not None:
-    _set_active_pdf(uploaded.name, uploaded.getvalue(), came_from_drive=False)
-    _reset_chat()
+if "uploaded_file_from_drive" in st.session_state:
+    file_badge_link(
+        st.session_state.uploaded_file_name,
+        st.session_state.uploaded_file_from_drive,
+        synced=True
+    )
+    up = io.BytesIO(st.session_state.uploaded_file_from_drive)
+    up.name = st.session_state.uploaded_file_name
+else:
+    up = st.file_uploader("Upload a valuation report PDF", type="pdf")
+    if up:
+        file_badge_link(up.name, up.getvalue(), synced=False)
+        if up.name != st.session_state.get("last_selected_upload"):
+            st.session_state.last_selected_upload = up.name
+            _reset_chat()
 
-up = _get_active_pdf()
 if not up:
     st.warning("Please upload or load a PDF to continue.")
     st.stop()
 
-# “Using file …” badge
-if st.session_state.get("active_pdf_from_drive"):
-    file_badge_link(st.session_state.active_pdf_name, st.session_state.active_pdf_bytes, synced=True)
-else:
-    file_badge_link(st.session_state.active_pdf_name, st.session_state.active_pdf_bytes, synced=False)
-
-# Rebuild retriever when file content changes (safe, non-crashing)
-if st.session_state.get("last_processed_hash") != st.session_state.active_pdf_hash:
-    st.session_state.last_processed_hash = st.session_state.active_pdf_hash
+# Rebuild retriever when file changes (set name early to avoid partial reruns)
+if st.session_state.get("last_processed_pdf") != up.name:
+    st.session_state.last_processed_pdf = up.name   # set early to avoid duplicate rebuilds
     pdf_bytes = up.getvalue()
     st.session_state.pdf_bytes = pdf_bytes
-    st.session_state.pdf_b64  = base64.b64encode(pdf_bytes).decode("ascii")
+    st.session_state.pdf_b64 = base64.b64encode(pdf_bytes).decode("ascii")  # single shared copy
 
-    retr, imgs, texts = _safe_build(pdf_bytes, up.name, st.session_state.active_pdf_hash)
-    if retr is None:
-        # allow retry without reloading the app
-        st.session_state.last_processed_hash = None
-        st.stop()
+    (st.session_state.retriever,
+     st.session_state.page_images,
+     st.session_state.page_texts) = build_retriever_from_pdf(pdf_bytes, up.name)
 
-    st.session_state.retriever   = retr
-    st.session_state.page_images = imgs
-    st.session_state.page_texts  = texts
     _reset_chat()
+
+# ===== Bottom-right pinned quick actions (compact pill) =====
+pill = st.container()
+with pill:
+    st.markdown("<span id='pin-bottom-right'></span>", unsafe_allow_html=True)
+    c1, c2, c3 = st.columns(3)
+    if c1.button("Valuation", key="qa_val"):        queue_question("Valuation")
+    if c2.button("Good will", key="qa_gw"):         queue_question("Good will")
+    if c3.button("Etran Cheatsheet", key="qa_etran"): queue_question("Etran Cheatsheet")
+
+components.html("""
+<script>
+(function pin(){
+  const d = window.parent.document;
+  const mark = d.querySelector('#pin-bottom-right');
+  if(!mark) return setTimeout(pin,120);
+
+  const block = mark.closest('div[data-testid="stVerticalBlock"]');
+  if(!block) return setTimeout(pin,120);
+  if(block.dataset.pinned === "1") return;
+  block.dataset.pinned = "1";
+
+  const host = block.closest('div[data-testid="stElementContainer"]');
+  if (host) { host.style.height='0px'; host.style.minHeight='0'; host.style.margin='0';
+              host.style.padding='0'; host.style.display='contents'; }
+
+  Object.assign(block.style, {
+    position:'fixed', right:'0px', bottom:'100px', zIndex:'10000',
+    display:'flex', flexWrap:'nowrap', gap:'12px', padding:'10px 118px',
+    borderRadius:'9999px', background:'transparent', border:'none',
+    boxShadow:'none', minWidth:'350px', width:'fit-content', whiteSpace:'nowrap',
+    pointerEvents:'auto'
+  });
+  Array.from(block.children||[]).forEach(ch => { ch.style.width='auto'; ch.style.margin='0'; });
+  block.querySelectorAll('button').forEach(b => {
+    b.style.padding='18px 32px'; b.style.fontSize='18px'; b.style.borderRadius='9999px';
+  });
+})();
+</script>
+""", height=0)
 
 # Chat input
 user_q = st.chat_input("Type your question here…", key="main_chat_input")
@@ -674,7 +635,7 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
         is_deny = (intent == "DENY")
         is_confirm = (intent == "CONFIRM")
 
-        # --- helper to emit + optional reference ---
+        # ===== SPECIAL CASES (ETRAN / VALUATION / GOODWILL) =====
         def _emit_answer_with_ref(answer_text: str, page_num: int | None):
             thinking.empty()
             with block.container():
@@ -696,7 +657,6 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
             st.session_state.pending_input = None
             st.session_state.waiting_for_response = False
 
-        # ---- quick intents ----
         rq_l = raw_q.strip().lower()
         if rq_l in {"etran cheatsheet", "etran cheat sheet", "etran"}:
             page3_text = (st.session_state.page_texts or {}).get(3, "")
@@ -817,19 +777,10 @@ Conversation so far:
             with block.container():
                 type_bubble(answer)
                 skip_reference = is_unrelated or is_clarify
-                best_doc = None
                 if docs and not skip_reference:
                     try:
-                        emb = CohereEmbeddings(
-                            model="embed-english-v3.0", user_agent="langchain", cohere_api_key=os.environ["COHERE_API_KEY"]
-                        )
-                        texts = [d.page_content for d in docs]
-                        emb_query  = emb.embed_query(answer)
-                        chunk_embs = emb.embed_documents(texts)
-                        sims = cosine_similarity([emb_query], chunk_embs)[0]
-                        ranked = sorted(list(zip(docs, sims)), key=lambda x: x[1], reverse=True)
-                        top3 = [d for d,_ in ranked[:3]]
-
+                        top3 = docs[:3]
+                        best_doc = top3[0] if top3 else None
                         if len(top3) >= 3:
                             ranking_prompt = PromptTemplate(
                                 template=(
@@ -856,9 +807,6 @@ Conversation so far:
                                     best_doc = top3[int(pick) - 1]
                             except Exception:
                                 pass
-
-                        if best_doc is None and top3:
-                            best_doc = top3[0]  # fallback
 
                         if best_doc is not None:
                             ref_page = best_doc.metadata.get("page_number")
