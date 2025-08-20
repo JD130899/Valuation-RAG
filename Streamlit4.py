@@ -1,4 +1,4 @@
-# app.py  (Cloud Run safe: writes go to /tmp, safer memory, error-surfacing)
+# app.py  (Cloud Run safe; /tmp storage; memory-capped; auto-resume; error-surfacing)
 
 import os, io, pickle, base64, re, uuid, time, json, hashlib
 import streamlit as st
@@ -31,11 +31,17 @@ HARDCODED_FOLDER_LINK = "https://drive.google.com/drive/folders/1XGyBBFhhQFiG43j
 FOLDER_TO_USE = DRIVE_FOLDER_FROM_SECRET or HARDCODED_FOLDER_LINK
 
 # Writable base dir (Cloud Run allows /tmp)
-DATA_DIR = os.getenv("DATA_DIR", "/tmp/uw_agent")
+DATA_DIR     = os.getenv("DATA_DIR", "/tmp/uw_agent")
 UPLOADED_DIR = os.path.join(DATA_DIR, "uploaded")
 VECTOR_DIR   = os.path.join(DATA_DIR, "vectorstore")
 os.makedirs(UPLOADED_DIR, exist_ok=True)
 os.makedirs(VECTOR_DIR,   exist_ok=True)
+
+# tuning knobs (env-configurable)
+ENABLE_OCR  = os.getenv("ENABLE_OCR", "0") == "1"     # off by default to save time/memory
+MAX_CHUNKS  = int(os.getenv("MAX_CHUNKS", "600"))     # cap chunks to avoid OOM
+CHUNK_SIZE  = int(os.getenv("CHUNK_SIZE", "2000"))
+CHUNK_OVERL = int(os.getenv("CHUNK_OVERLAP", "150"))
 
 # quick visibility if instance restarts
 st.sidebar.caption(f"PID: {os.getpid()}")
@@ -74,16 +80,53 @@ def _set_active_pdf(name: str, data: bytes, *, came_from_drive: bool):
     st.session_state.active_pdf_bytes = data
     st.session_state.active_pdf_hash  = hashlib.md5(data).hexdigest()
     st.session_state.active_pdf_from_drive = bool(came_from_drive)
+    # also persist to a local temp file so we can re-open after soft restarts
+    path = os.path.join(UPLOADED_DIR, f"{st.session_state.active_pdf_hash[:8]}_{name}")
+    with open(path, "wb") as f:
+        f.write(data)
+    st.session_state.active_pdf_path = path
     # Force (re)build for new content
     st.session_state.last_processed_hash = None
 
 def _get_active_pdf():
+    """Return a BytesIO of the active PDF or try to recover it from disk/Drive."""
     data = st.session_state.get("active_pdf_bytes")
     name = st.session_state.get("active_pdf_name")
-    if not data or not name:
-        return None
-    bio = io.BytesIO(data); bio.name = name
-    return bio
+
+    # If still in memory, return it
+    if data and name:
+        bio = io.BytesIO(data); bio.name = name
+        return bio
+
+    # Try local temp file (same instance restarts but /tmp survives)
+    p = st.session_state.get("active_pdf_path")
+    if p and os.path.exists(p):
+        with open(p, "rb") as f:
+            data = f.read()
+        st.session_state.active_pdf_bytes = data
+        if not name:
+            # best-effort recover
+            st.session_state.active_pdf_name = os.path.basename(p).split("_", 1)[-1]
+        bio = io.BytesIO(data); bio.name = st.session_state.active_pdf_name
+        return bio
+
+    # Auto-reload from Drive if we know the last synced file id
+    if st.session_state.get("active_pdf_from_drive") and st.session_state.get("last_synced_file_id"):
+        try:
+            service = get_drive_service()
+            # we also stored the name when it was loaded
+            nm = st.session_state.get("active_pdf_name") or "file.pdf"
+            path = download_pdf(service, st.session_state["last_synced_file_id"], nm)
+            if path and os.path.exists(path):
+                with open(path, "rb") as f:
+                    _set_active_pdf(nm, f.read(), came_from_drive=True)
+                bio = io.BytesIO(st.session_state.active_pdf_bytes); bio.name = nm
+                return bio
+        except Exception:
+            pass
+
+    # Give up
+    return None
 
 # ---------- Session state ----------
 defaults = {
@@ -389,7 +432,7 @@ def _parse_with_retry(pdf_path: str, attempts: int = 3, delay: float = 2.0):
 @st.cache_resource(show_spinner="📦 Processing & indexing PDF…")
 def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str, file_hash: str):
     """
-    Heavy work: page previews (base64 strings), selective OCR, LlamaParse, embeddings, FAISS, retriever
+    Heavy work: page previews, (optional) OCR, LlamaParse, embeddings, FAISS, retriever.
     Cache key includes file_hash so same-named-but-different-content rebuilds.
     """
     pdf_path = os.path.join(UPLOADED_DIR, f"{file_hash[:8]}_{file_name}")
@@ -406,17 +449,18 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str, file_hash: str):
         img_b64 = base64.b64encode(pix.tobytes("png")).decode("ascii")
         page_images_b64[i + 1] = img_b64
 
-    # Detect which pages to OCR
-    selected_pages = _detect_selected_pages(doc)
+    # OCR only if enabled
     ocr_text_by_page = {}
-    for pnum in sorted(selected_pages):
-        try:
-            img_b = base64.b64decode(page_images_b64[pnum])
-            ocr_text = _ocr_page_with_gpt4o(img_b)
-            if ocr_text:
-                ocr_text_by_page[pnum] = ocr_text
-        except Exception:
-            pass
+    if ENABLE_OCR:
+        selected_pages = _detect_selected_pages(doc)
+        for pnum in sorted(selected_pages):
+            try:
+                img_b = base64.b64decode(page_images_b64[pnum])
+                ocr_text = _ocr_page_with_gpt4o(img_b)
+                if ocr_text:
+                    ocr_text_by_page[pnum] = ocr_text
+            except Exception:
+                pass
     doc.close()
 
     # Parse entire document with LlamaParse (with retry)
@@ -436,10 +480,9 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str, file_hash: str):
             page_texts[pnum] = text
 
     # Split → (cap) → Embed → Index (lower memory)
-    splitter = RecursiveCharacterTextSplitter(chunk_size=2200, chunk_overlap=200)
+    splitter = RecursiveCharacterTextSplitter(chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERL)
     chunks = splitter.split_documents(pages)
 
-    MAX_CHUNKS = int(os.getenv("MAX_CHUNKS", "800"))  # cap for Cloud Run memory safety
     if len(chunks) > MAX_CHUNKS:
         chunks = chunks[:MAX_CHUNKS]
 
@@ -468,7 +511,7 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str, file_hash: str):
     retriever = ContextualCompressionRetriever(
         base_retriever=vs.as_retriever(
             search_type="mmr",
-            search_kwargs={"k": 20, "fetch_k": 40, "lambda_mult": 0.9}
+            search_kwargs={"k": 15, "fetch_k": 30, "lambda_mult": 0.9}
         ),
         base_compressor=reranker
     )
@@ -777,11 +820,11 @@ Conversation so far:
                 best_doc = None
                 if docs and not skip_reference:
                     try:
-                        texts = [d.page_content for d in docs]
                         emb = CohereEmbeddings(
                             model="embed-english-v3.0", user_agent="langchain", cohere_api_key=os.environ["COHERE_API_KEY"]
                         )
-                        emb_query = emb.embed_query(answer)
+                        texts = [d.page_content for d in docs]
+                        emb_query  = emb.embed_query(answer)
                         chunk_embs = emb.embed_documents(texts)
                         sims = cosine_similarity([emb_query], chunk_embs)[0]
                         ranked = sorted(list(zip(docs, sims)), key=lambda x: x[1], reverse=True)
