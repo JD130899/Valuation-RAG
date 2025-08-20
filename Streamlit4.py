@@ -248,6 +248,26 @@ def guess_suggestion(question: str, docs):
                 best_score, best_line = score, raw
     return _clean_heading(best_line or "Valuation Summary")
 
+def ensure_gfm_tables(text: str) -> str:
+    lines = text.splitlines()
+    out, i = [], 0
+    while i < len(lines):
+        # detect a table header row: starts and ends with '|'
+        if re.match(r'^\s*\|.+\|\s*$', lines[i]):
+            header = lines[i]
+            # look ahead: if next line isn't a separator, insert one
+            if i+1 >= len(lines) or not re.match(r'^\s*\|(?:\s*:?-{3,}:?\s*\|)+\s*$', lines[i+1]):
+                cols = header.count("|") - 1  # pipes minus the trailing one
+                sep = "|" + "|".join(["---"] * cols) + "|"
+                out.append(header)
+                out.append(sep)
+                i += 1
+                continue
+        out.append(lines[i])
+        i += 1
+    return "\n".join(out)
+
+
 def sanitize_suggestion(answer: str, question: str, docs):
     low = answer.lower().strip()
     if ("sorry i didnt understand the question" not in low
@@ -541,7 +561,13 @@ If the user's question is unrelated to this PDF or requires information outside 
 
 
 2. **Table questions**  
-   • PLEASE Return the full table (SHOULD'NT BE BROKEN) **with its header row** in GitHub-flavoured markdown.
+   • When returning a table:
+    - Output a VALID GitHub-flavored table.
+    - Always include the header separator line (e.g., `|---|---|---|`).
+    - Each row MUST start and end with `|` exactly once.
+    - Do not wrap cells across lines; escape any `|` inside cells as `\|`.
+    - Add a blank line before the table.
+
 
 3.Market Approach weights/valuation (router)
 If the question involves **valuation methods**, **concluded value**, or topics like **Income Approach**, **Market Approach**, or **Valuation Summary**, do the following:
@@ -577,7 +603,7 @@ Conversation so far:
                     input_variables=["chat_history", "context", "question", "pdf_name"]
                 ).invoke(full_input)
             ).content
-
+            answer = ensure_gfm_tables(answer)    
             answer = sanitize_suggestion(answer, effective_q, docs)
 
             sug = extract_suggestion(answer)
