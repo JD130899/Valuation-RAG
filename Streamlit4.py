@@ -31,12 +31,18 @@ st.set_page_config(page_title="Underwriting Agent", layout="wide")
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 # --- near the top, after load_dotenv() ---
-DRIVE_FOLDER_FROM_SECRET = (
-    st.secrets.get("GOOGLE_DRIVE_FOLDER", "").strip() if hasattr(st, "secrets") else ""
-)
-DRIVE_FOLDER_FROM_ENV = os.getenv("GOOGLE_DRIVE_FOLDER", "").strip()
-HARDCODED_FOLDER_LINK = "https://drive.google.com/drive/folders/1XGyBBFhhQFiG43jpYJhNzZYi7C-_l5me"
+def _safe_secret(key: str, default: str = "") -> str:
+    try:
+        return str(st.secrets.get(key, default))
+    except Exception:
+        return default
+
+DRIVE_FOLDER_FROM_SECRET = _safe_secret("GOOGLE_DRIVE_FOLDER", "").strip()
+DRIVE_FOLDER_FROM_ENV    = os.getenv("GOOGLE_DRIVE_FOLDER", "").strip()
+HARDCODED_FOLDER_LINK    = "https://drive.google.com/drive/folders/1XGyBBFhhQFiG43jpYJhNzZYi7C-_l5me"
+
 FOLDER_TO_USE = DRIVE_FOLDER_FROM_ENV or DRIVE_FOLDER_FROM_SECRET or HARDCODED_FOLDER_LINK
+
 
 
 def type_bubble(text: str, *, base_delay: float = 0.012, cutoff_chars: int = 2000):
