@@ -443,56 +443,7 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
     )
     return retriever, page_images_b64, page_texts
 
-# --------- ETRAN CHEATSHEET HELPERS ----------
-def etran_extract_from_page3(page3_text: str) -> dict:
-    want_keys = [
-        "Concluded Value",
-        "Purchase Type",
-        "Fixed Asset Value",
-        "Other Tangible Assets Value",
-        "Goodwill Value",
-        "Free Cash Flow",
-    ]
-    prompt = PromptTemplate(
-        template=(
-            "From the provided report text (this is the exact content of page 3), "
-            "extract the following fields. Return ONLY valid JSON (no code fences), "
-            "with these exact keys (even if value is unknown, use an empty string):\n"
-            f"{want_keys}\n\n"
-            "Text:\n{page3}\n"
-        ),
-        input_variables=["page3"]
-    )
-    try:
-        llm = ChatOpenAI(model="gpt-4o", temperature=0)
-        raw = llm.invoke(prompt.invoke({"page3": page3_text})).content.strip()
-        data = json.loads(raw)
-    except Exception:
-        data = {k: "" for k in want_keys}
-    for k in want_keys:
-        data.setdefault(k, "")
-    return data
 
-def render_etran_table(dynamic: dict) -> str:
-    static_rows = [
-        ("Appraisal Firm", "Value Buddy"),
-        ("Appraiser", "Tim Gbur"),
-        ("Appraiser Certification", "NACVA - Certified Valuation Analyst (CVA)"),
-    ]
-    dyn_rows = [
-        ("Concluded Value", dynamic.get("Concluded Value","")),
-        ("Purchase Type", dynamic.get("Purchase Type","")),
-        ("Fixed Asset Value", dynamic.get("Fixed Asset Value","")),
-        ("Other Tangible Assets Value", dynamic.get("Other Tangible Assets Value","")),
-        ("Goodwill Value", dynamic.get("Goodwill Value","")),
-        ("Free Cash Flow", dynamic.get("Free Cash Flow","")),
-    ]
-    rows = static_rows + dyn_rows
-    lines = ["| Field | Value |", "|---|---|"]
-    for k, v in rows:
-        val = (v or "").replace("\n", " ").strip()
-        lines.append(f"| {k} | {val if val else '—'} |")
-    return "\n".join(lines)
 
 # ================= Sidebar: Google Drive loader =================
 service = get_drive_service()
@@ -563,46 +514,6 @@ if st.session_state.get("last_processed_pdf") != up.name:
 
     _reset_chat()
 
-# ===== Bottom-right pinned quick actions (compact pill) =====
-pill = st.container()
-with pill:
-    st.markdown("<span id='pin-bottom-right'></span>", unsafe_allow_html=True)
-    c1, c2, c3 = st.columns(3)
-    if c1.button("Valuation", key="qa_val"):        queue_question("Valuation")
-    if c2.button("Good will", key="qa_gw"):         queue_question("Good will")
-    if c3.button("Etran Cheatsheet", key="qa_etran"): queue_question("Etran Cheatsheet")
-
-components.html("""
-<script>
-(function pin(){
-  const d = window.parent.document;
-  const mark = d.querySelector('#pin-bottom-right');
-  if(!mark) return setTimeout(pin,120);
-
-  const block = mark.closest('div[data-testid="stVerticalBlock"]');
-  if(!block) return setTimeout(pin,120);
-  if(block.dataset.pinned === "1") return;
-  block.dataset.pinned = "1";
-
-  const host = block.closest('div[data-testid="stElementContainer"]');
-  if (host) { host.style.height='0px'; host.style.minHeight='0'; host.style.margin='0';
-              host.style.padding='0'; host.style.display='contents'; }
-
-  Object.assign(block.style, {
-    position:'fixed', right:'0px', bottom:'100px', zIndex:'10000',
-    display:'flex', flexWrap:'nowrap', gap:'12px', padding:'10px 118px',
-    borderRadius:'9999px', background:'transparent', border:'none',
-    boxShadow:'none', minWidth:'350px', width:'fit-content', whiteSpace:'nowrap',
-    pointerEvents:'auto'
-  });
-  Array.from(block.children||[]).forEach(ch => { ch.style.width='auto'; ch.style.margin='0'; });
-  block.querySelectorAll('button').forEach(b => {
-    b.style.padding='18px 32px'; b.style.fontSize='18px'; b.style.borderRadius='9999px';
-  });
-})();
-</script>
-""", height=0)
-
 # Chat input
 user_q = st.chat_input("Type your question here…", key="main_chat_input")
 if user_q:
@@ -634,63 +545,6 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
         intent = classify_reply_intent(raw_q, _last_assistant_text(history_to_use))
         is_deny = (intent == "DENY")
         is_confirm = (intent == "CONFIRM")
-
-        # ===== SPECIAL CASES (ETRAN / VALUATION / GOODWILL) =====
-        def _emit_answer_with_ref(answer_text: str, page_num: int | None):
-            thinking.empty()
-            with block.container():
-                type_bubble(answer_text)
-                entry = {"id": _new_id(), "role": "assistant", "content": answer_text}
-                if page_num:
-                    img_b64 = st.session_state.page_images.get(page_num)
-                    if img_b64:
-                        entry.update({
-                            "source": f"Page {page_num}",
-                            "source_img": img_b64,
-                            "source_page": page_num,
-                        })
-                        render_reference_card(
-                            label=entry["source"], img_b64=img_b64,
-                            page=page_num, key=entry["id"]
-                        )
-                st.session_state.messages.append(entry)
-            st.session_state.pending_input = None
-            st.session_state.waiting_for_response = False
-
-        rq_l = raw_q.strip().lower()
-        if rq_l in {"etran cheatsheet", "etran cheat sheet", "etran"}:
-            page3_text = (st.session_state.page_texts or {}).get(3, "")
-            if not page3_text:
-                _emit_answer_with_ref("I couldn’t find page 3 content in this PDF.", None)
-            else:
-                extracted = etran_extract_from_page3(page3_text)
-                table_md = render_etran_table(extracted)
-                _emit_answer_with_ref(f"### Etran Cheatsheet\n\n{table_md}", 3)
-            st.stop()
-
-        if rq_l in {"valuation", "fair market value", "fmv", "value"}:
-            page3_text = (st.session_state.page_texts or {}).get(3, "")
-            if not page3_text:
-                _emit_answer_with_ref("I couldn’t find page 3 content in this PDF.", None)
-            else:
-                data = etran_extract_from_page3(page3_text)
-                fmv = (data.get("Concluded Value") or data.get("Fair Market Value") or "").strip()
-                company = _company_from_filename(up.name)
-                ans = f"Valuation of {company} is {fmv}." if fmv else "I couldn’t find a clear Fair Market Value on page 3."
-                _emit_answer_with_ref(ans, 3)
-            st.stop()
-
-        if rq_l in {"good will", "goodwill"}:
-            page3_text = (st.session_state.page_texts or {}).get(3, "")
-            if not page3_text:
-                _emit_answer_with_ref("I couldn’t find page 3 content in this PDF.", None)
-            else:
-                data = etran_extract_from_page3(page3_text)
-                goodwill = (data.get("Goodwill Value") or "").strip()
-                company = _company_from_filename(up.name)
-                ans = f"Goodwill value of {company} is {goodwill}." if goodwill else "I couldn’t find a clear Goodwill value on page 3."
-                _emit_answer_with_ref(ans, 3)
-            st.stop()
 
         if is_deny:
             thinking.empty()
@@ -728,26 +582,41 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
                 answer = llm.invoke(
                     PromptTemplate(
                         template = """
-You are a financial-data extraction assistant.
+        You are a financial-data extraction assistant.
+    
+       **IMPORTANT CONDITIONAL FOLLOW-UP**  
+        🛎️ After you answer the user’s question (using steps 1–4), **only if** there is still **unused** relevant report content, **ask**:  
+          “Would you like more detail on [X]?”  
+       Otherwise, **do not** ask any follow-up.
 
-**IMPORTANT CONDITIONAL FOLLOW-UP**
-After you answer the user’s question (using steps 1–4), only if there is still unused relevant report content, ask:
-“Would you like more detail on [X]?”
-Otherwise, do not ask any follow-up.
+    **Use ONLY what appears under “Context”.**
 
-**HARD RULE (unrelated questions)**
-If the user's question is unrelated to this PDF or requires information outside the Context, reply exactly:
-"Sorry I can only answer question related to {pdf_name} pdf document"
-
-Use ONLY what appears under “Context”.
-
-### How to answer
-1. Single value → short sentence with the exact number.
-2. Table questions → return the full table in GitHub-flavoured markdown.
-3. Valuation methods → synthesize across chunks; show weights and $ values.
-4. Theory/text → explain using context.
-5. If you cannot find an answer in Context → reply exactly:
-   "Sorry I didnt understand the question. Did you mean SUGGESTION?"
+    ### How to answer
+    1. **Single value questions**  
+       • Find the row + column that match the user's words.  
+       • Return the answer in a **short, clear sentence** using the exact number from the context.  
+         Example: “The Income (DCF) approach value is $1,150,000.”  
+       • **Do NOT repeat the metric name or company name** unless the user asks.
+    
+    2. **Table questions**  
+       • Return the full table **with its header row** in GitHub-flavoured markdown.
+    
+    3. **Valuation method / theory / reasoning questions**
+        
+       • If the question involves **valuation methods**, **concluded value**, or topics like **Income Approach**, **Market Approach**, or **Valuation Summary**, do the following:
+         - Combine and synthesize relevant information across all chunks.
+         - Pay special attention to how **weights are distributed** (e.g., “50% DCF, 25% EBITDA, 25% SDE”).
+         - Avoid oversimplifying if more detailed breakdowns (like subcomponents of market approach) are available.
+         - If a table gives a simplified view (e.g., "50% Market Approach"), but other parts break it down (e.g., 25% EBITDA + 25% SDE), **prefer the detailed breakdown with percent value**.   
+         - When describing weights, also mention the **corresponding dollar values** used in the context (e.g., “50% DCF = $3,712,000, 25% EBITDA = $4,087,000...”)
+         - **If Market approach is composed of sub-methods like EBITDA and SDE, then explicitly extract and show their individual weights and values, even if not listed together in a single table.**
+        
+ 
+    4. **Theory/textual question**  
+       • Try to return an explanation **based on the context**.
+       
+    5. If you cannot find an answer in Context → reply exactly:
+       "Sorry I didnt understand the question. Did you mean SUGGESTION?"
 
 ---
 Context:
