@@ -563,45 +563,7 @@ if st.session_state.get("last_processed_pdf") != up.name:
 
     _reset_chat()
 
-# ===== Bottom-right pinned quick actions (compact pill) =====
-pill = st.container()
-with pill:
-    st.markdown("<span id='pin-bottom-right'></span>", unsafe_allow_html=True)
-    c1, c2, c3 = st.columns(3)
-    if c1.button("Valuation", key="qa_val"):        queue_question("Valuation")
-    if c2.button("Good will", key="qa_gw"):         queue_question("Good will")
-    if c3.button("Etran Cheatsheet", key="qa_etran"): queue_question("Etran Cheatsheet")
 
-components.html("""
-<script>
-(function pin(){
-  const d = window.parent.document;
-  const mark = d.querySelector('#pin-bottom-right');
-  if(!mark) return setTimeout(pin,120);
-
-  const block = mark.closest('div[data-testid="stVerticalBlock"]');
-  if(!block) return setTimeout(pin,120);
-  if(block.dataset.pinned === "1") return;
-  block.dataset.pinned = "1";
-
-  const host = block.closest('div[data-testid="stElementContainer"]');
-  if (host) { host.style.height='0px'; host.style.minHeight='0'; host.style.margin='0';
-              host.style.padding='0'; host.style.display='contents'; }
-
-  Object.assign(block.style, {
-    position:'fixed', right:'0px', bottom:'100px', zIndex:'10000',
-    display:'flex', flexWrap:'nowrap', gap:'12px', padding:'10px 118px',
-    borderRadius:'9999px', background:'transparent', border:'none',
-    boxShadow:'none', minWidth:'350px', width:'fit-content', whiteSpace:'nowrap',
-    pointerEvents:'auto'
-  });
-  Array.from(block.children||[]).forEach(ch => { ch.style.width='auto'; ch.style.margin='0'; });
-  block.querySelectorAll('button').forEach(b => {
-    b.style.padding='18px 32px'; b.style.fontSize='18px'; b.style.borderRadius='9999px';
-  });
-})();
-</script>
-""", height=0)
 
 # Chat input
 user_q = st.chat_input("Type your question here…", key="main_chat_input")
@@ -779,9 +741,16 @@ Conversation so far:
                 skip_reference = is_unrelated or is_clarify
                 if docs and not skip_reference:
                     try:
-                        top3 = docs[:3]
-                        best_doc = top3[0] if top3 else None
-                        if len(top3) >= 3:
+                        texts = [d.page_content for d in docs]
+                        emb_query = CohereEmbeddings(
+                            model="embed-english-v3.0", user_agent="langchain", cohere_api_key=os.environ["COHERE_API_KEY"]
+                        ).embed_query(answer)
+                        chunk_embs = CohereEmbeddings(
+                            model="embed-english-v3.0", user_agent="langchain", cohere_api_key=os.environ["COHERE_API_KEY"]
+                        ).embed_documents(texts)
+                        sims = cosine_similarity([emb_query], chunk_embs)[0]
+                        ranked = sorted(list(zip(docs, sims)), key=lambda x: x[1], reverse=True)
+                        top3 = [d for d,_ in ranked[:3]]
                             ranking_prompt = PromptTemplate(
                                 template=(
                                     "Given the user's question and 3 candidate context chunks, "
