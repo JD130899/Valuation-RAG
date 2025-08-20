@@ -652,7 +652,7 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
                 texts = [d.page_content for d in docs]
                 emb_query = CohereEmbeddings(
                     model="embed-english-v3.0", user_agent="langchain", cohere_api_key=os.environ["COHERE_API_KEY"]
-                ).embed_query(ans)
+                ).embed_query(answer)
                 chunk_embs = CohereEmbeddings(
                     model="embed-english-v3.0", user_agent="langchain", cohere_api_key=os.environ["COHERE_API_KEY"]
                 ).embed_documents(texts)
