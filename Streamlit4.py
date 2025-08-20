@@ -658,56 +658,53 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
                 sims = cosine_similarity([emb_query], chunk_embs)[0]
                 ranked = sorted(list(zip(docs, sims)), key=lambda x: x[1], reverse=True)
                 top3 = [d for d,_ in ranked[:3]]
-                        if len(top3) >= 3:
-                            ranking_prompt = PromptTemplate(
-                                template="""
-                                Given a user question and 3 candidate context chunks, return the number (1-3) of the chunk that best answers it.
-                                Question:
-                                {question}
-                                
-                                Chunk 1:
-                                {chunk1}
-                                
-                                Chunk 2:
-                                {chunk2}
-                                
-                                Chunk 3:
-                                {chunk3}
-                                
-                                Best Chunk Number:
-                                """,
-                                input_variables=["question", "chunk1", "chunk2", "chunk3"]
-                            )
-                            try:
-                                pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
-                                    ranking_prompt.invoke({
-                                        "question": query_for_retrieval,
-                                        "chunk1": top3[0].page_content,
-                                        "chunk2": top3[1].page_content,
-                                        "chunk3": top3[2].page_content
-                                    })
-                                ).content.strip()
-                                if pick.isdigit() and 1 <= int(pick) <= 3:
-                                    best_doc = top3[int(pick) - 1]
-                            except Exception:
-                                pass
+                if len(top3) >= 3:
+                    ranking_prompt = PromptTemplate(
+                        template="""
+                        Given a user question and 3 candidate context chunks, return the number (1-3) of the chunk that best answers it.
+                        Question:
+                        {question}
+                        
+                        Chunk 1:
+                        {chunk1}
+                        
+                        Chunk 2:
+                        {chunk2}
+                        
+                        Chunk 3:
+                        {chunk3}
+                        
+                        Best Chunk Number:
+                        """,
+                        input_variables=["question", "chunk1", "chunk2", "chunk3"]
+                    )
+                    try:
+                        pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
+                            ranking_prompt.invoke({
+                                "question": query_for_retrieval,
+                                "chunk1": top3[0].page_content,
+                                "chunk2": top3[1].page_content,
+                                "chunk3": top3[2].page_content
+                            })
+                        ).content.strip()
+                        if pick.isdigit() and 1 <= int(pick) <= 3:
+                            best_doc = top3[int(pick) - 1]
+                    except Exception:
+                        pass
 
-                        if best_doc is not None:
-                            ref_page = best_doc.metadata.get("page_number")
-                            img_b64 = st.session_state.page_images.get(ref_page)
-                            if img_b64:
-                                entry["source"] = f"Page {ref_page}"
-                                entry["source_img"] = img_b64
-                                entry["source_page"] = ref_page
-                                render_reference_card(
-                                    label=entry["source"],
-                                    img_b64=img_b64,
-                                    page=ref_page,
-                                    key=entry["id"],
-                                )
-                    except Exception as e:
-                        st.info(f"ℹ️ Reference selection skipped: {e}")
-
+                if best_doc is not None:
+                    ref_page = best_doc.metadata.get("page_number")
+                    img_b64 = st.session_state.page_images.get(ref_page)
+                    if img_b64:
+                        entry["source"] = f"Page {ref_page}"
+                        entry["source_img"] = img_b64
+                        entry["source_page"] = ref_page
+                        render_reference_card(
+                            label=entry["source"],
+                            img_b64=img_b64,
+                            page=ref_page,
+                            key=entry["id"],)
+                   
             st.session_state.messages.append(entry)
             st.session_state.pending_input = None
             st.session_state.waiting_for_response = False
