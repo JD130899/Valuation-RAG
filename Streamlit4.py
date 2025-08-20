@@ -1,11 +1,11 @@
-# app.py  (drop-in replacement)
+# app.py  (cosine-sim reference selection, safe + cached)
 
 import os, io, pickle, base64, re, uuid, time, json
 import streamlit as st
 import fitz  # PyMuPDF
-from PIL import Image
 from dotenv import load_dotenv
 import streamlit.components.v1 as components
+from sklearn.metrics.pairwise import cosine_similarity
 
 # LangChain / RAG deps
 from langchain_core.documents import Document
@@ -26,7 +26,7 @@ load_dotenv()
 st.set_page_config(page_title="Underwriting Agent", layout="wide")
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-DRIVE_FOLDER_FROM_SECRET = os.getenv("GOOGLE_DRIVE_FOLDER", "").strip()
+DRIVE_FOLDER_FROM_SECRET = (os.getenv("GOOGLE_DRIVE_FOLDER") or "").strip()
 HARDCODED_FOLDER_LINK = "https://drive.google.com/drive/folders/1XGyBBFhhQFiG43jpYJhNzZYi7C-_l5me"
 FOLDER_TO_USE = DRIVE_FOLDER_FROM_SECRET or HARDCODED_FOLDER_LINK
 
@@ -77,18 +77,14 @@ if "last_suggestion" not in st.session_state:
 if "next_msg_id" not in st.session_state:
     st.session_state.next_msg_id = 0
 
-# ---------- styles (chat + reference styles) ----------
+# ---------- styles ----------
 st.markdown("""
 <style>
 .block-container{ padding-top:54px!important; padding-bottom:160px!important; }
 .block-container h1 { margin-top:0!important; }
-
-/* Chat bubbles */
 .user-bubble {background:#007bff;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:right;margin:4px;}
 .assistant-bubble {background:#1e1e1e;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:left;margin:4px;}
 .clearfix::after {content:"";display:table;clear:both;}
-
-/* Reference card */
 .ref{ display:block; width:60%; max-width:900px; margin:6px 0 12px 8px; }
 .ref summary{
   display:inline-flex; align-items:center; gap:8px; cursor:pointer; list-style:none; outline:none;
@@ -157,7 +153,6 @@ def file_badge_link(name: str, pdf_bytes: bytes, synced: bool = True):
     )
 
 def render_reference_card(label: str, img_b64: str, page: int, key: str):
-    """Uses the single shared st.session_state.pdf_b64 (not per-message)."""
     pdf_b64 = st.session_state.get("pdf_b64", "")
     st.markdown(
         f"""
@@ -313,6 +308,55 @@ def condense_query(chat_history, user_input: str, pdf_name: str) -> str:
     except Exception:
         return user_input
 
+# ================= Cosine-sim embedder (cached & safe) =================
+@st.cache_resource
+def _get_embedder():
+    # Prefer Streamlit secrets if present; fallback to env
+    key = None
+    try:
+        if hasattr(st, "secrets"):
+            key = st.secrets.get("COHERE_API_KEY", None)
+    except Exception:
+        key = None
+    if not key:
+        key = os.getenv("COHERE_API_KEY")
+    if not key:
+        return None  # signal: not available
+    return CohereEmbeddings(
+        model="embed-english-v3.0",
+        user_agent="langchain",
+        cohere_api_key=key
+    )
+
+def _pick_best_doc_with_cosine(docs, answer_text: str, cap: int = 25):
+    """
+    Rank docs by cosine similarity to the final LLM 'answer' text.
+    Never throws: returns a doc or None (if docs empty).
+    """
+    if not docs:
+        return None
+    emb = _get_embedder()
+    if emb is None:
+        # No key → just use first doc; don't break the app
+        return docs[0]
+
+    try:
+        docs_capped = docs[:cap]  # bound latency/memory
+        texts = [d.page_content for d in docs_capped]
+        q_vec = emb.embed_query(answer_text)
+        d_vecs = emb.embed_documents(texts)  # list of vectors
+        sims = cosine_similarity([q_vec], d_vecs)[0]  # 1D array
+        # argmax manually to avoid numpy import assumptions
+        best_idx, best_val = 0, float("-inf")
+        for i, s in enumerate(sims):
+            if s > best_val:
+                best_idx, best_val = i, s
+        return docs_capped[best_idx]
+    except Exception as e:
+        # Never allow ranking to crash the run
+        st.info(f"⚠️ Skipping cosine ranking due to: {e}")
+        return docs[0]
+
 # ================= Helper for page selection + OCR =================
 def _detect_selected_pages(doc: fitz.Document):
     want = set()
@@ -370,26 +414,24 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
     # Open with PyMuPDF
     doc = fitz.open(pdf_path)
 
-    # Build base64 PNG previews (reduced DPI to save memory)
+    # Previews
     page_images_b64 = {}
     for i, page in enumerate(doc):
-        pix = page.get_pixmap(dpi=120)  # 96–120 is plenty
+        pix = page.get_pixmap(dpi=120)  # keep memory modest
         img_b64 = base64.b64encode(pix.tobytes("png")).decode("ascii")
         page_images_b64[i + 1] = img_b64
 
-    # Detect which pages to override with OCR
+    # OCR selected pages
     selected_pages = _detect_selected_pages(doc)
     ocr_text_by_page = {}
     for pnum in sorted(selected_pages):
         try:
-            # Use the already-rendered preview (saves memory)
             img_b = base64.b64decode(page_images_b64[pnum])
             ocr_text = _ocr_page_with_gpt4o(img_b)
             if ocr_text:
                 ocr_text_by_page[pnum] = ocr_text
         except Exception:
             pass
-
     doc.close()
 
     # Parse entire document with LlamaParse
@@ -443,11 +485,8 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
     )
     return retriever, page_images_b64, page_texts
 
-
-
 # ================= Sidebar: Google Drive loader =================
 service = get_drive_service()
-
 pdf_files = get_all_pdfs(service, FOLDER_TO_USE)
 st.sidebar.caption(f"📁 Using Drive folder: {FOLDER_TO_USE}")
 
@@ -501,7 +540,7 @@ if not up:
     st.warning("Please upload or load a PDF to continue.")
     st.stop()
 
-# Rebuild retriever when file changes (set name early to avoid partial reruns)
+# Rebuild retriever when file changes
 if st.session_state.get("last_processed_pdf") != up.name:
     st.session_state.last_processed_pdf = up.name   # set early to avoid duplicate rebuilds
     pdf_bytes = up.getvalue()
@@ -595,27 +634,15 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
     1. **Single value questions**  
        • Find the row + column that match the user's words.  
        • Return the answer in a **short, clear sentence** using the exact number from the context.  
-         Example: “The Income (DCF) approach value is $1,150,000.”  
-       • **Do NOT repeat the metric name or company name** unless the user asks.
+       • **Do NOT repeat** the metric/company name unless asked.
     
     2. **Table questions**  
-       • Return the full table **with its header row** in GitHub-flavoured markdown.
+       • Return the full table **with header row** in GitHub-flavoured markdown.
     
-    3. **Valuation method / theory / reasoning questions**
-        
-       • If the question involves **valuation methods**, **concluded value**, or topics like **Income Approach**, **Market Approach**, or **Valuation Summary**, do the following:
-         - Combine and synthesize relevant information across all chunks.
-         - Pay special attention to how **weights are distributed** (e.g., “50% DCF, 25% EBITDA, 25% SDE”).
-         - Avoid oversimplifying if more detailed breakdowns (like subcomponents of market approach) are available.
-         - If a table gives a simplified view (e.g., "50% Market Approach"), but other parts break it down (e.g., 25% EBITDA + 25% SDE), **prefer the detailed breakdown with percent value**.   
-         - When describing weights, also mention the **corresponding dollar values** used in the context (e.g., “50% DCF = $3,712,000, 25% EBITDA = $4,087,000...”)
-         - **If Market approach is composed of sub-methods like EBITDA and SDE, then explicitly extract and show their individual weights and values, even if not listed together in a single table.**
-        
+    3. **Valuation method / theory**  
+       • Synthesize across chunks; include weights and $ values when present.
  
-    4. **Theory/textual question**  
-       • Try to return an explanation **based on the context**.
-       
-    5. If you cannot find an answer in Context → reply exactly:
+    4. If you cannot find an answer in Context → reply exactly:
        "Sorry I didnt understand the question. Did you mean SUGGESTION?"
 
 ---
@@ -636,20 +663,21 @@ Conversation so far:
             answer = sanitize_suggestion(answer, effective_q, docs)
             st.session_state.last_suggestion = _clean_heading(extract_suggestion(answer) or "") or None
 
-            apology = f"Sorry I can only answer question related to {pdf_display} pdf document"
-            is_unrelated = apology.lower() in answer.strip().lower()
             is_clarify  = is_clarification(answer)
 
             entry = {"id": _new_id(), "role": "assistant", "content": answer}
             thinking.empty()
 
+            # --------- COSINE SIMILARITY REFERENCE PICK (safe) ----------
             with block.container():
                 type_bubble(answer)
-                skip_reference = is_unrelated or is_clarify
+                skip_reference = is_clarify
+                best_doc = None
+
                 if docs and not skip_reference:
+                    # 1) (optional) quick 3-way LLM pick on first 3 docs
                     try:
                         top3 = docs[:3]
-                        best_doc = top3[0] if top3 else None
                         if len(top3) >= 3:
                             ranking_prompt = PromptTemplate(
                                 template=(
@@ -676,22 +704,31 @@ Conversation so far:
                                     best_doc = top3[int(pick) - 1]
                             except Exception:
                                 pass
-
-                        if best_doc is not None:
-                            ref_page = best_doc.metadata.get("page_number")
-                            img_b64 = st.session_state.page_images.get(ref_page)
-                            if img_b64:
-                                entry["source"] = f"Page {ref_page}"
-                                entry["source_img"] = img_b64
-                                entry["source_page"] = ref_page
-                                render_reference_card(
-                                    label=entry["source"],
-                                    img_b64=img_b64,
-                                    page=ref_page,
-                                    key=entry["id"],
-                                )
                     except Exception as e:
-                        st.info(f"ℹ️ Reference selection skipped: {e}")
+                        st.info(f"ℹ️ LLM pre-pick skipped: {e}")
+
+                    # 2) COSINE similarity against the final answer text
+                    try:
+                        if best_doc is None:
+                            best_doc = _pick_best_doc_with_cosine(docs, answer, cap=25)
+                    except Exception as e:
+                        st.info(f"ℹ️ Cosine ranking skipped: {e}")
+                        if best_doc is None and docs:
+                            best_doc = docs[0]
+
+                if best_doc is not None:
+                    ref_page = best_doc.metadata.get("page_number")
+                    img_b64 = st.session_state.page_images.get(ref_page)
+                    if img_b64:
+                        entry["source"] = f"Page {ref_page}"
+                        entry["source_img"] = img_b64
+                        entry["source_page"] = ref_page
+                        render_reference_card(
+                            label=entry["source"],
+                            img_b64=img_b64,
+                            page=ref_page,
+                            key=entry["id"],
+                        )
 
             st.session_state.messages.append(entry)
             st.session_state.pending_input = None
