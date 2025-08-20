@@ -538,6 +538,7 @@ If the user's question is unrelated to this PDF or requires information outside 
    • Return the answer in a **short, clear sentence** using the exact number from the context.  
      Example: “The Income (DCF) approach value is $1,150,000.”  
    • **Do NOT repeat the metric name or company name** unless the user asks.
+   
 
 2. **Table questions**  
    • PLEASE Return the full table (SHOULD'NT BE BROKEN) **with its header row** in GitHub-flavoured markdown.
