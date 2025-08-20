@@ -1,11 +1,11 @@
-# app.py  (cosine-sim reference selection, safe + cached)
-
+# app.py  (drop-in replacement)
 import os, io, pickle, base64, re, uuid, time, json
 import streamlit as st
 import fitz  # PyMuPDF
+from PIL import Image
 from dotenv import load_dotenv
 import streamlit.components.v1 as components
-from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.metrics.pairwise import cosine_similarity  # ← added
 
 # LangChain / RAG deps
 from langchain_core.documents import Document
@@ -26,9 +26,18 @@ load_dotenv()
 st.set_page_config(page_title="Underwriting Agent", layout="wide")
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-DRIVE_FOLDER_FROM_SECRET = (os.getenv("GOOGLE_DRIVE_FOLDER") or "").strip()
+DRIVE_FOLDER_FROM_SECRET = os.getenv("GOOGLE_DRIVE_FOLDER", "").strip()
 HARDCODED_FOLDER_LINK = "https://drive.google.com/drive/folders/1XGyBBFhhQFiG43jpYJhNzZYi7C-_l5me"
 FOLDER_TO_USE = DRIVE_FOLDER_FROM_SECRET or HARDCODED_FOLDER_LINK
+
+# ---- cache a single Cohere embedder (reuse across calls) ----
+@st.cache_resource(show_spinner=False)
+def get_embedder():
+    return CohereEmbeddings(
+        model="embed-english-v3.0",
+        user_agent="langchain",
+        cohere_api_key=os.environ["COHERE_API_KEY"],
+    )
 
 # ---------- small helpers ----------
 def type_bubble(text: str, *, base_delay: float = 0.012, cutoff_chars: int = 2000):
@@ -77,7 +86,7 @@ if "last_suggestion" not in st.session_state:
 if "next_msg_id" not in st.session_state:
     st.session_state.next_msg_id = 0
 
-# ---------- styles ----------
+# ---------- styles (chat + reference styles) ----------
 st.markdown("""
 <style>
 .block-container{ padding-top:54px!important; padding-bottom:160px!important; }
@@ -308,55 +317,6 @@ def condense_query(chat_history, user_input: str, pdf_name: str) -> str:
     except Exception:
         return user_input
 
-# ================= Cosine-sim embedder (cached & safe) =================
-@st.cache_resource
-def _get_embedder():
-    # Prefer Streamlit secrets if present; fallback to env
-    key = None
-    try:
-        if hasattr(st, "secrets"):
-            key = st.secrets.get("COHERE_API_KEY", None)
-    except Exception:
-        key = None
-    if not key:
-        key = os.getenv("COHERE_API_KEY")
-    if not key:
-        return None  # signal: not available
-    return CohereEmbeddings(
-        model="embed-english-v3.0",
-        user_agent="langchain",
-        cohere_api_key=key
-    )
-
-def _pick_best_doc_with_cosine(docs, answer_text: str, cap: int = 25):
-    """
-    Rank docs by cosine similarity to the final LLM 'answer' text.
-    Never throws: returns a doc or None (if docs empty).
-    """
-    if not docs:
-        return None
-    emb = _get_embedder()
-    if emb is None:
-        # No key → just use first doc; don't break the app
-        return docs[0]
-
-    try:
-        docs_capped = docs[:cap]  # bound latency/memory
-        texts = [d.page_content for d in docs_capped]
-        q_vec = emb.embed_query(answer_text)
-        d_vecs = emb.embed_documents(texts)  # list of vectors
-        sims = cosine_similarity([q_vec], d_vecs)[0]  # 1D array
-        # argmax manually to avoid numpy import assumptions
-        best_idx, best_val = 0, float("-inf")
-        for i, s in enumerate(sims):
-            if s > best_val:
-                best_idx, best_val = i, s
-        return docs_capped[best_idx]
-    except Exception as e:
-        # Never allow ranking to crash the run
-        st.info(f"⚠️ Skipping cosine ranking due to: {e}")
-        return docs[0]
-
 # ================= Helper for page selection + OCR =================
 def _detect_selected_pages(doc: fitz.Document):
     want = set()
@@ -403,25 +363,21 @@ def _ocr_page_with_gpt4o(img_png_bytes: bytes) -> str:
 # ================= Builder =================
 @st.cache_resource(show_spinner="📦 Processing & indexing PDF…")
 def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
-    """
-    Heavy work: page previews (base64 strings), selective OCR, LlamaParse, embeddings, FAISS, retriever
-    """
     os.makedirs("uploaded", exist_ok=True)
     pdf_path = os.path.join("uploaded", file_name)
     with open(pdf_path, "wb") as f:
         f.write(pdf_bytes)
 
-    # Open with PyMuPDF
     doc = fitz.open(pdf_path)
 
-    # Previews
+    # Base64 PNG previews (lightweight)
     page_images_b64 = {}
     for i, page in enumerate(doc):
-        pix = page.get_pixmap(dpi=120)  # keep memory modest
+        pix = page.get_pixmap(dpi=120)
         img_b64 = base64.b64encode(pix.tobytes("png")).decode("ascii")
         page_images_b64[i + 1] = img_b64
 
-    # OCR selected pages
+    # OCR overrides
     selected_pages = _detect_selected_pages(doc)
     ocr_text_by_page = {}
     for pnum in sorted(selected_pages):
@@ -432,16 +388,15 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
                 ocr_text_by_page[pnum] = ocr_text
         except Exception:
             pass
+
     doc.close()
 
-    # Parse entire document with LlamaParse
     parser = LlamaParse(api_key=os.environ["LLAMA_CLOUD_API_KEY"], num_workers=4)
     result = parser.parse(pdf_path)
 
-    # Build pages array with OCR overrides
     pages, page_texts = [], {}
     for pg in result.pages:
-        pnum = pg.page  # 1-based
+        pnum = pg.page
         if pnum in ocr_text_by_page:
             text = ocr_text_by_page[pnum].strip()
         else:
@@ -451,7 +406,6 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
             pages.append(Document(page_content=text, metadata={"page_number": pnum}))
             page_texts[pnum] = text
 
-    # Split → Embed → Index
     splitter = RecursiveCharacterTextSplitter(chunk_size=3300, chunk_overlap=0)
     chunks = splitter.split_documents(pages)
     for idx, c in enumerate(chunks):
@@ -540,18 +494,19 @@ if not up:
     st.warning("Please upload or load a PDF to continue.")
     st.stop()
 
-# Rebuild retriever when file changes
+# Rebuild retriever when file changes (set name early to avoid partial reruns)
 if st.session_state.get("last_processed_pdf") != up.name:
-    st.session_state.last_processed_pdf = up.name   # set early to avoid duplicate rebuilds
+    st.session_state.last_processed_pdf = up.name
     pdf_bytes = up.getvalue()
     st.session_state.pdf_bytes = pdf_bytes
-    st.session_state.pdf_b64 = base64.b64encode(pdf_bytes).decode("ascii")  # single shared copy
+    st.session_state.pdf_b64 = base64.b64encode(pdf_bytes).decode("ascii")
 
     (st.session_state.retriever,
      st.session_state.page_images,
      st.session_state.page_texts) = build_retriever_from_pdf(pdf_bytes, up.name)
 
     _reset_chat()
+
 
 # Chat input
 user_q = st.chat_input("Type your question here…", key="main_chat_input")
@@ -585,6 +540,9 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
         is_deny = (intent == "DENY")
         is_confirm = (intent == "CONFIRM")
 
+
+
+        
         if is_deny:
             thinking.empty()
             answer = "Alright, if you have any more questions or need further assistance, feel free to ask!"
@@ -607,6 +565,7 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
             if retr_err:
                 st.warning(f"RAG retrieval error: {retr_err}")
 
+            # -------- answer with LLM --------
             try:
                 llm = ChatOpenAI(model="gpt-4o", temperature=0)
                 full_input = {
@@ -621,29 +580,26 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
                 answer = llm.invoke(
                     PromptTemplate(
                         template = """
-        You are a financial-data extraction assistant.
-    
-       **IMPORTANT CONDITIONAL FOLLOW-UP**  
-        🛎️ After you answer the user’s question (using steps 1–4), **only if** there is still **unused** relevant report content, **ask**:  
-          “Would you like more detail on [X]?”  
-       Otherwise, **do not** ask any follow-up.
+You are a financial-data extraction assistant.
 
-    **Use ONLY what appears under “Context”.**
+**IMPORTANT CONDITIONAL FOLLOW-UP**
+After you answer the user’s question (using steps 1–4), only if there is still unused relevant report content, ask:
+“Would you like more detail on [X]?”
+Otherwise, do not ask any follow-up.
 
-    ### How to answer
-    1. **Single value questions**  
-       • Find the row + column that match the user's words.  
-       • Return the answer in a **short, clear sentence** using the exact number from the context.  
-       • **Do NOT repeat** the metric/company name unless asked.
-    
-    2. **Table questions**  
-       • Return the full table **with header row** in GitHub-flavoured markdown.
-    
-    3. **Valuation method / theory**  
-       • Synthesize across chunks; include weights and $ values when present.
- 
-    4. If you cannot find an answer in Context → reply exactly:
-       "Sorry I didnt understand the question. Did you mean SUGGESTION?"
+**HARD RULE (unrelated questions)**
+If the user's question is unrelated to this PDF or requires information outside the Context, reply exactly:
+"Sorry I can only answer question related to {pdf_name} pdf document"
+
+Use ONLY what appears under “Context”.
+
+### How to answer
+1. Single value → short sentence with the exact number.
+2. Table questions → return the full table in GitHub-flavoured markdown.
+3. Valuation methods → synthesize across chunks; show weights and $ values.
+4. Theory/text → explain using context.
+5. If you cannot find an answer in Context → reply exactly:
+   "Sorry I didnt understand the question. Did you mean SUGGESTION?"
 
 ---
 Context:
@@ -663,58 +619,59 @@ Conversation so far:
             answer = sanitize_suggestion(answer, effective_q, docs)
             st.session_state.last_suggestion = _clean_heading(extract_suggestion(answer) or "") or None
 
+            apology = f"Sorry I can only answer question related to {pdf_display} pdf document"
+            is_unrelated = apology.lower() in answer.strip().lower()
             is_clarify  = is_clarification(answer)
 
             entry = {"id": _new_id(), "role": "assistant", "content": answer}
             thinking.empty()
 
-            # --------- COSINE SIMILARITY REFERENCE PICK (safe) ----------
             with block.container():
                 type_bubble(answer)
-                skip_reference = is_clarify
+
+                # ===== COSINE-SIMILARITY RERANK (question vs chunks) =====
+                skip_reference = is_unrelated or is_clarify
                 best_doc = None
-
                 if docs and not skip_reference:
-                    # 1) (optional) quick 3-way LLM pick on first 3 docs
                     try:
-                        top3 = docs[:3]
-                        if len(top3) >= 3:
-                            ranking_prompt = PromptTemplate(
-                                template=(
-                                    "Given the user's question and 3 candidate context chunks, "
-                                    "reply with only the number (1, 2, or 3) of the chunk that best answers it.\n\n"
-                                    "Question:\n{question}\n\n"
-                                    "Chunk 1:\n{chunk1}\n\n"
-                                    "Chunk 2:\n{chunk2}\n\n"
-                                    "Chunk 3:\n{chunk3}\n\n"
-                                    "Best Chunk Number:"
-                                ),
-                                input_variables=["question", "chunk1", "chunk2", "chunk3"]
-                            )
-                            try:
-                                pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
-                                    ranking_prompt.invoke({
-                                        "question": query_for_retrieval,
-                                        "chunk1": top3[0].page_content,
-                                        "chunk2": top3[1].page_content,
-                                        "chunk3": top3[2].page_content
-                                    })
-                                ).content.strip()
-                                if pick.isdigit() and 1 <= int(pick) <= 3:
-                                    best_doc = top3[int(pick) - 1]
-                            except Exception:
-                                pass
-                    except Exception as e:
-                        st.info(f"ℹ️ LLM pre-pick skipped: {e}")
+                        texts = [d.page_content for d in docs] or []
+                        if texts:
+                            emb = get_embedder()
+                            q_vec = emb.embed_query(query_for_retrieval)   # ← embed QUESTION
+                            chunk_vecs = emb.embed_documents(texts)
+                            sims = cosine_similarity([q_vec], chunk_vecs)[0]
+                            ranked = sorted(zip(docs, sims), key=lambda x: x[1], reverse=True)
+                            top3 = [d for d, _ in ranked[:3]]
+                            best_doc = top3[0] if top3 else None
 
-                    # 2) COSINE similarity against the final answer text
-                    try:
-                        if best_doc is None:
-                            best_doc = _pick_best_doc_with_cosine(docs, answer, cap=25)
+                            # Optional tiny LLM tie-break only if we truly have 3
+                            if len(top3) >= 3:
+                                ranking_prompt = PromptTemplate(
+                                    template=("Given the user's question and 3 candidate context chunks, "
+                                              "reply with only the number (1, 2, or 3) of the chunk that best answers it.\n\n"
+                                              "Question:\n{question}\n\n"
+                                              "Chunk 1:\n{chunk1}\n\n"
+                                              "Chunk 2:\n{chunk2}\n\n"
+                                              "Chunk 3:\n{chunk3}\n\n"
+                                              "Best Chunk Number:"),
+                                    input_variables=["question", "chunk1", "chunk2", "chunk3"]
+                                )
+                                try:
+                                    pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
+                                        ranking_prompt.invoke({
+                                            "question": query_for_retrieval,
+                                            "chunk1": top3[0].page_content,
+                                            "chunk2": top3[1].page_content,
+                                            "chunk3": top3[2].page_content
+                                        })
+                                    ).content.strip()
+                                    if pick.isdigit() and 1 <= int(pick) <= 3:
+                                        best_doc = top3[int(pick)-1]
+                                except Exception:
+                                    pass
                     except Exception as e:
-                        st.info(f"ℹ️ Cosine ranking skipped: {e}")
-                        if best_doc is None and docs:
-                            best_doc = docs[0]
+                        st.info(f"ℹ️ Reference selection skipped: {e}")
+                        best_doc = None
 
                 if best_doc is not None:
                     ref_page = best_doc.metadata.get("page_number")
