@@ -1,4 +1,4 @@
-# gdrive_utils.py  (writes to /tmp, works on Cloud Run)
+# gdrive_utils.py
 import os, io, json
 try:
     import streamlit as st
@@ -8,15 +8,11 @@ except Exception:
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
-from google.auth import default as google_auth_default
+from google.auth import default as google_auth_default   # <-- ADC
 
 SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
-FOLDER_ID = "1XGyBBFhhQFiG43jpYJhNzZYi7C-_l5me"
+FOLDER_ID = "1XGyBBFhhQFiG43jpYJhNzZYi7C-_l5me"  # fallback; ignored if a link/id is provided
 
-# writable dirs
-DATA_DIR = os.getenv("DATA_DIR", "/tmp/uw_agent")
-UPLOADED_DIR = os.path.join(DATA_DIR, "uploaded")
-os.makedirs(UPLOADED_DIR, exist_ok=True)
 
 def _emit(msg, level="info"):
     if st:
@@ -25,16 +21,25 @@ def _emit(msg, level="info"):
     else:
         print(msg)
 
+
 def get_drive_service():
+    """
+    Prefer SERVICE_ACCOUNT_JSON (local/dev). Otherwise use ADC
+    (Cloud Run’s service account). Both are scoped for Drive Readonly.
+    """
+    # 1) Explicit JSON (local/dev or if you kept the secret mapped)
     saj = os.environ.get("SERVICE_ACCOUNT_JSON")
     if saj:
         info = json.loads(saj)
         creds = Credentials.from_service_account_info(info, scopes=SCOPES)
         return build('drive', 'v3', credentials=creds, cache_discovery=False)
+
+    # 2) Application Default Credentials (Cloud Run)
     creds, _ = google_auth_default(scopes=SCOPES)
     if not creds:
         raise RuntimeError("ADC not available (no credentials found)")
     return build('drive', 'v3', credentials=creds, cache_discovery=False)
+
 
 def _extract_folder_id(folder_id_or_url: str) -> str:
     s = (folder_id_or_url or "").strip()
@@ -43,6 +48,7 @@ def _extract_folder_id(folder_id_or_url: str) -> str:
     if s.startswith("http"):
         s = s.rstrip("/").split("/")[-1]
     return s
+
 
 def get_all_pdfs(service, folder_id_or_url: str = None):
     folder_id = _extract_folder_id(folder_id_or_url)
@@ -62,10 +68,12 @@ def get_all_pdfs(service, folder_id_or_url: str = None):
         _emit(f"❌ Error accessing Drive folder: {e}", "error")
         return []
 
+
 def download_pdf(service, file_id, file_name):
     try:
         request = service.files().get_media(fileId=file_id)
-        file_path = os.path.join(UPLOADED_DIR, file_name)
+        os.makedirs("uploaded", exist_ok=True)
+        file_path = os.path.join("uploaded", file_name)
         with io.FileIO(file_path, "wb") as f:
             downloader = MediaIoBaseDownload(f, request)
             done = False
