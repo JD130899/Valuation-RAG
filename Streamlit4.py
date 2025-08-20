@@ -387,7 +387,7 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
     embedder = CohereEmbeddings(
         model="embed-english-v3.0",
         user_agent="langchain",
-        cohere_api_key=st.secrets["COHERE_API_KEY"]
+        cohere_api_key=os.environ["COHERE_API_KEY"]
     )
     vs = FAISS.from_documents(chunks, embedder)
 
@@ -400,7 +400,7 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
     reranker = CohereRerank(
         model="rerank-english-v3.0",
         user_agent="langchain",
-        cohere_api_key=st.secrets["COHERE_API_KEY"],
+        cohere_api_key=os.environ["COHERE_API_KEY"],
         top_n=20
     )
     retriever = ContextualCompressionRetriever(
@@ -625,10 +625,10 @@ Conversation so far:
                     try:
                         texts = [d.page_content for d in docs]
                         emb_query = CohereEmbeddings(
-                            model="embed-english-v3.0", user_agent="langchain", cohere_api_key=st.secrets["COHERE_API_KEY"]
+                            model="embed-english-v3.0", user_agent="langchain", cohere_api_key=os.environ["COHERE_API_KEY"]
                         ).embed_query(answer)
                         chunk_embs = CohereEmbeddings(
-                            model="embed-english-v3.0", user_agent="langchain", cohere_api_key=st.secrets["COHERE_API_KEY"]
+                            model="embed-english-v3.0", user_agent="langchain", cohere_api_key=os.environ["COHERE_API_KEY"]
                         ).embed_documents(texts)
                         sims = cosine_similarity([emb_query], chunk_embs)[0]
                         ranked = sorted(list(zip(docs, sims)), key=lambda x: x[1], reverse=True)
