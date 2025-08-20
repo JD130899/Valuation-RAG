@@ -23,6 +23,7 @@ from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
 
 # ================= Setup =================
 load_dotenv()
+
 st.set_page_config(page_title="Underwriting Agent", layout="wide")
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
@@ -650,10 +651,10 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
                 skip_reference = is_unrelated or is_clarify
                 texts = [d.page_content for d in docs]
                 emb_query = CohereEmbeddings(
-                    model="embed-english-v3.0", user_agent="langchain", cohere_api_key=st.secrets["COHERE_API_KEY"]
+                    model="embed-english-v3.0", user_agent="langchain", cohere_api_key=os.environ["COHERE_API_KEY"]
                 ).embed_query(ans)
                 chunk_embs = CohereEmbeddings(
-                    model="embed-english-v3.0", user_agent="langchain", cohere_api_key=st.secrets["COHERE_API_KEY"]
+                    model="embed-english-v3.0", user_agent="langchain", cohere_api_key=os.environ["COHERE_API_KEY"]]
                 ).embed_documents(texts)
                 sims = cosine_similarity([emb_query], chunk_embs)[0]
                 ranked = sorted(list(zip(docs, sims)), key=lambda x: x[1], reverse=True)
