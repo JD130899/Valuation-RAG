@@ -17,7 +17,6 @@ from langchain.retrievers.document_compressors import CohereRerank
 from langchain.retrievers import ContextualCompressionRetriever
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
-from sklearn.metrics.pairwise import cosine_similarity
 
 import openai
 from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
@@ -357,12 +356,6 @@ def _ocr_page_with_gpt4o(img_png_bytes: bytes) -> str:
     except Exception:
         return ""
 
-embedder = CohereEmbeddings(
-        model="embed-english-v3.0",
-        user_agent="langchain",
-        cohere_api_key=os.environ["COHERE_API_KEY"]
-    )
-
 # ================= Builder =================
 @st.cache_resource(show_spinner="📦 Processing & indexing PDF…")
 def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
@@ -422,7 +415,11 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
     for idx, c in enumerate(chunks):
         c.metadata["chunk_id"] = idx + 1
 
-    
+    embedder = CohereEmbeddings(
+        model="embed-english-v3.0",
+        user_agent="langchain",
+        cohere_api_key=os.environ["COHERE_API_KEY"]
+    )
     vs = FAISS.from_documents(chunks, embedder)
 
     store = os.path.join("vectorstore", file_name)
@@ -445,6 +442,9 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
         base_compressor=reranker
     )
     return retriever, page_images_b64, page_texts
+
+
+
 
 
 # ================= Sidebar: Google Drive loader =================
@@ -550,7 +550,6 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
         is_deny = (intent == "DENY")
         is_confirm = (intent == "CONFIRM")
 
-        
         if is_deny:
             thinking.empty()
             answer = "Alright, if you have any more questions or need further assistance, feel free to ask!"
@@ -587,45 +586,26 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
                 answer = llm.invoke(
                     PromptTemplate(
                         template = """
-         You are a financial-data extraction assistant.
-    
-       **IMPORTANT CONDITIONAL FOLLOW-UP**  
-        🛎️ After you answer the user’s question (using steps 1–4), **only if** there is still **unused** relevant report content, **ask**:  
-            “Would you like more detail on [X]?”  
-            Otherwise, **do not** ask any follow-up.
+You are a financial-data extraction assistant.
 
-        **HARD RULE (unrelated questions)**
-        If the user's question is unrelated to this PDF or requires information outside the Context, reply exactly:
-        "Sorry I can only answer question related to {pdf_name} pdf document"
+**IMPORTANT CONDITIONAL FOLLOW-UP**
+After you answer the user’s question (using steps 1–4), only if there is still unused relevant report content, ask:
+“Would you like more detail on [X]?”
+Otherwise, do not ask any follow-up.
 
-        **Use ONLY what appears under “Context”.**
+**HARD RULE (unrelated questions)**
+If the user's question is unrelated to this PDF or requires information outside the Context, reply exactly:
+"Sorry I can only answer question related to {pdf_name} pdf document"
 
-        ### How to answer
-        1. **Single value questions**  
-        • Find the row + column that match the user's words.  
-        • Return the answer in a **short, clear sentence** using the exact number from the context.  
-            Example: “The Income (DCF) approach value is $1,150,000.”  
-        • **Do NOT repeat the metric name or company name** unless the user asks.
-        
-        2. **Table questions**  
-        • Return the full table **with its header row** in GitHub-flavoured markdown.
-        
-        3. **Valuation method / theory / reasoning questions**
-            
-        • If the question involves **valuation methods**, **concluded value**, or topics like **Income Approach**, **Market Approach**, or **Valuation Summary**, do the following:
-            - Combine and synthesize relevant information across all chunks.
-            - Pay special attention to how **weights are distributed** (e.g., “50% DCF, 25% EBITDA, 25% SDE”).
-            - Avoid oversimplifying if more detailed breakdowns (like subcomponents of market approach) are available.
-            - If a table gives a simplified view (e.g., "50% Market Approach"), but other parts break it down (e.g., 25% EBITDA + 25% SDE), **prefer the detailed breakdown with percent value**.   
-            - When describing weights, also mention the **corresponding dollar values** used in the context (e.g., “50% DCF = $3,712,000, 25% EBITDA = $4,087,000...”)
-            - **If Market approach is composed of sub-methods like EBITDA and SDE, then explicitly extract and show their individual weights and values, even if not listed together in a single table.**
-            
-    
-        4. **Theory/textual question**  
-        • Try to return an explanation **based on the context**.
+Use ONLY what appears under “Context”.
 
-        5. If you cannot find an answer in Context → reply exactly:
-        "Sorry I didnt understand the question. Did you mean SUGGESTION?"
+### How to answer
+1. Single value → short sentence with the exact number.
+2. Table questions → return the full table in GitHub-flavoured markdown.
+3. Valuation methods → synthesize across chunks; show weights and $ values.
+4. Theory/text → explain using context.
+5. If you cannot find an answer in Context → reply exactly:
+   "Sorry I didnt understand the question. Did you mean SUGGESTION?"
 
 ---
 Context:
@@ -657,44 +637,36 @@ Conversation so far:
                 skip_reference = is_unrelated or is_clarify
                 if docs and not skip_reference:
                     try:
-                        texts = [d.page_content for d in docs]
-                        emb_query = embedder.embed_query(answer)
-                        chunk_embs =embedder.embed_documents(texts) 
-                        sims = cosine_similarity([emb_query], chunk_embs)[0]
-                        ranked = sorted(list(zip(docs, sims)), key=lambda x: x[1], reverse=True)
-                        top3 = [d for d,_ in ranked[:3]]
-                        if len(top3) >= 3:
+                        top5 = docs[:5]
+                        best_doc = top5[0] if top5 else None
+                        if len(top5) >= 5:
                             ranking_prompt = PromptTemplate(
-                                template=("""
-                                Given a user question and 3 candidate context chunks, return the number (1-3) of the chunk that best answers it.
-                                Question:
-                                {question}
-
-                                Chunk 1:
-                                {chunk1}
-
-                                Chunk 2:
-                                {chunk2}
-
-                                Chunk 3:
-                                {chunk3}
-
-                                Best Chunk Number:
-                                          """
+                                template=(
+                                    "Given the user's question and 3 candidate context chunks, "
+                                    "reply with only the number (1, 2,3,4 or 5) of the chunk that best answers it.\n\n"
+                                    "Question:\n{question}\n\n"
+                                    "Chunk 1:\n{chunk1}\n\n"
+                                    "Chunk 2:\n{chunk2}\n\n"
+                                    "Chunk 3:\n{chunk3}\n\n"
+                                    "Chunk 4:\n{chunk4}\n\n"
+                                    "Chunk 5:\n{chunk5}\n\n"
+                                    "Best Chunk Number:"
                                 ),
-                                input_variables=["question", "chunk1", "chunk2", "chunk3"]
+                                input_variables=["question", "chunk1", "chunk2", "chunk3", "chunk4", "chunk5"]
                             )
                             try:
                                 pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
                                     ranking_prompt.invoke({
                                         "question": query_for_retrieval,
-                                        "chunk1": top3[0].page_content,
-                                        "chunk2": top3[1].page_content,
-                                        "chunk3": top3[2].page_content
+                                        "chunk1": top5[0].page_content,
+                                        "chunk2": top5[1].page_content,
+                                        "chunk3": top5[2].page_content,
+                                        "chunk4": top5[3].page_content,
+                                        "chunk5": top5[4].page_content
                                     })
                                 ).content.strip()
-                                if pick.isdigit() and 1 <= int(pick) <= 3:
-                                    best_doc = top3[int(pick) - 1]
+                                if pick.isdigit() and 1 <= int(pick) <= 5:
+                                    best_doc = top5[int(pick) - 1]
                             except Exception:
                                 pass
 
