@@ -1,6 +1,6 @@
-# app.py  (drop-in replacement)
+# app.py  (stable drop-in)
 
-import os, io, pickle, base64, re, uuid, time, json
+import os, io, pickle, base64, re, uuid, time, json, hashlib
 import streamlit as st
 import fitz  # PyMuPDF
 from PIL import Image
@@ -24,7 +24,6 @@ from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
 
 # ================= Setup =================
 load_dotenv()
-
 st.set_page_config(page_title="Underwriting Agent", layout="wide")
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
@@ -35,8 +34,7 @@ FOLDER_TO_USE = DRIVE_FOLDER_FROM_SECRET or HARDCODED_FOLDER_LINK
 # ---------- small helpers ----------
 def type_bubble(text: str, *, base_delay: float = 0.012, cutoff_chars: int = 2000):
     placeholder = st.empty()
-    buf = []
-    count = 0
+    buf, count = [], 0
     for ch in text:
         buf.append(ch); count += 1
         placeholder.markdown(
@@ -47,11 +45,6 @@ def type_bubble(text: str, *, base_delay: float = 0.012, cutoff_chars: int = 200
             time.sleep(base_delay)
     return placeholder
 
-def _company_from_filename(pdf_name: str) -> str:
-    base = os.path.splitext(pdf_name)[0]
-    base = re.sub(r"\s*[-–—:]?\s*Certified\s+Valuation\s+Report.*$", "", base, flags=re.I)
-    return base.strip() or "the subject company"
-
 def _reset_chat():
     st.session_state.messages = [
         {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
@@ -60,21 +53,6 @@ def _reset_chat():
     st.session_state.pending_input = None
     st.session_state.waiting_for_response = False
     st.session_state.last_suggestion = None
-
-# helpers
-def _set_active_pdf(name: str, data: bytes):
-    st.session_state.active_pdf_name  = name
-    st.session_state.active_pdf_bytes = data
-    st.session_state.last_processed_pdf = None  # force rebuild for a new file
-
-def _get_active_pdf():
-    data = st.session_state.get("active_pdf_bytes")
-    name = st.session_state.get("active_pdf_name")
-    if not data or not name:
-        return None
-    bio = io.BytesIO(data); bio.name = name
-    return bio
-
 
 # ---------- Session state ----------
 if "last_synced_file_id" not in st.session_state:
@@ -93,6 +71,21 @@ if "last_suggestion" not in st.session_state:
     st.session_state.last_suggestion = None
 if "next_msg_id" not in st.session_state:
     st.session_state.next_msg_id = 0
+
+# ---------- One single source of truth for active PDF ----------
+def _set_active_pdf(name: str, data: bytes):
+    st.session_state.active_pdf_name  = name
+    st.session_state.active_pdf_bytes = data
+    # We only mark processed AFTER a successful build, so clear here.
+    st.session_state.last_processed_pdf = None
+
+def _get_active_pdf():
+    data = st.session_state.get("active_pdf_bytes")
+    name = st.session_state.get("active_pdf_name")
+    if not data or not name:
+        return None
+    bio = io.BytesIO(data); bio.name = name
+    return bio
 
 # ---------- styles (chat + reference styles) ----------
 st.markdown("""
@@ -174,7 +167,6 @@ def file_badge_link(name: str, pdf_bytes: bytes, synced: bool = True):
     )
 
 def render_reference_card(label: str, img_b64: str, page: int, key: str):
-    """Uses the single shared st.session_state.pdf_b64 (not per-message)."""
     pdf_b64 = st.session_state.get("pdf_b64", "")
     st.markdown(
         f"""
@@ -235,8 +227,7 @@ def extract_suggestion(text):
     m = re.search(r"did you mean\s+(.+?)\?", text, flags=re.IGNORECASE)
     if not m: return None
     val = _clean_heading(m.group(1).strip())
-    if val.lower() == "suggestion": return None
-    return val
+    return None if val.lower() == "suggestion" else val
 
 def is_clarification(answer: str) -> bool:
     low = answer.lower().strip()
@@ -257,8 +248,8 @@ def guess_suggestion(question: str, docs):
     for d in docs or []:
         for ln in d.page_content.splitlines():
             raw = ln.strip()
-            if not raw: continue
-            if len(raw.split()) > 6: continue
+            if not raw or len(raw.split()) > 6: 
+                continue
             words = set(w.lower() for w in re.findall(r"[A-Za-z]{3,}", raw))
             score = len(q_terms & words)
             if score > best_score:
@@ -331,7 +322,7 @@ def condense_query(chat_history, user_input: str, pdf_name: str) -> str:
         return user_input
 
 # ================= Helper for page selection + OCR =================
-def _detect_selected_pages(doc: fitz.Document):
+def _detect_selected_pages(doc: fitz.Document, cap: int = 3):
     want = set()
     total = len(doc)
     if total >= 3:
@@ -348,9 +339,11 @@ def _detect_selected_pages(doc: fitz.Document):
         second = market_hits[1]; want.add(second)
         if second + 1 <= total: want.add(second + 1)
     if valuation_summary_page: want.add(valuation_summary_page)
-    return want
+    # Cap to avoid OCR rate hits
+    return set(list(sorted(want))[:cap])
 
-def _ocr_page_with_gpt4o(img_png_bytes: bytes) -> str:
+def _ocr_page_with_gpt4o(img_png_bytes: bytes, retries: int = 3) -> str:
+    """Small retry/backoff to avoid transient rate limits."""
     b64 = base64.b64encode(img_png_bytes).decode("utf-8")
     prompt_text = (
         "Extract all values and details precisely from the image. "
@@ -358,29 +351,36 @@ def _ocr_page_with_gpt4o(img_png_bytes: bytes) -> str:
         "If formulas are present, write THE EQUATION using simple math symbols. "
         "Avoid extra commentary."
     )
-    try:
-        resp = openai.chat.completions.create(
-            model="gpt-4o",
-            messages=[{
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": prompt_text},
-                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}}],
-            }],
-            max_tokens=800,
-        )
-        return resp.choices[0].message.content.strip()
-    except Exception:
-        return ""
+    delay = 1.5
+    for attempt in range(retries):
+        try:
+            resp = openai.chat.completions.create(
+                model="gpt-4o",
+                messages=[{
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt_text},
+                        {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}}],
+                }],
+                max_tokens=800,
+            )
+            return resp.choices[0].message.content.strip()
+        except Exception:
+            if attempt == retries - 1:
+                return ""
+            time.sleep(delay)
+            delay *= 2
 
 # ================= Builder =================
 @st.cache_resource(show_spinner="📦 Processing & indexing PDF…")
-def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
+def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str, content_hash: str):
     """
     Heavy work: page previews (base64 strings), selective OCR, LlamaParse, embeddings, FAISS, retriever
+    Cache keyed by bytes hash so same-named files don't collide.
     """
     os.makedirs("uploaded", exist_ok=True)
-    pdf_path = os.path.join("uploaded", file_name)
+    safe_name = f"{content_hash[:12]}_{file_name}"
+    pdf_path = os.path.join("uploaded", safe_name)
     with open(pdf_path, "wb") as f:
         f.write(pdf_bytes)
 
@@ -394,12 +394,11 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
         img_b64 = base64.b64encode(pix.tobytes("png")).decode("ascii")
         page_images_b64[i + 1] = img_b64
 
-    # Detect which pages to override with OCR
-    selected_pages = _detect_selected_pages(doc)
+    # Detect which pages to override with OCR (capped)
+    selected_pages = _detect_selected_pages(doc, cap=3)
     ocr_text_by_page = {}
     for pnum in sorted(selected_pages):
         try:
-            # Use the already-rendered preview (saves memory)
             img_b = base64.b64decode(page_images_b64[pnum])
             ocr_text = _ocr_page_with_gpt4o(img_b)
             if ocr_text:
@@ -439,7 +438,7 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
     )
     vs = FAISS.from_documents(chunks, embedder)
 
-    store = os.path.join("vectorstore", file_name)
+    store = os.path.join("vectorstore", safe_name)
     os.makedirs(store, exist_ok=True)
     vs.save_local(store, index_name="faiss")
     with open(os.path.join(store, "metadata.pkl"), "wb") as mf:
@@ -460,10 +459,8 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
     )
     return retriever, page_images_b64, page_texts
 
-
 # ================= Sidebar: Google Drive loader =================
 service = get_drive_service()
-
 pdf_files = get_all_pdfs(service, FOLDER_TO_USE)
 st.sidebar.caption(f"📁 Using Drive folder: {FOLDER_TO_USE}")
 
@@ -497,42 +494,39 @@ else:
 # ================= Main UI =================
 st.title("Underwriting Agent")
 
-if "uploaded_file_from_drive" in st.session_state:
-    file_badge_link(
-        st.session_state.uploaded_file_name,
-        st.session_state.uploaded_file_from_drive,
-        synced=True
-    )
-    up = io.BytesIO(st.session_state.uploaded_file_from_drive)
-    up.name = st.session_state.uploaded_file_name
-else:
-    uploaded = st.file_uploader("Upload a valuation report PDF", type="pdf", key="uploader")
-    if uploaded:
-        _set_active_pdf(uploaded.name, uploaded.getvalue())
-        file_badge_link(uploaded.name, uploaded.getvalue(), synced=False)
-        if uploaded.name != st.session_state.get("last_selected_upload"):
-            st.session_state.last_selected_upload = uploaded.name
-            _reset_chat()
+# Uploader (also goes through the single setter)
+uploaded = st.file_uploader("Upload a valuation report PDF", type="pdf", key="uploader")
+if uploaded:
+    _set_active_pdf(uploaded.name, uploaded.getvalue())
+    if uploaded.name != st.session_state.get("last_selected_upload"):
+        st.session_state.last_selected_upload = uploaded.name
+        _reset_chat()
 
+# Always reconstruct the active handle from state
 up = _get_active_pdf()
-if up and st.session_state.get("last_synced_file_id"):
-    file_badge_link(st.session_state.active_pdf_name, st.session_state.active_pdf_bytes, synced=True)
 
 if not up:
     st.warning("Please upload or load a PDF to continue.")
     st.stop()
 
-# Rebuild retriever when file changes (set name early to avoid partial reruns)
-if st.session_state.get("last_processed_pdf") != up.name:
-    st.session_state.last_processed_pdf = up.name   # set early to avoid duplicate rebuilds
+# Show a single “using file” badge
+file_badge_link(st.session_state.active_pdf_name, st.session_state.active_pdf_bytes, synced=bool(st.session_state.get("last_synced_file_id")))
+
+# Rebuild retriever when needed — mark as processed only AFTER a successful build
+need_build = ("retriever" not in st.session_state) or (st.session_state.get("last_processed_pdf") != up.name)
+if need_build:
     pdf_bytes = up.getvalue()
     st.session_state.pdf_bytes = pdf_bytes
-    st.session_state.pdf_b64 = base64.b64encode(pdf_bytes).decode("ascii")  # single shared copy
+    st.session_state.pdf_b64  = base64.b64encode(pdf_bytes).decode("ascii")
+
+    # content hash so cache doesn't collide on same-named different files
+    content_hash = hashlib.sha256(pdf_bytes).hexdigest()
 
     (st.session_state.retriever,
      st.session_state.page_images,
-     st.session_state.page_texts) = build_retriever_from_pdf(pdf_bytes, up.name)
+     st.session_state.page_texts) = build_retriever_from_pdf(pdf_bytes, up.name, content_hash)
 
+    st.session_state.last_processed_pdf = up.name
     _reset_chat()
 
 # Chat input
@@ -566,7 +560,6 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
         intent = classify_reply_intent(raw_q, _last_assistant_text(history_to_use))
         is_deny = (intent == "DENY")
         is_confirm = (intent == "CONFIRM")
-
 
         if is_deny:
             thinking.empty()
@@ -624,6 +617,7 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
         
         2. **Table questions**  
            • Return the full table **with its header row** in GitHub-flavoured markdown.
+           • if user asks about dcf, it stands for Discounted cash flow. So use this while extracting the table
         
         3. **Valuation method / theory / reasoning questions**
             
@@ -657,6 +651,7 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
             except Exception as e:
                 answer = f"Sorry, I hit an error while answering: {e}"
 
+            # Apply suggestion sanitizer
             answer = sanitize_suggestion(answer, effective_q, docs)
             st.session_state.last_suggestion = _clean_heading(extract_suggestion(answer) or "") or None
 
@@ -669,64 +664,72 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
 
             with block.container():
                 type_bubble(answer)
-                skip_reference = is_unrelated or is_clarify
-                texts = [d.page_content for d in docs]
-                emb_query = CohereEmbeddings(
-                    model="embed-english-v3.0", user_agent="langchain", cohere_api_key=os.environ["COHERE_API_KEY"]
-                ).embed_query(answer)
-                chunk_embs = CohereEmbeddings(
-                    model="embed-english-v3.0", user_agent="langchain", cohere_api_key=os.environ["COHERE_API_KEY"]
-                ).embed_documents(texts)
-                sims = cosine_similarity([emb_query], chunk_embs)[0]
-                ranked = sorted(list(zip(docs, sims)), key=lambda x: x[1], reverse=True)
-                top3 = [d for d,_ in ranked[:3]]
-                if len(top3) >= 3:
-                    ranking_prompt = PromptTemplate(
-                        template="""
-                        Given a user question and 3 candidate context chunks, return the number (1-3) of the chunk that best answers it.
-                        Question:
-                        {question}
-                        
-                        Chunk 1:
-                        {chunk1}
-                        
-                        Chunk 2:
-                        {chunk2}
-                        
-                        Chunk 3:
-                        {chunk3}
-                        
-                        Best Chunk Number:
-                        """,
-                        input_variables=["question", "chunk1", "chunk2", "chunk3"]
-                    )
-                    try:
-                        pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
-                            ranking_prompt.invoke({
-                                "question": query_for_retrieval,
-                                "chunk1": top3[0].page_content,
-                                "chunk2": top3[1].page_content,
-                                "chunk3": top3[2].page_content
-                            })
-                        ).content.strip()
-                        if pick.isdigit() and 1 <= int(pick) <= 3:
-                            best_doc = top3[int(pick) - 1]
-                    except Exception:
-                        pass
 
-                if best_doc is not None:
-                    ref_page = best_doc.metadata.get("page_number")
-                    img_b64 = st.session_state.page_images.get(ref_page)
-                    if img_b64:
-                        entry["source"] = f"Page {ref_page}"
-                        entry["source_img"] = img_b64
-                        entry["source_page"] = ref_page
-                        render_reference_card(
-                            label=entry["source"],
-                            img_b64=img_b64,
-                            page=ref_page,
-                            key=entry["id"],)
-                   
+                # Attach a reference only if we have confident selection
+                if docs and not (is_unrelated or is_clarify):
+                    try:
+                        texts = [d.page_content for d in docs]
+                        # reuse a single embedder
+                        co = CohereEmbeddings(
+                            model="embed-english-v3.0",
+                            user_agent="langchain",
+                            cohere_api_key=os.environ["COHERE_API_KEY"]
+                        )
+                        emb_query  = co.embed_query(answer)
+                        chunk_embs = co.embed_documents(texts)
+                        sims = cosine_similarity([emb_query], chunk_embs)[0]
+                        ranked = sorted(zip(docs, sims), key=lambda x: x[1], reverse=True)
+                        top3 = [d for d, _ in ranked[:3]]
+
+                        best_doc = None
+                        if len(top3) >= 3:
+                            ranking_prompt = PromptTemplate(
+                                template="""
+                Given a user question and 3 candidate context chunks, return the number (1-3) of the chunk that best answers it.
+                Question:
+                {question}
+                Chunk 1:
+                {chunk1}
+                Chunk 2:
+                {chunk2}
+                Chunk 3:
+                {chunk3}
+                Best Chunk Number:
+                """,
+                                input_variables=["question", "chunk1", "chunk2", "chunk3"]
+                            )
+                            try:
+                                pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
+                                    ranking_prompt.invoke({
+                                        "question": query_for_retrieval,
+                                        "chunk1": top3[0].page_content,
+                                        "chunk2": top3[1].page_content,
+                                        "chunk3": top3[2].page_content
+                                    })
+                                ).content.strip()
+                                if pick.isdigit():
+                                    idx = int(pick) - 1
+                                    if 0 <= idx < 3:
+                                        best_doc = top3[idx]
+                            except Exception:
+                                pass  # leave best_doc = None
+
+                        if best_doc is not None:
+                            ref_page = best_doc.metadata.get("page_number")
+                            img_b64 = st.session_state.page_images.get(ref_page)
+                            if img_b64:
+                                entry["source"] = f"Page {ref_page}"
+                                entry["source_img"] = img_b64
+                                entry["source_page"] = ref_page
+                                render_reference_card(
+                                    label=entry["source"],
+                                    img_b64=img_b64,
+                                    page=ref_page,
+                                    key=entry["id"],
+                                )
+                    except Exception as e:
+                        st.info(f"ℹ️ Reference selection skipped: {e}")
+
             st.session_state.messages.append(entry)
             st.session_state.pending_input = None
             st.session_state.waiting_for_response = False
