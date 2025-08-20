@@ -6,9 +6,6 @@ import fitz  # PyMuPDF
 from PIL import Image
 from dotenv import load_dotenv
 import streamlit.components.v1 as components
-import numpy as np
-from sklearn.metrics.pairwise import cosine_similarity
-
 
 # LangChain / RAG deps
 from langchain_core.documents import Document
@@ -61,40 +58,6 @@ def _reset_chat():
     st.session_state.pending_input = None
     st.session_state.waiting_for_response = False
     st.session_state.last_suggestion = None
-
-def _set_active_pdf(name: str, data: bytes):
-    st.session_state.active_pdf_name  = name
-    st.session_state.active_pdf_bytes = data
-    # force rebuild for newly selected file
-    st.session_state.last_processed_pdf = None
-
-def _get_active_pdf():
-    data = st.session_state.get("active_pdf_bytes")
-    name = st.session_state.get("active_pdf_name")
-    if data and name:
-        bio = io.BytesIO(data)
-        bio.name = name
-        return bio
-    return None
-
-def _rehydrate_active_pdf_from_disk():
-    """If the active PDF vanished (after rerun/restart), restore it from the
-    last persisted path on disk so the app doesn't bounce back to the landing screen."""
-    if st.session_state.get("active_pdf_bytes") and st.session_state.get("active_pdf_name"):
-        return  # we're fine
-
-    path = st.session_state.get("persisted_pdf_path")
-    if path and os.path.exists(path):
-        try:
-            with open(path, "rb") as f:
-                data = f.read()
-            _set_active_pdf(os.path.basename(path), data)
-        except Exception:
-            # If anything goes wrong, just leave things as-is;
-            # the UI will still show the uploader.
-            pass
-
-
 
 # ---------- Session state ----------
 if "last_synced_file_id" not in st.session_state:
@@ -404,9 +367,6 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
     with open(pdf_path, "wb") as f:
         f.write(pdf_bytes)
 
-    # ▼ ADD THIS:
-    st.session_state["persisted_pdf_path"] = pdf_path
-
     # Open with PyMuPDF
     doc = fitz.open(pdf_path)
 
@@ -512,39 +472,33 @@ else:
             path = download_pdf(service, chosen["id"], chosen["name"])
             if path:
                 with open(path, "rb") as f:
-                    data = f.read()
-                _set_active_pdf(chosen["name"], data)
+                    st.session_state.uploaded_file_from_drive = f.read()
+                st.session_state.uploaded_file_name = chosen["name"]
                 st.session_state.last_synced_file_id = chosen["id"]
                 _reset_chat()
-
 
 # ================= Main UI =================
 st.title("Underwriting Agent")
 
-
-# 1) Uploader can *set* the active PDF
-uploaded = st.file_uploader("Upload a valuation report PDF", type="pdf", key="uploader")
-if uploaded:
-    data = uploaded.getvalue()
-    _set_active_pdf(uploaded.name, data)
-    file_badge_link(uploaded.name, data, synced=False)
-    if uploaded.name != st.session_state.get("last_selected_upload"):
-        st.session_state.last_selected_upload = uploaded.name
-        _reset_chat()
-
-# 2) If a Drive file was chosen earlier, we already set active_pdf_* in the sidebar code
-
-# 3) Always reconstruct the working handle from session state
-_rehydrate_active_pdf_from_disk()
-up = _get_active_pdf()
-if up:
-    # nice badge if we came from Drive
-    if st.session_state.get("last_synced_file_id"):
-        file_badge_link(st.session_state.get("active_pdf_name"), st.session_state.get("active_pdf_bytes"), synced=True)
+if "uploaded_file_from_drive" in st.session_state:
+    file_badge_link(
+        st.session_state.uploaded_file_name,
+        st.session_state.uploaded_file_from_drive,
+        synced=True
+    )
+    up = io.BytesIO(st.session_state.uploaded_file_from_drive)
+    up.name = st.session_state.uploaded_file_name
 else:
+    up = st.file_uploader("Upload a valuation report PDF", type="pdf")
+    if up:
+        file_badge_link(up.name, up.getvalue(), synced=False)
+        if up.name != st.session_state.get("last_selected_upload"):
+            st.session_state.last_selected_upload = up.name
+            _reset_chat()
+
+if not up:
     st.warning("Please upload or load a PDF to continue.")
     st.stop()
-
 
 # Rebuild retriever when file changes (set name early to avoid partial reruns)
 if st.session_state.get("last_processed_pdf") != up.name:
@@ -648,8 +602,6 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
         
         2. **Table questions**  
            • Return the full table **with its header row** in GitHub-flavoured markdown.
-           • if user asks about dcf, it stands for Discounted cash flow. So use this while extracting the table
-           
         
         3. **Valuation method / theory / reasoning questions**
             
@@ -696,67 +648,53 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
             with block.container():
                 type_bubble(answer)
                 skip_reference = is_unrelated or is_clarify
-                if docs and not skip_reference:
-                    try:
-                        # 1) Embed the FINAL answer and all retrieved chunks
-                        texts = [d.page_content for d in docs]
-                
-                        embedder = CohereEmbeddings(
-                            model="embed-english-v3.0",
-                            user_agent="langchain",
-                            cohere_api_key=os.environ["COHERE_API_KEY"]  # use st.secrets["COHERE_API_KEY"] if you prefer
-                        )
-                        emb_query = embedder.embed_query(answer)          # vector for the FINAL answer text
-                        chunk_embs = embedder.embed_documents(texts)      # vectors for the retrieved chunks
-                
-                        # 2) Cosine similarity (sklearn)
-                        sims = cosine_similarity([emb_query], chunk_embs)[0]
-                        ranked = sorted(zip(docs, sims), key=lambda x: x[1], reverse=True)
-                        top3 = [d for d, _ in ranked[:3]]
-                
-                        # 3) LLM micro-ranker among top-3 (same prompt you had)
-                        best_doc = top3[0] if top3 else None
+                texts = [d.page_content for d in docs]
+                emb_query = CohereEmbeddings(
+                    model="embed-english-v3.0", user_agent="langchain", cohere_api_key=st.secrets["COHERE_API_KEY"]
+                ).embed_query(ans)
+                chunk_embs = CohereEmbeddings(
+                    model="embed-english-v3.0", user_agent="langchain", cohere_api_key=st.secrets["COHERE_API_KEY"]
+                ).embed_documents(texts)
+                sims = cosine_similarity([emb_query], chunk_embs)[0]
+                ranked = sorted(list(zip(docs, sims)), key=lambda x: x[1], reverse=True)
+                top3 = [d for d,_ in ranked[:3]]
                         if len(top3) >= 3:
                             ranking_prompt = PromptTemplate(
                                 template="""
-                Given a user question and 3 candidate context chunks, return the number (1-3) of the chunk that best answers it.
-                
-                Question:
-                {question}
-                
-                Chunk 1:
-                {chunk1}
-                
-                Chunk 2:
-                {chunk2}
-                
-                Chunk 3:
-                {chunk3}
-                
-                Best Chunk Number:
-                """,
+                                Given a user question and 3 candidate context chunks, return the number (1-3) of the chunk that best answers it.
+                                Question:
+                                {question}
+                                
+                                Chunk 1:
+                                {chunk1}
+                                
+                                Chunk 2:
+                                {chunk2}
+                                
+                                Chunk 3:
+                                {chunk3}
+                                
+                                Best Chunk Number:
+                                """,
                                 input_variables=["question", "chunk1", "chunk2", "chunk3"]
                             )
                             try:
                                 pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
                                     ranking_prompt.invoke({
-                                        "question": effective_q,  # or query_for_retrieval
+                                        "question": query_for_retrieval,
                                         "chunk1": top3[0].page_content,
                                         "chunk2": top3[1].page_content,
                                         "chunk3": top3[2].page_content
                                     })
                                 ).content.strip()
-                                if pick.isdigit():
-                                    idx = int(pick) - 1
-                                    if 0 <= idx < len(top3):
-                                        best_doc = top3[idx]
+                                if pick.isdigit() and 1 <= int(pick) <= 3:
+                                    best_doc = top3[int(pick) - 1]
                             except Exception:
                                 pass
-                
-                        # 4) Attach the reference card using the chosen doc's page
+
                         if best_doc is not None:
                             ref_page = best_doc.metadata.get("page_number")
-                            img_b64 = st.session_state.page_images.get(ref_page)   # already base64 in your app
+                            img_b64 = st.session_state.page_images.get(ref_page)
                             if img_b64:
                                 entry["source"] = f"Page {ref_page}"
                                 entry["source_img"] = img_b64
@@ -769,7 +707,6 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
                                 )
                     except Exception as e:
                         st.info(f"ℹ️ Reference selection skipped: {e}")
-
 
             st.session_state.messages.append(entry)
             st.session_state.pending_input = None
