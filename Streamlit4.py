@@ -248,24 +248,45 @@ def guess_suggestion(question: str, docs):
                 best_score, best_line = score, raw
     return _clean_heading(best_line or "Valuation Summary")
 
-def ensure_gfm_tables(text: str) -> str:
-    lines = text.splitlines()
-    out, i = [], 0
-    while i < len(lines):
-        # detect a table header row: starts and ends with '|'
-        if re.match(r'^\s*\|.+\|\s*$', lines[i]):
-            header = lines[i]
-            # look ahead: if next line isn't a separator, insert one
-            if i+1 >= len(lines) or not re.match(r'^\s*\|(?:\s*:?-{3,}:?\s*\|)+\s*$', lines[i+1]):
-                cols = header.count("|") - 1  # pipes minus the trailing one
-                sep = "|" + "|".join(["---"] * cols) + "|"
-                out.append(header)
-                out.append(sep)
-                i += 1
-                continue
-        out.append(lines[i])
-        i += 1
+def fix_markdown_tables(text: str) -> str:
+    sep_re  = re.compile(r'^\s*\|(?:\s*:?-{3,}:?\s*\|)+\s*$')   # |---|---|...|
+    row_re  = re.compile(r'^\s*\|.+\|\s*$')                    # | a | b |
+    dash_re = re.compile(r'\s*[-–—]{2,}\s*$')                  # --- / -- / ——
+
+    lines, out = text.splitlines(), []
+    n = len(lines)
+    for i, line in enumerate(lines):
+        is_row = bool(row_re.match(line))
+        is_sep = bool(sep_re.match(line))
+
+        # 1) If this looks like the START of a table and next line isn't a separator, insert one.
+        prev_is_table = i > 0 and (row_re.match(lines[i-1]) or sep_re.match(lines[i-1]))
+        if is_row and not prev_is_table:
+            out.append(line.strip())
+            if i + 1 >= n or not sep_re.match(lines[i+1]):
+                cols = line.count("|") - 1
+                out.append("|" + "|".join(["---"] * cols) + "|")
+            continue
+
+        # 2) Keep valid separator lines as-is.
+        if is_sep:
+            out.append(line)
+            continue
+
+        # 3) For other table rows: drop all-dash rows; replace dash-only cells with em dash.
+        if is_row:
+            cells = [c.strip() for c in line.strip()[1:-1].split("|")]
+            if all(dash_re.fullmatch(c) for c in cells):
+                continue  # drop decorative '---' row
+            cells = ["—" if dash_re.fullmatch(c) else c for c in cells]
+            out.append("| " + " | ".join(cells) + " |")
+            continue
+
+        # 4) Non-table lines pass through.
+        out.append(line)
+
     return "\n".join(out)
+
 
 
 def sanitize_suggestion(answer: str, question: str, docs):
@@ -603,7 +624,7 @@ Conversation so far:
                     input_variables=["chat_history", "context", "question", "pdf_name"]
                 ).invoke(full_input)
             ).content
-            answer = ensure_gfm_tables(answer)    
+            answer = fix_markdown_tables(answer)   
             answer = sanitize_suggestion(answer, effective_q, docs)
 
             sug = extract_suggestion(answer)
