@@ -492,7 +492,7 @@ else:
                     data = f.read()
                 _set_active_pdf(chosen["name"], data)
                 st.session_state.last_synced_file_id = chosen["id"]
-                _reset_chat(
+                _reset_chat()
 
 # ================= Main UI =================
 st.title("Underwriting Agent")
