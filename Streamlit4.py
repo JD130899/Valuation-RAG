@@ -61,6 +61,21 @@ def _reset_chat():
     st.session_state.waiting_for_response = False
     st.session_state.last_suggestion = None
 
+# helpers
+def _set_active_pdf(name: str, data: bytes):
+    st.session_state.active_pdf_name  = name
+    st.session_state.active_pdf_bytes = data
+    st.session_state.last_processed_pdf = None  # force rebuild for a new file
+
+def _get_active_pdf():
+    data = st.session_state.get("active_pdf_bytes")
+    name = st.session_state.get("active_pdf_name")
+    if not data or not name:
+        return None
+    bio = io.BytesIO(data); bio.name = name
+    return bio
+
+
 # ---------- Session state ----------
 if "last_synced_file_id" not in st.session_state:
     st.session_state.last_synced_file_id = None
@@ -474,10 +489,10 @@ else:
             path = download_pdf(service, chosen["id"], chosen["name"])
             if path:
                 with open(path, "rb") as f:
-                    st.session_state.uploaded_file_from_drive = f.read()
-                st.session_state.uploaded_file_name = chosen["name"]
+                    data = f.read()
+                _set_active_pdf(chosen["name"], data)
                 st.session_state.last_synced_file_id = chosen["id"]
-                _reset_chat()
+                _reset_chat(
 
 # ================= Main UI =================
 st.title("Underwriting Agent")
@@ -491,12 +506,17 @@ if "uploaded_file_from_drive" in st.session_state:
     up = io.BytesIO(st.session_state.uploaded_file_from_drive)
     up.name = st.session_state.uploaded_file_name
 else:
-    up = st.file_uploader("Upload a valuation report PDF", type="pdf")
-    if up:
-        file_badge_link(up.name, up.getvalue(), synced=False)
-        if up.name != st.session_state.get("last_selected_upload"):
-            st.session_state.last_selected_upload = up.name
+    uploaded = st.file_uploader("Upload a valuation report PDF", type="pdf", key="uploader")
+    if uploaded:
+        _set_active_pdf(uploaded.name, uploaded.getvalue())
+        file_badge_link(uploaded.name, uploaded.getvalue(), synced=False)
+        if uploaded.name != st.session_state.get("last_selected_upload"):
+            st.session_state.last_selected_upload = uploaded.name
             _reset_chat()
+
+up = _get_active_pdf()
+if up and st.session_state.get("last_synced_file_id"):
+    file_badge_link(st.session_state.active_pdf_name, st.session_state.active_pdf_bytes, synced=True)
 
 if not up:
     st.warning("Please upload or load a PDF to continue.")
