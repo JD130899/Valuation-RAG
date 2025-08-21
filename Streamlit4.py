@@ -108,26 +108,44 @@ if "next_msg_id" not in st.session_state:
 # ---------- styles (chat + reference styles) ----------
 st.markdown("""
 <style>
-.block-container{ padding-top:54px !important; padding-bottom:160px !important; }
-.block-container h1{ margin-top:0 !important; }
-.user-bubble {background:#007bff;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:right;margin:4px;}
-.assistant-bubble {background:#1e1e1e;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:left;margin:4px;}
-.clearfix::after {content:"";display:table;clear:both;}
-.ref{ display:block; width:60%; max-width:900px; margin:6px 0 12px 8px; }
-.ref summary{ display:inline-flex; align-items:center; gap:8px; cursor:pointer; list-style:none; outline:none;
+/* MAIN content only (not the sidebar) */
+div[data-testid="stAppViewContainer"] .block-container{
+  padding-top:54px !important;
+  padding-bottom:160px !important;
+}
+div[data-testid="stAppViewContainer"] .block-container h1{
+  margin-top:0 !important;
+}
+
+/* SIDEBAR: remove extra top spacing */
+section[data-testid="stSidebar"] .block-container{
+  padding-top:2px !important;   /* set to 0 for absolutely no gap */
+  padding-bottom:12px !important;
+}
+section[data-testid="stSidebar"] .block-container > :first-child{
+  margin-top:0 !important;
+}
+
+/* Chat bubbles + reference cards (scoped to main so they won't affect sidebar) */
+div[data-testid="stAppViewContainer"] .user-bubble {background:#007bff;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:right;margin:4px;}
+div[data-testid="stAppViewContainer"] .assistant-bubble {background:#1e1e1e;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:left;margin:4px;}
+div[data-testid="stAppViewContainer"] .clearfix::after {content:"";display:table;clear:both;}
+div[data-testid="stAppViewContainer"] .ref{ display:block; width:60%; max-width:900px; margin:6px 0 12px 8px; }
+div[data-testid="stAppViewContainer"] .ref summary{ display:inline-flex; align-items:center; gap:8px; cursor:pointer; list-style:none; outline:none;
   background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:10px; padding:6px 10px; }
-.ref summary::before{ content:"▶"; font-size:12px; line-height:1; }
-.ref[open] summary::before{ content:"▼"; }
-.ref .panel{ background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-top:none;
+div[data-testid="stAppViewContainer"] .ref summary::before{ content:"▶"; font-size:12px; line-height:1; }
+div[data-testid="stAppViewContainer"] .ref[open] summary::before{ content:"▼"; }
+div[data-testid="stAppViewContainer"] .ref .panel{ background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-top:none;
   border-radius:10px; padding:10px; margin-top:0; box-shadow:0 6px 20px rgba(0,0,0,.25); }
-.ref .panel img{ width:100%; height:auto; border-radius:8px; display:block; }
-.ref .overlay{ display:none; }
-.ref[open] .overlay{ display:block; position:fixed; inset:0; z-index:998; background:transparent; border:0; padding:0; margin:0; }
-.ref[open] > .panel{ position:fixed; z-index:999; top:12vh; left:50%; transform:translateX(-50%);
+div[data-testid="stAppViewContainer"] .ref .panel img{ width:100%; height:auto; border-radius:8px; display:block; }
+div[data-testid="stAppViewContainer"] .ref .overlay{ display:none; }
+div[data-testid="stAppViewContainer"] .ref[open] .overlay{ display:block; position:fixed; inset:0; z-index:998; background:transparent; border:0; padding:0; margin:0; }
+div[data-testid="stAppViewContainer"] .ref[open] > .panel{ position:fixed; z-index:999; top:12vh; left:50%; transform:translateX(-50%);
   width:min(900px, 90vw); max-height:75vh; overflow:auto; box-shadow:0 20px 60px rgba(0,0,0,.45); }
-.ref .close-x{ position:absolute; top:6px; right:10px; border:0; background:transparent; color:#94a3b8; font-size:20px; line-height:1; cursor:pointer; }
+div[data-testid="stAppViewContainer"] .ref .close-x{ position:absolute; top:6px; right:10px; border:0; background:transparent; color:#94a3b8; font-size:20px; line-height:1; cursor:pointer; }
 </style>
 """, unsafe_allow_html=True)
+
 
 def _new_id():
     n = st.session_state.next_msg_id
@@ -437,13 +455,6 @@ def _embedder():
         cohere_api_key=os.environ["COHERE_API_KEY"],
     )
 
-
-with st.sidebar:
-    #st.write("Cookie secret set:", bool(os.getenv("STREAMLIT_SERVER_COOKIE_SECRET")))
-    components.html(
-        "<script>setInterval(()=>{fetch(location.pathname,{method:'GET',cache:'no-store'}).catch(()=>{})},60000)</script>",
-        height=0,
-    )
     
 # ================= Sidebar: Google Drive loader =================
 service = get_drive_service()
