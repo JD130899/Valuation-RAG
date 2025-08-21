@@ -397,7 +397,7 @@ def condense_query(chat_history, user_input: str, pdf_name: str) -> str:
 
 
 # ================= Builder =================
-@st.cache_resource(show_spinner="📦 Processing & indexing PDF…")
+@st.cache_resource(show_spinner=False)
 def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
     os.makedirs("uploaded", exist_ok=True)
     pdf_path = os.path.join("uploaded", file_name)
@@ -507,7 +507,7 @@ else:
 
 # ================= Main UI =================
 st.title("Underwriting Agent")
-history_mount = st.empty()
+
 if "uploaded_file_from_drive" in st.session_state:
     file_badge_link(
         st.session_state.uploaded_file_name,
@@ -524,7 +524,7 @@ else:
             st.session_state.last_selected_upload = up.name
             _preclear_before_build(up.name)  # << clear chat NOW
 
-
+history_mount = st.empty()
 if not up:
     st.warning("Please upload or load a PDF to continue.")
     st.stop()
@@ -577,6 +577,7 @@ with history_mount.container():
                 page=msg["source_page"],
                 key=msg.get("id", "k0"),
             )
+
 
 
 # ========================== ANSWER ==========================
