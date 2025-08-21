@@ -6,10 +6,11 @@ import time
 import json
 import streamlit as st
 import fitz  # PyMuPDF
-from PIL import Image
+from PIL import Image  # ok to keep; not strictly required now
 from dotenv import load_dotenv
 import streamlit.components.v1 as components
 from sklearn.metrics.pairwise import cosine_similarity
+
 # LangChain / RAG deps
 from langchain_core.documents import Document
 from llama_cloud_services import LlamaParse
@@ -30,7 +31,6 @@ load_dotenv()
 st.set_page_config(page_title="Underwriting Agent", layout="wide")
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-# --- near the top, after load_dotenv() ---
 def _safe_secret(key: str, default: str = "") -> str:
     try:
         return str(st.secrets.get(key, default))
@@ -40,11 +40,24 @@ def _safe_secret(key: str, default: str = "") -> str:
 DRIVE_FOLDER_FROM_SECRET = _safe_secret("GOOGLE_DRIVE_FOLDER", "").strip()
 DRIVE_FOLDER_FROM_ENV    = os.getenv("GOOGLE_DRIVE_FOLDER", "").strip()
 HARDCODED_FOLDER_LINK    = "https://drive.google.com/drive/folders/1XGyBBFhhQFiG43jpYJhNzZYi7C-_l5me"
-
 FOLDER_TO_USE = DRIVE_FOLDER_FROM_ENV or DRIVE_FOLDER_FROM_SECRET or HARDCODED_FOLDER_LINK
 
 
+# ============== Lightweight, on-demand page rendering ==============
+@st.cache_data(show_spinner=False)
+def page_png_b64(pdf_bytes: bytes, page_no: int, dpi: int = 120) -> str:
+    """
+    Render exactly ONE page to PNG and return base64 (cached).
+    This avoids pre-rendering every page into memory.
+    """
+    doc = fitz.open(stream=pdf_bytes, filetype="pdf")
+    page = doc.load_page(page_no - 1)
+    pix = page.get_pixmap(dpi=dpi)
+    doc.close()
+    return base64.b64encode(pix.tobytes("png")).decode("ascii")
 
+
+# ================= Chat UI helpers =================
 def type_bubble(text: str, *, base_delay: float = 0.012, cutoff_chars: int = 2000):
     placeholder = st.empty()
     buf = []
@@ -81,7 +94,7 @@ if "pending_input" not in st.session_state:
 if "waiting_for_response" not in st.session_state:
     st.session_state.waiting_for_response = False
 if "page_images" not in st.session_state:
-    st.session_state.page_images = {}
+    st.session_state.page_images = {}  # left for compatibility; now unused
 if "page_texts" not in st.session_state:
     st.session_state.page_texts = {}
 if "last_suggestion" not in st.session_state:
@@ -92,37 +105,23 @@ if "next_msg_id" not in st.session_state:
 # ---------- styles (chat + reference styles) ----------
 st.markdown("""
 <style>
-/* give the page a little top room so H1 isn't clipped, and bottom room for the pill */
-.block-container{
-  padding-top: 54px !important;
-  padding-bottom: 160px !important;
-}
-.block-container h1 { margin-top: 0 !important; }
-
-/* Chat bubbles */
+.block-container{ padding-top:54px !important; padding-bottom:160px !important; }
+.block-container h1{ margin-top:0 !important; }
 .user-bubble {background:#007bff;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:right;margin:4px;}
 .assistant-bubble {background:#1e1e1e;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:left;margin:4px;}
 .clearfix::after {content:"";display:table;clear:both;}
-
-/* Reference card */
 .ref{ display:block; width:60%; max-width:900px; margin:6px 0 12px 8px; }
-.ref summary{
-  display:inline-flex; align-items:center; gap:8px; cursor:pointer; list-style:none; outline:none;
-  background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:10px; padding:6px 10px;
-}
+.ref summary{ display:inline-flex; align-items:center; gap:8px; cursor:pointer; list-style:none; outline:none;
+  background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:10px; padding:6px 10px; }
 .ref summary::before{ content:"▶"; font-size:12px; line-height:1; }
 .ref[open] summary::before{ content:"▼"; }
-.ref .panel{
-  background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-top:none;
-  border-radius:10px; padding:10px; margin-top:0; box-shadow:0 6px 20px rgba(0,0,0,.25);
-}
+.ref .panel{ background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-top:none;
+  border-radius:10px; padding:10px; margin-top:0; box-shadow:0 6px 20px rgba(0,0,0,.25); }
 .ref .panel img{ width:100%; height:auto; border-radius:8px; display:block; }
 .ref .overlay{ display:none; }
 .ref[open] .overlay{ display:block; position:fixed; inset:0; z-index:998; background:transparent; border:0; padding:0; margin:0; }
-.ref[open] > .panel{
-  position: fixed; z-index: 999; top: 12vh; left: 50%; transform: translateX(-50%);
-  width: min(900px, 90vw); max-height: 75vh; overflow: auto; box-shadow:0 20px 60px rgba(0,0,0,.45);
-}
+.ref[open] > .panel{ position:fixed; z-index:999; top:12vh; left:50%; transform:translateX(-50%);
+  width:min(900px, 90vw); max-height:75vh; overflow:auto; box-shadow:0 20px 60px rgba(0,0,0,.45); }
 .ref .close-x{ position:absolute; top:6px; right:10px; border:0; background:transparent; color:#94a3b8; font-size:20px; line-height:1; cursor:pointer; }
 </style>
 """, unsafe_allow_html=True)
@@ -274,7 +273,6 @@ def fix_markdown_tables(text: str) -> str:
         is_row = bool(row_re.match(line))
         is_sep = bool(sep_re.match(line))
 
-        # 1) If this looks like the START of a table and next line isn't a separator, insert one.
         prev_is_table = i > 0 and (row_re.match(lines[i-1]) or sep_re.match(lines[i-1]))
         if is_row and not prev_is_table:
             out.append(line.strip())
@@ -283,26 +281,21 @@ def fix_markdown_tables(text: str) -> str:
                 out.append("|" + "|".join(["---"] * cols) + "|")
             continue
 
-        # 2) Keep valid separator lines as-is.
         if is_sep:
             out.append(line)
             continue
 
-        # 3) For other table rows: drop all-dash rows; replace dash-only cells with em dash.
         if is_row:
             cells = [c.strip() for c in line.strip()[1:-1].split("|")]
             if all(dash_re.fullmatch(c) for c in cells):
-                continue  # drop decorative '---' row
+                continue
             cells = ["—" if dash_re.fullmatch(c) else c for c in cells]
             out.append("| " + " | ".join(cells) + " |")
             continue
 
-        # 4) Non-table lines pass through.
         out.append(line)
 
     return "\n".join(out)
-
-
 
 def sanitize_suggestion(answer: str, question: str, docs):
     low = answer.lower().strip()
@@ -368,6 +361,7 @@ def condense_query(chat_history, user_input: str, pdf_name: str) -> str:
         prompt.invoke({"pdf_name": pdf_name, "history": hist_txt, "question": user_input})
     ).content.strip() or user_input
 
+
 # ================= Builder =================
 @st.cache_resource(show_spinner="📦 Processing & indexing PDF…")
 def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
@@ -376,23 +370,22 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
     with open(pdf_path, "wb") as f:
         f.write(pdf_bytes)
 
+    # Avoid pre-rendering all pages; just note page count if you want.
     doc = fitz.open(pdf_path)
-    page_images = {
-        i + 1: Image.open(io.BytesIO(page.get_pixmap(dpi=180).tobytes("png")))
-        for i, page in enumerate(doc)
-    }
+    page_count = doc.page_count
     doc.close()
 
-    parser = LlamaParse(api_key=os.environ["LLAMA_CLOUD_API_KEY"], num_workers=4)
+    parser = LlamaParse(api_key=os.environ["LLAMA_CLOUD_API_KEY"], num_workers=2)
     result = parser.parse(pdf_path)
+
     pages = []
-    page_texts = {}  # NEW: hold raw page text
+    page_texts = {}
     for pg in result.pages:
         cleaned = [l for l in pg.md.splitlines() if l.strip() and l.lower() != "null"]
         text = "\n".join(cleaned)
         if text:
             pages.append(Document(page_content=text, metadata={"page_number": pg.page}))
-            page_texts[pg.page] = text  # NEW
+            page_texts[pg.page] = text
 
     splitter = RecursiveCharacterTextSplitter(chunk_size=3300, chunk_overlap=0)
     chunks = splitter.split_documents(pages)
@@ -425,9 +418,12 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
         ),
         base_compressor=reranker
     )
-    return retriever, page_images, page_texts  # CHANGED
 
-def pil_to_base64(img: Image.Image) -> str:
+    # Return empty page_images (kept for compatibility), and page_texts.
+    return retriever, {}, page_texts
+
+
+def pil_to_base64(img: Image.Image) -> str:  # kept for compatibility; not used now
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return base64.b64encode(buf.getvalue()).decode("ascii")
@@ -495,6 +491,7 @@ if not up:
 if st.session_state.get("last_processed_pdf") != up.name:
     pdf_bytes = up.getvalue()
     st.session_state.pdf_bytes = pdf_bytes
+    st.session_state.pdf_b64 = base64.b64encode(pdf_bytes).decode("ascii")  # store ONE copy for cards
     (st.session_state.retriever,
      st.session_state.page_images,
      st.session_state.page_texts) = build_retriever_from_pdf(pdf_bytes, up.name)
@@ -503,7 +500,6 @@ if st.session_state.get("last_processed_pdf") != up.name:
         {"role": "assistant", "content": "What can I help you with?"}
     ]
     st.session_state.last_processed_pdf = up.name
-
 
 
 # Chat input
@@ -538,7 +534,6 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
         intent = classify_reply_intent(raw_q, _last_assistant_text(history_to_use))
         is_deny = (intent == "DENY")
         is_confirm = (intent == "CONFIRM")
-
 
         if is_deny:
             st.session_state.last_suggestion = None
@@ -601,7 +596,7 @@ Otherwise, **do not** ask any follow-up.
     - Output a VALID GitHub-flavored table.
     - Always include the header separator line (e.g., `|---|---|---|`).
     - Each row MUST start and end with `|` exactly once.
-    - Do not wrap cells across lines; escape any `|` inside cells as `\|`.
+    - Do not wrap cells across lines; escape any `|` inside cells as `\\|`.
     - Add a blank line before the table.
 
 3. **Theory/textual question**  
@@ -649,45 +644,51 @@ Conversation so far:
                         ).embed_documents(texts)
                         sims = cosine_similarity([emb_query], chunk_embs)[0]
                         ranked = sorted(list(zip(docs, sims)), key=lambda x: x[1], reverse=True)
-                        top3 = [d for d,_ in ranked[:3]]
-                        ranking_prompt = PromptTemplate(
-                            template=(
-                                "Given the user's question and 3 candidate context chunks, "
-                                "reply with only the number (1, 2, or 3) of the chunk that best answers it.\n\n"
-                                "Question:\n{question}\n\n"
-                                "Chunk 1:\n{chunk1}\n\n"
-                                "Chunk 2:\n{chunk2}\n\n"
-                                "Chunk 3:\n{chunk3}\n\n"
-                                "Best Chunk Number:"
-                            ),
-                            input_variables=["question", "chunk1", "chunk2", "chunk3"]
-                        )
-                        pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
-                            ranking_prompt.invoke({
-                                "question": query_for_retrieval,
-                                "chunk1": top3[0].page_content,
-                                "chunk2": top3[1].page_content,
-                                "chunk3": top3[2].page_content
-                            })
-                        ).content.strip()
-                        if pick.isdigit() and 1 <= int(pick) <= 3:
-                            best_doc = top3[int(pick) - 1]
+
+                        best_doc = None
+                        if len(ranked) >= 1:
+                            if len(ranked) < 3:
+                                best_doc = ranked[0][0]
+                            else:
+                                top3 = [d for d,_ in ranked[:3]]
+                                ranking_prompt = PromptTemplate(
+                                    template=(
+                                        "Given the user's question and 3 candidate context chunks, "
+                                        "reply with only the number (1, 2, or 3) of the chunk that best answers it.\n\n"
+                                        "Question:\n{question}\n\n"
+                                        "Chunk 1:\n{chunk1}\n\n"
+                                        "Chunk 2:\n{chunk2}\n\n"
+                                        "Chunk 3:\n{chunk3}\n\n"
+                                        "Best Chunk Number:"
+                                    ),
+                                    input_variables=["question", "chunk1", "chunk2", "chunk3"]
+                                )
+                                pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
+                                    ranking_prompt.invoke({
+                                        "question": query_for_retrieval,
+                                        "chunk1": top3[0].page_content,
+                                        "chunk2": top3[1].page_content,
+                                        "chunk3": top3[2].page_content
+                                    })
+                                ).content.strip()
+                                if pick.isdigit() and 1 <= int(pick) <= 3:
+                                    best_doc = top3[int(pick) - 1]
 
                         if best_doc is not None:
                             ref_page = best_doc.metadata.get("page_number")
-                            img = st.session_state.page_images.get(ref_page)
-                            if img:
-                                entry["source"] = f"Page {ref_page}"
-                                entry["source_img"] = pil_to_base64(img)
-                                entry["source_pdf_b64"] = base64.b64encode(st.session_state.pdf_bytes).decode("ascii")
-                                entry["source_page"] = ref_page
-                                render_reference_card(
-                                    label=entry["source"],
-                                    img_b64=entry["source_img"],
-                                    pdf_b64=entry["source_pdf_b64"],
-                                    page=entry["source_page"],
-                                    key=entry["id"],
-                                )
+                            # Render ONE page lazily (low DPI is fine for preview)
+                            img_b64 = page_png_b64(st.session_state.pdf_bytes, ref_page, dpi=120)
+                            entry["source"] = f"Page {ref_page}"
+                            entry["source_img"] = img_b64
+                            entry["source_pdf_b64"] = st.session_state.pdf_b64  # reuse single copy
+                            entry["source_page"] = ref_page
+                            render_reference_card(
+                                label=entry["source"],
+                                img_b64=entry["source_img"],
+                                pdf_b64=entry["source_pdf_b64"],
+                                page=entry["source_page"],
+                                key=entry["id"],
+                            )
                     except Exception as e:
                         st.info(f"ℹ️ Reference selection skipped: {e}")
 
