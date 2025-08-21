@@ -531,7 +531,7 @@ if st.session_state.get("last_processed_pdf") != up.name:
 
     loading = st.empty()
     with loading.container():
-        st.info("📦 Processing & indexing PDF…")
+        #st.info("📦 Processing & indexing PDF…")
         
     pdf_bytes = up.getvalue()
     st.session_state.pdf_bytes = pdf_bytes
