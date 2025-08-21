@@ -601,11 +601,11 @@ Otherwise, **do not** ask any follow-up.
 
 ### How to answer
 1. **Single value questions**  
+   • Return the answer in a **short, clear sentence** using the exact number from the context.  
+         Example: “The Income (DCF) approach value is $1,150,000.”  
    • When asked about SDE Multiple about Companies, please REFER Page 38 for answer and reference
    • When asked about market approach valuation, please REFER page 40 for answer and reference
    • Find the row + column that match the user's words.  
-   • Return the answer in a **short, clear sentence** using the exact number from the context.  
-         Example: “The Income (DCF) approach value is $1,150,000.”  
    • **Do NOT repeat the metric name or company name** unless the user asks.
     
 
