@@ -43,7 +43,7 @@ DRIVE_FOLDER_FROM_ENV    = os.getenv("GOOGLE_DRIVE_FOLDER", "").strip()
 HARDCODED_FOLDER_LINK    = "https://drive.google.com/drive/folders/1XGyBBFhhQFiG43jpYJhNzZYi7C-_l5me"
 FOLDER_TO_USE = DRIVE_FOLDER_FROM_ENV or DRIVE_FOLDER_FROM_SECRET or HARDCODED_FOLDER_LINK
 
-st.sidebar.write("Cookie secret set:", bool(os.getenv("STREAMLIT_SERVER_COOKIE_SECRET")))
+#st.sidebar.write("Cookie secret set:", bool(os.getenv("STREAMLIT_SERVER_COOKIE_SECRET")))
 
 
 # ============== Lightweight, on-demand page rendering ==============
