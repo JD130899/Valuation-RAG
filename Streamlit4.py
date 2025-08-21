@@ -439,7 +439,7 @@ def _embedder():
 
 
 with st.sidebar:
-    st.write("Cookie secret set:", bool(os.getenv("STREAMLIT_SERVER_COOKIE_SECRET")))
+    #st.write("Cookie secret set:", bool(os.getenv("STREAMLIT_SERVER_COOKIE_SECRET")))
     components.html(
         "<script>setInterval(()=>{fetch(location.pathname,{method:'GET',cache:'no-store'}).catch(()=>{})},60000)</script>",
         height=0,
@@ -718,3 +718,14 @@ Conversation so far:
             st.session_state.messages.append(entry)
             st.session_state.pending_input = None
             st.session_state.waiting_for_response = False
+
+components.html(
+    """
+    <script>
+      setInterval(function () {
+        fetch(window.location.pathname, {method:'GET', cache:'no-store'}).catch(()=>{});
+      }, 60000);
+    </script>
+    """,
+    height=0,
+)
