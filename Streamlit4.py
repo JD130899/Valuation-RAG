@@ -105,6 +105,11 @@ if "last_suggestion" not in st.session_state:
 if "next_msg_id" not in st.session_state:
     st.session_state.next_msg_id = 0
 
+# ---------- Session state ----------
+if "building" not in st.session_state:
+    st.session_state.building = False
+
+
 # ---------- styles (chat + reference styles) ----------
 st.markdown("""
 <style>
@@ -489,7 +494,9 @@ else:
                     st.session_state.uploaded_file_from_drive = f.read()
                 st.session_state.uploaded_file_name = chosen["name"]
                 st.session_state.last_synced_file_id = chosen["id"]
-                _reset_chat()
+                st.session_state.messages = []
+                st.session_state.last_suggestion = None
+                st.session_state.building = True
 
 # ================= Main UI =================
 st.title("Underwriting Agent")
@@ -508,7 +515,10 @@ else:
         file_badge_link(up.name, up.getvalue(), synced=False)
         if up.name != st.session_state.get("last_selected_upload"):
             st.session_state.last_selected_upload = up.name
-            _reset_chat()
+            st.session_state.messages = []   
+            st.session_state.last_suggestion = None
+            st.session_state.building = True
+     
 
 if not up:
     st.warning("Please upload or load a PDF to continue.")
@@ -516,6 +526,13 @@ if not up:
 
 # Rebuild retriever when file changes
 if st.session_state.get("last_processed_pdf") != up.name:
+    st.session_state.building = True
+    st.session_state.messages = []  # keep blank during build
+
+    loading = st.empty()
+    with loading.container():
+        st.info("📦 Processing & indexing PDF…")
+        
     pdf_bytes = up.getvalue()
     st.session_state.pdf_bytes = pdf_bytes
     st.session_state.pdf_b64 = base64.b64encode(pdf_bytes).decode("ascii")  # store ONE copy for cards
@@ -527,25 +544,30 @@ if st.session_state.get("last_processed_pdf") != up.name:
         {"role": "assistant", "content": "What can I help you with?"}
     ]
     st.session_state.last_processed_pdf = up.name
+    st.session_state.building = False
+    loading.empty()
 
 
 # Chat input
-user_q = st.chat_input("Type your question here…", key="main_chat_input")
+user_q = st.chat_input("Type your question here…", key="main_chat_input",disabled=st.session_state.get("building", False))
 if user_q:
     queue_question(user_q)
 
 # ========================== RENDER HISTORY ==========================
-for msg in st.session_state.messages:
-    cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
-    st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
-    if msg.get("source_img") and msg.get("source_pdf_b64") and msg.get("source_page"):
-        render_reference_card(
-            label=(msg.get("source") or "Page"),
-            img_b64=msg["source_img"],
-            pdf_b64=msg["source_pdf_b64"],
-            page=msg["source_page"],
-            key=msg.get("id", "k0"),
-        )
+# ========================== RENDER HISTORY ==========================
+if not st.session_state.get("building", False):
+    for msg in st.session_state.messages:
+        cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
+        st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
+        if msg.get("source_img") and msg.get("source_pdf_b64") and msg.get("source_page"):
+            render_reference_card(
+                label=(msg.get("source") or "Page"),
+                img_b64=msg["source_img"],
+                pdf_b64=msg["source_pdf_b64"],
+                page=msg["source_page"],
+                key=msg.get("id", "k0"),
+            )
+
 
 # ========================== ANSWER ==========================
 if st.session_state.waiting_for_response and st.session_state.pending_input:
