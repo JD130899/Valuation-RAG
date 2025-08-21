@@ -30,11 +30,6 @@ from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
 load_dotenv()
 st.set_page_config(page_title="Underwriting Agent", layout="wide")
 
-components.html(
-    "<script>setInterval(()=>{fetch(window.location.pathname,{method:'GET',cache:'no-store'}).catch(()=>{})},60000)</script>",
-    height=0,
-)
-
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 def _safe_secret(key: str, default: str = "") -> str:
@@ -443,10 +438,16 @@ def _embedder():
     )
 
 
-
+with st.sidebar:
+    st.write("Cookie secret set:", bool(os.getenv("STREAMLIT_SERVER_COOKIE_SECRET")))
+    components.html(
+        "<script>setInterval(()=>{fetch(location.pathname,{method:'GET',cache:'no-store'}).catch(()=>{})},60000)</script>",
+        height=0,
+    )
+    
 # ================= Sidebar: Google Drive loader =================
 service = get_drive_service()
-st.sidebar.caption(f"📁 Using Drive folder: {FOLDER_TO_USE}")
+#st.sidebar.caption(f"📁 Using Drive folder: {FOLDER_TO_USE}")
 
 pdf_files = get_all_pdfs(service, FOLDER_TO_USE) if service else []
 if service is None:
