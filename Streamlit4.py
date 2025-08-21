@@ -29,6 +29,18 @@ from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
 load_dotenv()
 st.set_page_config(page_title="Underwriting Agent", layout="wide")
 
+st.markdown("""
+<style>
+/* stop button dimming + any transition flashes */
+.stButton > button[disabled] { opacity: 1 !important; filter: none !important; }
+.stButton > button, button, [role="button"] { transition: none !important; }
+*:focus { outline: none !important; box-shadow: none !important; }
+html, body, [data-testid="stAppViewContainer"] * { transition: none !important; animation: none !important; }
+</style>
+""", unsafe_allow_html=True)
+
+
+
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
 def _safe_secret(key: str, default: str = "") -> str:
@@ -533,18 +545,40 @@ user_q = st.chat_input("Type your question here…", key="main_chat_input")
 if user_q:
     queue_question(user_q)
 
-# ========================== RENDER HISTORY ==========================
-for msg in st.session_state.messages:
-    cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
-    st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
-    if msg.get("source_img") and msg.get("source_pdf_b64") and msg.get("source_page"):
-        render_reference_card(
-            label=(msg.get("source") or "Page"),
-            img_b64=msg["source_img"],
-            pdf_b64=msg["source_pdf_b64"],
-            page=msg["source_page"],
-            key=msg.get("id", "k0"),
-        )
+# ===== BEFORE: your history loop =====
+# for msg in st.session_state.messages:
+#     ...
+
+# ===== AFTER: same loop, wrapped in a fragment =====
+if hasattr(st, "fragment"):  # works on Streamlit versions that support fragments
+    @st.fragment
+    def render_history(msgs):
+        for msg in msgs:
+            cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
+            st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
+            if msg.get("source_img") and msg.get("source_pdf_b64") and msg.get("source_page"):
+                render_reference_card(
+                    label=(msg.get("source") or "Page"),
+                    img_b64=msg["source_img"],
+                    pdf_b64=msg["source_pdf_b64"],
+                    page=msg["source_page"],
+                    key=msg.get("id", "k0"),
+                )
+    render_history(st.session_state.messages)
+else:
+    # fallback to your original loop (unchanged)
+    for msg in st.session_state.messages:
+        cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
+        st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
+        if msg.get("source_img") and msg.get("source_pdf_b64") and msg.get("source_page"):
+            render_reference_card(
+                label=(msg.get("source") or "Page"),
+                img_b64=msg["source_img"],
+                pdf_b64=msg["source_pdf_b64"],
+                page=msg["source_page"],
+                key=msg.get("id", "k0"),
+            )
+
 
 # ========================== ANSWER ==========================
 if st.session_state.waiting_for_response and st.session_state.pending_input:
