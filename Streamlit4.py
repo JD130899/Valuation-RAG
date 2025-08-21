@@ -400,12 +400,9 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
     for idx, c in enumerate(chunks):
         c.metadata["chunk_id"] = idx + 1
 
-    embedder = CohereEmbeddings(
-        model="embed-english-v3.0",
-        user_agent="langchain",
-        cohere_api_key=os.environ["COHERE_API_KEY"]
-    )
+    embedder = _embedder()
     vs = FAISS.from_documents(chunks, embedder)
+
 
     store = os.path.join("vectorstore", file_name)
     os.makedirs(store, exist_ok=True)
@@ -435,6 +432,16 @@ def pil_to_base64(img: Image.Image) -> str:  # kept for compatibility; not used 
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return base64.b64encode(buf.getvalue()).decode("ascii")
+
+# One embedder instance shared across reruns & code paths
+@st.cache_resource(show_spinner=False)
+def _embedder():
+    return CohereEmbeddings(
+        model="embed-english-v3.0",
+        user_agent="langchain",
+        cohere_api_key=os.environ["COHERE_API_KEY"],
+    )
+
 
 
 # ================= Sidebar: Google Drive loader =================
@@ -654,12 +661,9 @@ Conversation so far:
                 if docs and not skip_reference:
                     try:
                         texts = [d.page_content for d in docs]
-                        emb_query = CohereEmbeddings(
-                            model="embed-english-v3.0", user_agent="langchain", cohere_api_key=os.environ["COHERE_API_KEY"]
-                        ).embed_query(answer)
-                        chunk_embs = CohereEmbeddings(
-                            model="embed-english-v3.0", user_agent="langchain", cohere_api_key=os.environ["COHERE_API_KEY"]
-                        ).embed_documents(texts)
+                        emb = _embedder()
+                        emb_query = emb.embed_query(answer)
+                        chunk_embs = emb.embed_documents(texts)
                         sims = cosine_similarity([emb_query], chunk_embs)[0]
                         ranked = sorted(list(zip(docs, sims)), key=lambda x: x[1], reverse=True)
 
