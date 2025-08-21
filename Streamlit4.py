@@ -43,9 +43,6 @@ DRIVE_FOLDER_FROM_ENV    = os.getenv("GOOGLE_DRIVE_FOLDER", "").strip()
 HARDCODED_FOLDER_LINK    = "https://drive.google.com/drive/folders/1XGyBBFhhQFiG43jpYJhNzZYi7C-_l5me"
 FOLDER_TO_USE = DRIVE_FOLDER_FROM_ENV or DRIVE_FOLDER_FROM_SECRET or HARDCODED_FOLDER_LINK
 
-#st.sidebar.write("Cookie secret set:", bool(os.getenv("STREAMLIT_SERVER_COOKIE_SECRET")))
-
-
 # ============== Lightweight, on-demand page rendering ==============
 @st.cache_data(show_spinner=False)
 def page_png_b64(pdf_bytes: bytes, page_no: int, dpi: int = 120) -> str:
@@ -143,6 +140,9 @@ div[data-testid="stAppViewContainer"] .ref[open] .overlay{ display:block; positi
 div[data-testid="stAppViewContainer"] .ref[open] > .panel{ position:fixed; z-index:999; top:12vh; left:50%; transform:translateX(-50%);
   width:min(900px, 90vw); max-height:75vh; overflow:auto; box-shadow:0 20px 60px rgba(0,0,0,.45); }
 div[data-testid="stAppViewContainer"] .ref .close-x{ position:absolute; top:6px; right:10px; border:0; background:transparent; color:#94a3b8; font-size:20px; line-height:1; cursor:pointer; }
+
+/* <<< CHANGED: reserve space for the upcoming reference summary row */
+.ref-spacer { height: 42px; }  /* tweak a couple px if your 'Page :' row is taller/shorter */
 </style>
 """, unsafe_allow_html=True)
 
@@ -382,32 +382,150 @@ def condense_query(chat_history, user_input: str, pdf_name: str) -> str:
         prompt.invoke({"pdf_name": pdf_name, "history": hist_txt, "question": user_input})
     ).content.strip() or user_input
 
+# ================= Helper for page selection + OCR =================
+def _detect_selected_pages(doc: fitz.Document):
+    """
+    Heuristics to pick key pages for OCR repair.
+    Returns 1-based page numbers as a set.
+    """
+    want = set()
+    total = len(doc)
+    if total >= 3:
+        want.add(3)
+    income_hits, market_hits, valuation_summary_page = [], [], None
+    for i in range(total):
+        text = (doc[i].get_text() or "").upper()
+        if "INCOME APPROACH" in text: income_hits.append(i + 1)
+        if "MARKET APPROACH" in text: market_hits.append(i + 1)
+        if valuation_summary_page is None and "VALUATION SUMMARY" in text:
+            valuation_summary_page = i + 1
+    if income_hits: want.add(income_hits[0])
+    if len(market_hits) >= 2:
+        second = market_hits[1]; want.add(second)
+        if second + 1 <= total: want.add(second + 1)
+    if valuation_summary_page: want.add(valuation_summary_page)
+    return want
+
+
+def _ocr_page_with_gpt4o(img_png_bytes: bytes) -> str:
+    """
+    Uses OpenAI gpt-4o vision to OCR a rendered PNG of a PDF page.
+    Falls back to "" if anything fails.
+    """
+    b64 = base64.b64encode(img_png_bytes).decode("utf-8")
+    prompt_text = (
+        "Extract all values and details precisely from the image. "
+        "Return clean, readable plain text (not markdown tables). "
+        "If formulas are present, write THE EQUATION using simple math symbols. "
+        "Avoid extra commentary."
+    )
+    try:
+        resp = openai.chat.completions.create(
+            model="gpt-4o",
+            messages=[{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt_text},
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+                ],
+            }],
+            max_tokens=800,
+        )
+        return (resp.choices[0].message.content or "").strip()
+    except Exception:
+        return ""
+
 
 # ================= Builder =================
 @st.cache_resource(show_spinner="📦 Processing & indexing PDF…")
 def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
+    """
+    Heavy work:
+      • Save PDF
+      • (New) Heuristic page selection + GPT-4o OCR on those pages
+      • LlamaParse the PDF
+      • (New) Merge OCR text into LlamaParse per-page text
+      • Split, embed, FAISS, rerank, retriever
+    Returns: retriever, page_images (empty for compat), page_texts (merged).
+    """
     os.makedirs("uploaded", exist_ok=True)
     pdf_path = os.path.join("uploaded", file_name)
     with open(pdf_path, "wb") as f:
         f.write(pdf_bytes)
 
-    # Avoid pre-rendering all pages; just note page count if you want.
+    # --- Open with PyMuPDF; prep previews for OCR pages only ---
     doc = fitz.open(pdf_path)
-    page_count = doc.page_count
+    total_pages = len(doc)
+
+    # Heuristically pick pages to OCR-repair (1-based)
+    selected_pages = _detect_selected_pages(doc)
+
+    # Render PNGs just for selected pages (keep memory low)
+    # Use 120 DPI; bump if OCR quality needs it
+    ocr_text_by_page: dict[int, str] = {}
+    for pnum in sorted(selected_pages):
+        if pnum < 1 or pnum > total_pages:
+            continue
+        try:
+            page = doc[pnum - 1]
+            pix = page.get_pixmap(dpi=120)  # 96–150 is plenty for text
+            png_bytes = pix.tobytes("png")
+            ocr_text = _ocr_page_with_gpt4o(png_bytes)
+            if ocr_text:
+                ocr_text_by_page[pnum] = ocr_text
+        except Exception:
+            # Best-effort OCR; ignore failures
+            pass
+
     doc.close()
 
+    # --- LlamaParse structured pass (primary text source) ---
     parser = LlamaParse(api_key=os.environ["LLAMA_CLOUD_API_KEY"], num_workers=2)
     result = parser.parse(pdf_path)
 
-    pages = []
-    page_texts = {}
-    for pg in result.pages:
-        cleaned = [l for l in pg.md.splitlines() if l.strip() and l.lower() != "null"]
-        text = "\n".join(cleaned)
-        if text:
-            pages.append(Document(page_content=text, metadata={"page_number": pg.page}))
-            page_texts[pg.page] = text
+    # --- Merge per-page text (LlamaParse + OCR) ---
+    pages: list[Document] = []
+    page_texts: dict[int, str] = {}
 
+    for pg in result.pages:
+        # LlamaParse page number is 1-based in your code (pg.page)
+        pnum = int(pg.page)
+        # Clean LlamaParse text
+        lp_lines = [l for l in (pg.md or "").splitlines() if l.strip() and l.lower() != "null"]
+        llama_text = "\n".join(lp_lines).strip()
+
+        ocr_text = ocr_text_by_page.get(pnum, "").strip()
+
+        # Decide whether to REPLACE or APPEND OCR
+        mode = None
+        merged = llama_text
+        if ocr_text:
+            if not llama_text:
+                # Nothing from LlamaParse → take OCR fully
+                merged = ocr_text
+                mode = "replace"
+            else:
+                # If OCR looks substantially richer (e.g., 20% longer), prefer it
+                if len(ocr_text) >= 1.2 * len(llama_text):
+                    merged = ocr_text
+                    mode = "replace"
+                else:
+                    merged = llama_text + "\n\n---\n[OCR repair]\n" + ocr_text
+                    mode = "append"
+
+        if not merged:
+            # Skip empty pages to keep index lean
+            continue
+
+        meta = {
+            "page_number": pnum,
+            "ocr_applied": bool(ocr_text),
+            "ocr_mode": mode or "none",
+        }
+        pages.append(Document(page_content=merged, metadata=meta))
+        page_texts[pnum] = merged
+
+    # --- Chunk, embed, index ---
     splitter = RecursiveCharacterTextSplitter(chunk_size=3300, chunk_overlap=0)
     chunks = splitter.split_documents(pages)
     for idx, c in enumerate(chunks):
@@ -416,29 +534,31 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
     embedder = _embedder()
     vs = FAISS.from_documents(chunks, embedder)
 
-
+    # Persist FAISS + metadata (same layout you were using)
     store = os.path.join("vectorstore", file_name)
     os.makedirs(store, exist_ok=True)
     vs.save_local(store, index_name="faiss")
     with open(os.path.join(store, "metadata.pkl"), "wb") as mf:
         pickle.dump([c.metadata for c in chunks], mf)
 
+    # --- Reranker + retriever ---
     reranker = CohereRerank(
         model="rerank-english-v3.0",
         user_agent="langchain",
         cohere_api_key=os.environ["COHERE_API_KEY"],
-        top_n=20
+        top_n=20,
     )
     retriever = ContextualCompressionRetriever(
         base_retriever=vs.as_retriever(
             search_type="mmr",
-            search_kwargs={"k": 50, "fetch_k": 100, "lambda_mult": 0.9}
+            search_kwargs={"k": 50, "fetch_k": 100, "lambda_mult": 0.9},
         ),
-        base_compressor=reranker
+        base_compressor=reranker,
     )
 
-    # Return empty page_images (kept for compatibility), and page_texts.
+    # Keep page_images empty for compatibility with your render code
     return retriever, {}, page_texts
+
 
 
 def pil_to_base64(img: Image.Image) -> str:  # kept for compatibility; not used now
@@ -458,7 +578,6 @@ def _embedder():
     
 # ================= Sidebar: Google Drive loader =================
 service = get_drive_service()
-#st.sidebar.caption(f"📁 Using Drive folder: {FOLDER_TO_USE}")
 
 pdf_files = get_all_pdfs(service, FOLDER_TO_USE) if service else []
 if service is None:
@@ -668,7 +787,14 @@ Conversation so far:
             thinking.empty()
 
             with block.container():
+                # <<< CHANGED: reserve space where the "Page :" ref chip will appear
+                ref_slot = st.empty()
+                with ref_slot:
+                    st.markdown("<div class='ref-spacer'></div>", unsafe_allow_html=True)
+
+                # Type the answer as usual (kept your typewriter)
                 type_bubble(answer)
+
                 skip_reference = is_unrelated or is_clarify
                 if docs and not skip_reference:
                     try:
@@ -716,13 +842,17 @@ Conversation so far:
                             entry["source_img"] = img_b64
                             entry["source_pdf_b64"] = st.session_state.pdf_b64  # reuse single copy
                             entry["source_page"] = ref_page
-                            render_reference_card(
-                                label=entry["source"],
-                                img_b64=entry["source_img"],
-                                pdf_b64=entry["source_pdf_b64"],
-                                page=entry["source_page"],
-                                key=entry["id"],
-                            )
+
+                            # <<< CHANGED: swap spacer with the actual reference card (no layout shift)
+                            ref_slot.empty()
+                            with ref_slot:
+                                render_reference_card(
+                                    label=entry["source"],
+                                    img_b64=entry["source_img"],
+                                    pdf_b64=entry["source_pdf_b64"],
+                                    page=entry["source_page"],
+                                    key=entry["id"],
+                                )
                     except Exception as e:
                         st.info(f"ℹ️ Reference selection skipped: {e}")
 
