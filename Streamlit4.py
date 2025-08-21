@@ -507,7 +507,7 @@ else:
 
 # ================= Main UI =================
 st.title("Underwriting Agent")
-
+history_mount = st.empty()
 if "uploaded_file_from_drive" in st.session_state:
     file_badge_link(
         st.session_state.uploaded_file_name,
@@ -530,20 +530,33 @@ if not up:
     st.stop()
 
 # Rebuild retriever when file changes
+
 if st.session_state.get("last_processed_pdf") != up.name:
+    # make sure old chat is gone on-screen before heavy work starts
     if st.session_state.get("precleared_for") != up.name:
         _preclear_before_build(up.name)
+
+    # wipe the chat area immediately and show a processing bubble
+    with history_mount.container():
+        st.markdown(
+            "<div class='assistant-bubble clearfix'>Processing & indexing PDF…</div>",
+            unsafe_allow_html=True
+        )
+
     pdf_bytes = up.getvalue()
     st.session_state.pdf_bytes = pdf_bytes
-    st.session_state.pdf_b64 = base64.b64encode(pdf_bytes).decode("ascii")  # store ONE copy for cards
+    st.session_state.pdf_b64 = base64.b64encode(pdf_bytes).decode("ascii")
     (st.session_state.retriever,
      st.session_state.page_images,
      st.session_state.page_texts) = build_retriever_from_pdf(pdf_bytes, up.name)
+
+    # fresh greetings AFTER build completes
     st.session_state.messages = [
         {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
         {"role": "assistant", "content": "What can I help you with?"}
     ]
     st.session_state.last_processed_pdf = up.name
+
 
 
 # Chat input
@@ -552,17 +565,19 @@ if user_q:
     queue_question(user_q)
 
 # ========================== RENDER HISTORY ==========================
-for msg in st.session_state.messages:
-    cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
-    st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
-    if msg.get("source_img") and msg.get("source_pdf_b64") and msg.get("source_page"):
-        render_reference_card(
-            label=(msg.get("source") or "Page"),
-            img_b64=msg["source_img"],
-            pdf_b64=msg["source_pdf_b64"],
-            page=msg["source_page"],
-            key=msg.get("id", "k0"),
-        )
+with history_mount.container():
+    for msg in st.session_state.messages:
+        cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
+        st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
+        if msg.get("source_img") and msg.get("source_pdf_b64") and msg.get("source_page"):
+            render_reference_card(
+                label=(msg.get("source") or "Page"),
+                img_b64=msg["source_img"],
+                pdf_b64=msg["source_pdf_b64"],
+                page=msg["source_page"],
+                key=msg.get("id", "k0"),
+            )
+
 
 # ========================== ANSWER ==========================
 if st.session_state.waiting_for_response and st.session_state.pending_input:
