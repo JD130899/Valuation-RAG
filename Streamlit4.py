@@ -1,4 +1,4 @@
-# app.py  (simplified + source reference section restored)
+# app.py  (Drive + Upload, flicker-free, source reference)
 
 import os, io, pickle, base64, re, uuid, time, json
 import streamlit as st
@@ -20,6 +20,9 @@ from langchain_core.prompts import PromptTemplate
 
 from sklearn.metrics.pairwise import cosine_similarity
 import openai
+
+# Google Drive helpers (your original utils)
+from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
 
 # ================= Setup =================
 load_dotenv()
@@ -65,6 +68,8 @@ if "last_suggestion" not in st.session_state:
     st.session_state.last_suggestion = None
 if "next_msg_id" not in st.session_state:
     st.session_state.next_msg_id = 0
+if "last_synced_file_id" not in st.session_state:
+    st.session_state.last_synced_file_id = None
 
 # ---------- styles (chat + reference styles) ----------
 st.markdown("""
@@ -105,19 +110,21 @@ def _new_id():
     st.session_state.next_msg_id += 1
     return f"m{n}"
 
+# ==================== INTERACTIONS ====================
 def queue_question(q: str):
     st.session_state.pending_input = q
     st.session_state.waiting_for_response = True
     st.session_state.messages.append({"id": _new_id(), "role": "user", "content": q})
 
-def file_badge_link(name: str, pdf_bytes: bytes):
+def file_badge_link(name: str, pdf_bytes: bytes, synced: bool = True):
     base = os.path.splitext(name)[0]
     b64 = base64.b64encode(pdf_bytes).decode("ascii")
+    label = "Using synced file:" if synced else "Using file:"
     link_id = f"open-file-{uuid.uuid4().hex[:8]}"
     st.markdown(
         f'''
         <div style="background:#1f2c3a; padding:8px; border-radius:8px; color:#fff;">
-          ✅ <b>Using file:</b>
+          ✅ <b>{label}</b>
           <a id="{link_id}" href="#" target="_blank" rel="noopener" style="color:#93c5fd; text-decoration:none;">{base}</a>
         </div>
         ''',
@@ -168,7 +175,7 @@ def render_reference_card(label: str, img_b64: str, page: int, key: str):
 <style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
 <script>(function(){{
   function b64ToUint8Array(s){{var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}}
-  var blob = new Blob([b64ToUint8Array('{st.session_state.get("pdf_b64","")}')], {{type:'application/pdf'}});
+  var blob = new Blob([b64ToUint8Array('{pdf_b64}')], {{type:'application/pdf'}});
   var url  = URL.createObjectURL(blob) + '#page={page}';
   function attach(){{
     var d = window.parent && window.parent.document;
@@ -195,7 +202,7 @@ for m in st.session_state.messages:
     if "id" not in m:
         m["id"] = _new_id()
 
-# ----------- helpers -----------
+# ----------- text helpers -----------
 def _clean_heading(text: str) -> str:
     if not text: return text
     text = re.sub(r"^[#>\-\*\d\.\)\(]+\s*", "", text).strip()
@@ -431,21 +438,82 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
     )
     return retriever, page_images_b64, page_texts
 
+# --- Optional: cache listing to reduce churn ---
+@st.cache_data(ttl=300)
+def _list_pdfs_from_drive(folder_to_use: str):
+    service = get_drive_service()
+    return get_all_pdfs(service, folder_to_use) if service else []
+
+# ================= Sidebar: Google Drive loader (flicker-free) =================
+DRIVE_FOLDER_FROM_SECRET = os.getenv("GOOGLE_DRIVE_FOLDER", "").strip()
+HARDCODED_FOLDER_LINK = "https://drive.google.com/drive/folders/1XGyBBFhhQFiG43jpYJhNzZYi7C-_l5me"
+FOLDER_TO_USE = DRIVE_FOLDER_FROM_SECRET or HARDCODED_FOLDER_LINK
+
+st.sidebar.caption(f"📁 Using Drive folder: {FOLDER_TO_USE}")
+
+try:
+    pdf_files = _list_pdfs_from_drive(FOLDER_TO_USE)
+except Exception as e:
+    pdf_files = []
+    st.sidebar.error(f"Drive access error: {e}")
+
+if pdf_files and "selected_pdf_name" not in st.session_state:
+    st.session_state.selected_pdf_name = pdf_files[0]["name"]
+
+with st.sidebar.form("drive_loader_form", clear_on_submit=False):
+    if pdf_files:
+        names = [f["name"] for f in pdf_files]
+        st.selectbox(
+            "Select a PDF to load",
+            names,
+            index=(names.index(st.session_state.selected_pdf_name)
+                   if st.session_state.get("selected_pdf_name") in names else 0),
+            key="selected_pdf_name",
+        )
+        submitted = st.form_submit_button("Load selected PDF", use_container_width=True)
+        if submitted:
+            chosen = next(f for f in pdf_files if f["name"] == st.session_state.selected_pdf_name)
+            st.session_state.drive_to_load = {"id": chosen["id"], "name": chosen["name"]}
+    else:
+        st.sidebar.info("No PDFs found in the Drive folder (or access issue).")
+
+# Process Drive load trigger outside the sidebar to avoid rerun thrash
+if st.session_state.get("drive_to_load"):
+    svc = get_drive_service()
+    req = st.session_state.pop("drive_to_load")  # consume trigger
+    if req and svc:
+        if req["id"] != st.session_state.get("last_synced_file_id"):
+            path = download_pdf(svc, req["id"], req["name"])
+            if path:
+                with open(path, "rb") as f:
+                    st.session_state.uploaded_file_from_drive = f.read()
+                st.session_state.uploaded_file_name = req["name"]
+                st.session_state.last_synced_file_id = req["id"]
+                # don't reset chat yet; wait until after indexing completes
+
 # ================= Main UI =================
 st.title("Underwriting Agent")
 
-up = st.file_uploader("Upload a valuation report PDF", type="pdf")
-if up:
-    file_badge_link(up.name, up.getvalue())
-    if up.name != st.session_state.get("last_selected_upload"):
-        st.session_state.last_selected_upload = up.name
-        _reset_chat()
+# Prefer Drive-loaded file; fallback to uploader
+if "uploaded_file_from_drive" in st.session_state:
+    file_badge_link(
+        st.session_state.uploaded_file_name,
+        st.session_state.uploaded_file_from_drive,
+        synced=True
+    )
+    up = io.BytesIO(st.session_state.uploaded_file_from_drive)
+    up.name = st.session_state.uploaded_file_name
+else:
+    up = st.file_uploader("Upload a valuation report PDF", type="pdf")
+    if up:
+        file_badge_link(up.name, up.getvalue(), synced=False)
+        # no early reset; we'll reset after indexing
 
 if not up:
-    st.warning("Please upload a PDF to continue.")
+    st.warning("Please load from Drive or upload a PDF to continue.")
     st.stop()
 
-# Rebuild retriever when file changes
+# Rebuild retriever when file changes (single reset AFTER indexing)
 if st.session_state.get("last_processed_pdf") != up.name:
     st.session_state.last_processed_pdf = up.name
     pdf_bytes = up.getvalue()
@@ -456,7 +524,7 @@ if st.session_state.get("last_processed_pdf") != up.name:
      st.session_state.page_images,
      st.session_state.page_texts) = build_retriever_from_pdf(pdf_bytes, up.name)
 
-    _reset_chat()
+    _reset_chat()  # single reset AFTER building index
 
 # Chat input
 user_q = st.chat_input("Type your question here…", key="main_chat_input")
@@ -498,10 +566,7 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
                 ),
                 input_variables=["assistant", "user"]
             )
-            prev_assistant = ""
-            for m in reversed(history_to_use):
-                if m["role"] == "assistant":
-                    prev_assistant = m["content"]; break
+            prev_assistant = _last_assistant_text(history_to_use)
             intent = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
                 judge.invoke({"assistant": prev_assistant, "user": raw_q})
             ).content.strip().upper()
@@ -520,29 +585,6 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
             st.session_state.pending_input = None
             st.session_state.waiting_for_response = False
         else:
-            # Condense query
-            def condense_query(chat_history, user_input: str, pdf_name: str) -> str:
-                hist = []
-                for m in chat_history[-6:]:
-                    speaker = "User" if m["role"] == "user" else "Assistant"
-                    hist.append(f"{speaker}: {m['content']}")
-                hist_txt = "\n".join(hist)
-                prompt = PromptTemplate(
-                    template=(
-                        'Turn the last user message into a self-contained search query about the PDF "{pdf_name}". '
-                        "Use ONLY info implied by the history; keep it short and noun-heavy. "
-                        "Return just the query.\n"
-                        "---\nHistory:\n{history}\n---\nLast user message: {question}\nStandalone query:"
-                    ),
-                    input_variables=["pdf_name", "history", "question"]
-                )
-                try:
-                    return ChatOpenAI(model="gpt-4o", temperature=0).invoke(
-                        prompt.invoke({"pdf_name": pdf_name, "history": hist_txt, "question": user_input})
-                    ).content.strip() or user_input
-                except Exception:
-                    return user_input
-
             effective_q = st.session_state.last_suggestion if (is_confirm and st.session_state.last_suggestion) else raw_q
             query_for_retrieval = condense_query(history_to_use, effective_q, pdf_display)
 
@@ -620,49 +662,8 @@ Conversation so far:
                 answer = f"Sorry, I hit an error while answering: {e}"
 
             # Suggestion sanitization
-            def extract_suggestion(text):
-                m = re.search(r"did you mean\s+(.+?)\?", text, flags=re.IGNORECASE)
-                if not m: return None
-                val = re.sub(r"^[#>\-\*\d\.\)\(]+\s*", "", m.group(1).strip()).strip(" :–—-·•")
-                return None if val.lower()=="suggestion" else val
-
-            def sanitize_suggestion(answer: str, question: str, docs):
-                low = answer.lower().strip()
-                if ("sorry i didnt understand the question" not in low
-                    and "sorry i didn't understand the question" not in low
-                    and "did you mean" not in low):
-                    return answer
-                # Heuristic guesser
-                def guess_suggestion(question: str, docs):
-                    q_terms = set(w.lower() for w in re.findall(r"[A-Za-z]{3,}", question))
-                    best_line, best_score = None, 0
-                    for d in docs or []:
-                        for ln in d.page_content.splitlines():
-                            raw = ln.strip()
-                            if not raw: continue
-                            if len(raw.split()) > 6: continue
-                            words = set(w.lower() for w in re.findall(r"[A-Za-z]{3,}", raw))
-                            score = len(q_terms & words)
-                            if score > best_score:
-                                best_score, best_line = score, raw
-                    if not best_line: return "Valuation Summary"
-                    best_line = re.sub(r"^[#>\-\*\d\.\)\(]+\s*", "", best_line).strip(" :–—-·•")
-                    return best_line or "Valuation Summary"
-
-                sug = guess_suggestion(question, docs)
-                answer = re.sub(r"\bSUGGESTION\b", sug, answer, flags=re.IGNORECASE)
-                answer = re.sub(r"\[.*?\]", sug, answer)
-                m = re.search(r"did you mean\s+(.+?)\?", answer, flags=re.IGNORECASE)
-                cand = re.sub(r"^[#>\-\*\d\.\)\(]+\s*", "", m.group(1).strip()).strip(" :–—-·•") if m else ""
-                if not cand or cand.lower() == "suggestion":
-                    return f"Sorry I didnt understand the question. Did you mean {sug}?"
-                if len(cand.split()) > 6:
-                    cand = " ".join(cand.split()[:6])
-                    return f"Sorry I didnt understand the question. Did you mean {cand}?"
-                return re.sub(r"(Did you mean\s+)[#>\-\*\d\.\)\(]+\s*", r"\1", answer, flags=re.IGNORECASE)
-
             answer = sanitize_suggestion(answer, effective_q, docs)
-            st.session_state.last_suggestion = (extract_suggestion(answer) or "").strip() or None
+            st.session_state.last_suggestion = _clean_heading(extract_suggestion(answer) or "") or None
 
             # Flags
             apology = f"Sorry I can only answer question related to {pdf_display} pdf document"
@@ -676,10 +677,8 @@ Conversation so far:
             with block.container():
                 type_bubble(answer)
 
-                # Skip reference for unrelated or clarify
                 if docs and not (is_unrelated or is_clarify):
                     try:
-                        # Rank retrieved docs against the final answer (cheap & deterministic)
                         texts = [d.page_content for d in docs]
                         emb_query = embedder.embed_query(answer)
                         chunk_embs = embedder.embed_documents(texts)
@@ -688,8 +687,6 @@ Conversation so far:
                         top3 = [d for d,_ in ranked[:3]]
 
                         best_doc = top3[0] if top3 else None
-
-                        # Optional tie-break via LLM if we have 3
                         if len(top3) == 3:
                             ranking_prompt = PromptTemplate(
                                 template=("""
