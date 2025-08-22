@@ -1,3 +1,5 @@
+# app.py — Simple RAG (no Google Drive UI, no source references)
+
 import os, io, pickle, base64
 import re
 import uuid
@@ -8,7 +10,7 @@ import fitz  # PyMuPDF
 from PIL import Image  # ok to keep; not strictly required now
 from dotenv import load_dotenv
 import streamlit.components.v1 as components
-from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.metrics.pairwise import cosine_similarity  # harmless even if unused
 
 # LangChain / RAG deps
 from langchain_core.documents import Document
@@ -22,54 +24,43 @@ from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 
 import openai
-from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
-
 
 # ================= Setup =================
 load_dotenv()
 st.set_page_config(page_title="Underwriting Agent", layout="wide")
 
+# Anti-flicker CSS (kept)
 st.markdown("""
 <style>
-/* stop button dimming + any transition flashes */
 .stButton > button[disabled] { opacity: 1 !important; filter: none !important; }
 .stButton > button, button, [role="button"] { transition: none !important; }
 *:focus { outline: none !important; box-shadow: none !important; }
 html, body, [data-testid="stAppViewContainer"] * { transition: none !important; animation: none !important; }
+
+/* MAIN content only (not the sidebar) */
+div[data-testid="stAppViewContainer"] .block-container{
+  padding-top:54px !important;
+  padding-bottom:160px !important;
+}
+div[data-testid="stAppViewContainer"] .block-container h1{ margin-top:0 !important; }
+
+/* Chat bubbles */
+div[data-testid="stAppViewContainer"] .user-bubble {background:#007bff;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:right;margin:4px;}
+div[data-testid="stAppViewContainer"] .assistant-bubble {background:#1e1e1e;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:left;margin:4px;}
+div[data-testid="stAppViewContainer"] .clearfix::after {content:"";display:table;clear:both;}
 </style>
 """, unsafe_allow_html=True)
 
-
-
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-def _safe_secret(key: str, default: str = "") -> str:
-    try:
-        return str(st.secrets.get(key, default))
-    except Exception:
-        return default
-
-DRIVE_FOLDER_FROM_SECRET = _safe_secret("GOOGLE_DRIVE_FOLDER", "").strip()
-DRIVE_FOLDER_FROM_ENV    = os.getenv("GOOGLE_DRIVE_FOLDER", "").strip()
-HARDCODED_FOLDER_LINK    = "https://drive.google.com/drive/folders/1XGyBBFhhQFiG43jpYJhNzZYi7C-_l5me"
-FOLDER_TO_USE = DRIVE_FOLDER_FROM_ENV or DRIVE_FOLDER_FROM_SECRET or HARDCODED_FOLDER_LINK
-
-#st.sidebar.write("Cookie secret set:", bool(os.getenv("STREAMLIT_SERVER_COOKIE_SECRET")))
-
-
-# ============== Lightweight, on-demand page rendering ==============
+# ============== Lightweight, on-demand page rendering (kept but unused) ==============
 @st.cache_data(show_spinner=False)
 def page_png_b64(pdf_bytes: bytes, page_no: int, dpi: int = 120) -> str:
-    """
-    Render exactly ONE page to PNG and return base64 (cached).
-    This avoids pre-rendering every page into memory.
-    """
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     page = doc.load_page(page_no - 1)
     pix = page.get_pixmap(dpi=dpi)
     doc.close()
     return base64.b64encode(pix.tobytes("png")).decode("ascii")
-
 
 # ================= Chat UI helpers =================
 def type_bubble(text: str, *, base_delay: float = 0.012, cutoff_chars: int = 2000):
@@ -96,19 +87,12 @@ def _reset_chat():
     st.session_state.last_suggestion = None
 
 # ---------- Session state ----------
-if "last_synced_file_id" not in st.session_state:
-    st.session_state.last_synced_file_id = None
 if "messages" not in st.session_state:
-    st.session_state.messages = [
-        {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
-        {"role": "assistant", "content": "What can I help you with?"}
-    ]
+    _reset_chat()
 if "pending_input" not in st.session_state:
     st.session_state.pending_input = None
 if "waiting_for_response" not in st.session_state:
     st.session_state.waiting_for_response = False
-if "page_images" not in st.session_state:
-    st.session_state.page_images = {}  # left for compatibility; now unused
 if "page_texts" not in st.session_state:
     st.session_state.page_texts = {}
 if "last_suggestion" not in st.session_state:
@@ -116,142 +100,10 @@ if "last_suggestion" not in st.session_state:
 if "next_msg_id" not in st.session_state:
     st.session_state.next_msg_id = 0
 
-# ---------- styles (chat + reference styles) ----------
-st.markdown("""
-<style>
-/* MAIN content only (not the sidebar) */
-div[data-testid="stAppViewContainer"] .block-container{
-  padding-top:54px !important;
-  padding-bottom:160px !important;
-}
-div[data-testid="stAppViewContainer"] .block-container h1{
-  margin-top:0 !important;
-}
-
-/* SIDEBAR: remove extra top spacing */
-section[data-testid="stSidebar"] .block-container{
-  padding-top:2px !important;   /* set to 0 for absolutely no gap */
-  padding-bottom:12px !important;
-}
-section[data-testid="stSidebar"] .block-container > :first-child{
-  margin-top:0 !important;
-}
-
-/* Chat bubbles + reference cards (scoped to main so they won't affect sidebar) */
-div[data-testid="stAppViewContainer"] .user-bubble {background:#007bff;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:right;margin:4px;}
-div[data-testid="stAppViewContainer"] .assistant-bubble {background:#1e1e1e;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:left;margin:4px;}
-div[data-testid="stAppViewContainer"] .clearfix::after {content:"";display:table;clear:both;}
-div[data-testid="stAppViewContainer"] .ref{ display:block; width:60%; max-width:900px; margin:6px 0 12px 8px; }
-div[data-testid="stAppViewContainer"] .ref summary{ display:inline-flex; align-items:center; gap:8px; cursor:pointer; list-style:none; outline:none;
-  background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:10px; padding:6px 10px; }
-div[data-testid="stAppViewContainer"] .ref summary::before{ content:"▶"; font-size:12px; line-height:1; }
-div[data-testid="stAppViewContainer"] .ref[open] summary::before{ content:"▼"; }
-div[data-testid="stAppViewContainer"] .ref .panel{ background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-top:none;
-  border-radius:10px; padding:10px; margin-top:0; box-shadow:0 6px 20px rgba(0,0,0,.25); }
-div[data-testid="stAppViewContainer"] .ref .panel img{ width:100%; height:auto; border-radius:8px; display:block; }
-div[data-testid="stAppViewContainer"] .ref .overlay{ display:none; }
-div[data-testid="stAppViewContainer"] .ref[open] .overlay{ display:block; position:fixed; inset:0; z-index:998; background:transparent; border:0; padding:0; margin:0; }
-div[data-testid="stAppViewContainer"] .ref[open] > .panel{ position:fixed; z-index:999; top:12vh; left:50%; transform:translateX(-50%);
-  width:min(900px, 90vw); max-height:75vh; overflow:auto; box-shadow:0 20px 60px rgba(0,0,0,.45); }
-div[data-testid="stAppViewContainer"] .ref .close-x{ position:absolute; top:6px; right:10px; border:0; background:transparent; color:#94a3b8; font-size:20px; line-height:1; cursor:pointer; }
-</style>
-""", unsafe_allow_html=True)
-
-
 def _new_id():
     n = st.session_state.next_msg_id
     st.session_state.next_msg_id += 1
     return f"m{n}"
-
-# ==================== INTERACTIONS ====================
-def queue_question(q: str):
-    st.session_state.pending_input = q
-    st.session_state.waiting_for_response = True
-    st.session_state.messages.append({"id": _new_id(), "role": "user", "content": q})
-
-def file_badge_link(name: str, pdf_bytes: bytes, synced: bool = True):
-    base = os.path.splitext(name)[0]
-    b64 = base64.b64encode(pdf_bytes).decode("ascii")
-    label = "Using synced file:" if synced else "Using file:"
-    link_id = f"open-file-{uuid.uuid4().hex[:8]}"
-    st.markdown(
-        f'''
-        <div style="background:#1f2c3a; padding:8px; border-radius:8px; color:#fff;">
-          ✅ <b>{label}</b>
-          <a id="{link_id}" href="#" target="_blank" rel="noopener" style="color:#93c5fd; text-decoration:none;">{base}</a>
-        </div>
-        ''',
-        unsafe_allow_html=True
-    )
-    components.html(
-        f'''<!doctype html><meta charset='utf-8'>
-<style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
-<script>(function(){{
-  function b64ToUint8Array(s){{var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}}
-  var blob = new Blob([b64ToUint8Array("{b64}")], {{type:"application/pdf"}});
-  var url  = URL.createObjectURL(blob);
-  function attach(){{
-    var d = window.parent && window.parent.document;
-    if(!d) return setTimeout(attach,120);
-    var a = d.getElementById("{link_id}");
-    if(!a) return setTimeout(attach,120);
-    a.setAttribute("href", url);
-  }}
-  attach();
-  var me = window.frameElement; if(me){{me.style.display="none";me.style.height="0";me.style.border="0";}}
-}})();</script>''',
-        height=0,
-    )
-
-def render_reference_card(label: str, img_b64: str, pdf_b64: str, page: int, key: str):
-    st.markdown(
-        f"""
-        <details class="ref" id="ref-{key}">
-          <summary>📘 {label or "Reference"}</summary>
-          <button class="overlay" id="overlay-{key}" type="button" aria-label="Close"></button>
-          <div class="panel">
-            <button class="close-x" id="close-{key}" type="button" aria-label="Close">×</button>
-            <img src="data:image/png;base64,{img_b64}" alt="reference" loading="lazy"/>
-            <div style="margin-top:8px; text-align:right;">
-              <a id="open-{key}" href="#" target="_blank" rel="noopener">Open this page ↗</a>
-            </div>
-          </div>
-        </details>
-        <div class="clearfix"></div>
-        """,
-        unsafe_allow_html=True,
-    )
-    components.html(
-        f"""<!doctype html><meta charset='utf-8'>
-<style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
-<script>(function(){{
-  function b64ToUint8Array(s){{var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}}
-  var blob = new Blob([b64ToUint8Array('{pdf_b64}')], {{type:'application/pdf'}});
-  var url  = URL.createObjectURL(blob) + '#page={page}';
-  function attach(){{
-    var d = window.parent && window.parent.document;
-    if(!d) return setTimeout(attach,120);
-    var ref = d.getElementById('ref-{key}');
-    var a   = d.getElementById('open-{key}');
-    var ovl = d.getElementById('overlay-{key}');
-    var cls = d.getElementById('close-{key}');
-    if(!ref || !a || !ovl || !cls) return setTimeout(attach,120);
-    a.setAttribute('href', url);
-    function closeRef(){{ ref.removeAttribute('open'); }}
-    ovl.addEventListener('click', closeRef);
-    cls.addEventListener('click', closeRef);
-    d.addEventListener('keydown', function(e){{ if(e.key==='Escape') closeRef(); }});
-  }}
-  attach();
-  var me = window.frameElement; if(me){{me.style.display='none';me.style.height='0';me.style.border='0';}}
-}})();</script>""",
-        height=0,
-    )
-
-# give IDs to any preloaded messages
-for m in st.session_state.messages:
-    if "id" not in m:
-        m["id"] = _new_id()
 
 # ----------- helpers -----------
 def _clean_heading(text: str) -> str:
@@ -295,16 +147,14 @@ def guess_suggestion(question: str, docs):
     return _clean_heading(best_line or "Valuation Summary")
 
 def fix_markdown_tables(text: str) -> str:
-    sep_re  = re.compile(r'^\s*\|(?:\s*:?-{3,}:?\s*\|)+\s*$')   # |---|---|...|
-    row_re  = re.compile(r'^\s*\|.+\|\s*$')                    # | a | b |
-    dash_re = re.compile(r'\s*[-–—]{2,}\s*$')                  # --- / -- / ——
-
+    sep_re  = re.compile(r'^\s*\|(?:\s*:?-{3,}:?\s*\|)+\s*$')
+    row_re  = re.compile(r'^\s*\|.+\|\s*$')
+    dash_re = re.compile(r'\s*[-–—]{2,}\s*$')
     lines, out = text.splitlines(), []
     n = len(lines)
     for i, line in enumerate(lines):
         is_row = bool(row_re.match(line))
         is_sep = bool(sep_re.match(line))
-
         prev_is_table = i > 0 and (row_re.match(lines[i-1]) or sep_re.match(lines[i-1]))
         if is_row and not prev_is_table:
             out.append(line.strip())
@@ -312,21 +162,15 @@ def fix_markdown_tables(text: str) -> str:
                 cols = line.count("|") - 1
                 out.append("|" + "|".join(["---"] * cols) + "|")
             continue
-
         if is_sep:
-            out.append(line)
-            continue
-
+            out.append(line); continue
         if is_row:
             cells = [c.strip() for c in line.strip()[1:-1].split("|")]
             if all(dash_re.fullmatch(c) for c in cells):
                 continue
             cells = ["—" if dash_re.fullmatch(c) else c for c in cells]
-            out.append("| " + " | ".join(cells) + " |")
-            continue
-
+            out.append("| " + " | ".join(cells) + " |"); continue
         out.append(line)
-
     return "\n".join(out)
 
 def sanitize_suggestion(answer: str, question: str, docs):
@@ -393,7 +237,6 @@ def condense_query(chat_history, user_input: str, pdf_name: str) -> str:
         prompt.invoke({"pdf_name": pdf_name, "history": hist_txt, "question": user_input})
     ).content.strip() or user_input
 
-
 # ================= Builder =================
 @st.cache_resource(show_spinner="📦 Processing & indexing PDF…")
 def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
@@ -402,9 +245,9 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
     with open(pdf_path, "wb") as f:
         f.write(pdf_bytes)
 
-    # Avoid pre-rendering all pages; just note page count if you want.
+    # Optional: get page count (not used later)
     doc = fitz.open(pdf_path)
-    page_count = doc.page_count
+    _ = doc.page_count
     doc.close()
 
     parser = LlamaParse(api_key=os.environ["LLAMA_CLOUD_API_KEY"], num_workers=2)
@@ -427,7 +270,6 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
     embedder = _embedder()
     vs = FAISS.from_documents(chunks, embedder)
 
-
     store = os.path.join("vectorstore", file_name)
     os.makedirs(store, exist_ok=True)
     vs.save_local(store, index_name="faiss")
@@ -447,12 +289,9 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
         ),
         base_compressor=reranker
     )
+    return retriever, page_texts
 
-    # Return empty page_images (kept for compatibility), and page_texts.
-    return retriever, {}, page_texts
-
-
-def pil_to_base64(img: Image.Image) -> str:  # kept for compatibility; not used now
+def pil_to_base64(img: Image.Image) -> str:
     buf = io.BytesIO()
     img.save(buf, format="PNG")
     return base64.b64encode(buf.getvalue()).decode("ascii")
@@ -466,119 +305,46 @@ def _embedder():
         cohere_api_key=os.environ["COHERE_API_KEY"],
     )
 
-    
-# ================= Sidebar: Google Drive loader =================
-service = get_drive_service()
-#st.sidebar.caption(f"📁 Using Drive folder: {FOLDER_TO_USE}")
-
-pdf_files = get_all_pdfs(service, FOLDER_TO_USE) if service else []
-if service is None:
-    st.sidebar.info("Google Drive is not configured. You can still upload a PDF below.")
-
-if not pdf_files:
-    st.sidebar.warning("No PDFs found in the folder.")
-else:
-    if "selected_pdf_name" not in st.session_state:
-        st.session_state.selected_pdf_name = pdf_files[0]["name"]
-
-    names = [f["name"] for f in pdf_files]
-    sel_name = st.sidebar.selectbox(
-        "Select a PDF to load",
-        names,
-        index=names.index(st.session_state.selected_pdf_name) if st.session_state.get("selected_pdf_name") in names else 0,
-        key="selected_pdf_name",
-    )
-
-    if st.sidebar.button("Load selected PDF"):
-        chosen = next(f for f in pdf_files if f["name"] == sel_name)
-        if chosen["id"] == st.session_state.get("last_synced_file_id"):
-            st.sidebar.info("Already loaded.")
-        else:
-            path = download_pdf(service, chosen["id"], chosen["name"])
-            if path:
-                with open(path, "rb") as f:
-                    st.session_state.uploaded_file_from_drive = f.read()
-                st.session_state.uploaded_file_name = chosen["name"]
-                st.session_state.last_synced_file_id = chosen["id"]
-                _reset_chat()
-
 # ================= Main UI =================
 st.title("Underwriting Agent")
 
-if "uploaded_file_from_drive" in st.session_state:
-    file_badge_link(
-        st.session_state.uploaded_file_name,
-        st.session_state.uploaded_file_from_drive,
-        synced=True
-    )
-    up = io.BytesIO(st.session_state.uploaded_file_from_drive)
-    up.name = st.session_state.uploaded_file_name
-else:
-    up = st.file_uploader("Upload a valuation report PDF", type="pdf")
-    if up:
-        file_badge_link(up.name, up.getvalue(), synced=False)
-        if up.name != st.session_state.get("last_selected_upload"):
-            st.session_state.last_selected_upload = up.name
-            _reset_chat()
+up = st.file_uploader("Upload a valuation report PDF", type="pdf")
+if up and up.name != st.session_state.get("last_selected_upload"):
+    st.session_state.last_selected_upload = up.name
+    _reset_chat()
 
 if not up:
-    st.warning("Please upload or load a PDF to continue.")
+    st.warning("Please upload a PDF to continue.")
     st.stop()
 
 # Rebuild retriever when file changes
 if st.session_state.get("last_processed_pdf") != up.name:
     pdf_bytes = up.getvalue()
     st.session_state.pdf_bytes = pdf_bytes
-    st.session_state.pdf_b64 = base64.b64encode(pdf_bytes).decode("ascii")  # store ONE copy for cards
-    (st.session_state.retriever,
-     st.session_state.page_images,
-     st.session_state.page_texts) = build_retriever_from_pdf(pdf_bytes, up.name)
-    st.session_state.messages = [
-        {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
-        {"role": "assistant", "content": "What can I help you with?"}
-    ]
+    st.session_state.pdf_b64 = base64.b64encode(pdf_bytes).decode("ascii")
+    st.session_state.retriever, st.session_state.page_texts = build_retriever_from_pdf(pdf_bytes, up.name)
+    _reset_chat()
     st.session_state.last_processed_pdf = up.name
-
 
 # Chat input
 user_q = st.chat_input("Type your question here…", key="main_chat_input")
 if user_q:
-    queue_question(user_q)
+    st.session_state.pending_input = user_q
+    st.session_state.waiting_for_response = True
+    st.session_state.messages.append({"id": _new_id(), "role": "user", "content": user_q})
 
-# ===== BEFORE: your history loop =====
-# for msg in st.session_state.messages:
-#     ...
-
-# ===== AFTER: same loop, wrapped in a fragment =====
-if hasattr(st, "fragment"):  # works on Streamlit versions that support fragments
+# ===== Render chat history (no source refs) =====
+if hasattr(st, "fragment"):
     @st.fragment
     def render_history(msgs):
         for msg in msgs:
             cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
             st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
-            if msg.get("source_img") and msg.get("source_pdf_b64") and msg.get("source_page"):
-                render_reference_card(
-                    label=(msg.get("source") or "Page"),
-                    img_b64=msg["source_img"],
-                    pdf_b64=msg["source_pdf_b64"],
-                    page=msg["source_page"],
-                    key=msg.get("id", "k0"),
-                )
     render_history(st.session_state.messages)
 else:
-    # fallback to your original loop (unchanged)
     for msg in st.session_state.messages:
         cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
         st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
-        if msg.get("source_img") and msg.get("source_pdf_b64") and msg.get("source_page"):
-            render_reference_card(
-                label=(msg.get("source") or "Page"),
-                img_b64=msg["source_img"],
-                pdf_b64=msg["source_pdf_b64"],
-                page=msg["source_page"],
-                key=msg.get("id", "k0"),
-            )
-
 
 # ========================== ANSWER ==========================
 if st.session_state.waiting_for_response and st.session_state.pending_input:
@@ -591,6 +357,7 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
         history_to_use = st.session_state.messages[-10:]
         pdf_display = os.path.splitext(up.name)[0]
 
+        # Simple intent handling kept (optional)
         intent = classify_reply_intent(raw_q, _last_assistant_text(history_to_use))
         is_deny = (intent == "DENY")
         is_confirm = (intent == "CONFIRM")
@@ -598,14 +365,6 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
         if is_deny:
             st.session_state.last_suggestion = None
             answer = "Alright, if you have any more questions or need further assistance, feel free to ask!"
-            entry = {"id": _new_id(), "role": "assistant", "content": answer}
-            thinking.empty()
-            with block.container():
-                st.markdown(f"<div class='assistant-bubble clearfix'>{answer}</div>", unsafe_allow_html=True)
-            st.session_state.messages.append(entry)
-            st.session_state.pending_input = None
-            st.session_state.waiting_for_response = False
-
         else:
             effective_q = st.session_state.last_suggestion if (is_confirm and st.session_state.last_suggestion) else raw_q
             query_for_retrieval = condense_query(history_to_use, effective_q, pdf_display)
@@ -632,11 +391,6 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
                     template = """
 You are a financial-data extraction assistant.
 
-**IMPORTANT CONDITIONAL FOLLOW-UP**  
-🛎️ After you answer the user’s question (using steps 1–4), **only if** there is still **unused** relevant report content, **ask**:  
-“Would you like more detail on [X]?”  
-Otherwise, **do not** ask any follow-up.
-
 **HARD RULE (unrelated questions)**
  • If the user's question is unrelated to this PDF or requires information outside the Context, reply **exactly**:
    "Sorry I can only answer question related to {pdf_name} pdf document" 
@@ -644,36 +398,12 @@ Otherwise, **do not** ask any follow-up.
 **Use ONLY what appears under “Context”**.
 
 ### How to answer
-1. **Single value questions**  
-   • Return the answer in a **short, clear sentence** using the exact number from the context.  
-         Example: “The Income (DCF) approach value is $1,150,000.”  
-   • When asked about SDE Multiple about Companies, please REFER Page 38 for answer and reference
-   • When asked about market approach valuation, please REFER page 40 for answer and reference
-   • Find the row + column that match the user's words.  
-   • **Do NOT repeat the metric name or company name** unless the user asks.
-    
+1. **Single value questions**: Short, clear sentence with the exact number from context.
+2. **Table questions**: Return a valid GitHub-flavored table (with header separator).
+3. **Valuation/weights**: If applicable, combine info across chunks and mention weights and $ values.
 
-2. **Table questions**  
-   • When returning a table:
-    - Output a VALID GitHub-flavored table.
-    - Always include the header separator line (e.g., `|---|---|---|`).
-    - Each row MUST start and end with `|` exactly once.
-    - Do not wrap cells across lines; escape any `|` inside cells as `\|`.
-    - Add a blank line before the table.
-
-3. **Valuation method / theory / reasoning questions**
-        
-       • If the question involves **valuation methods**, **concluded value**, or topics like **Income Approach**, **Market Approach**, or **Valuation Summary**, do the following:
-         - Combine and synthesize relevant information across all chunks.
-         - Pay special attention to how **weights are distributed** (e.g., “50% DCF, 25% EBITDA, 25% SDE”).
-         - Avoid oversimplifying if more detailed breakdowns (like subcomponents of market approach) are available.
-         - If a table gives a simplified view (e.g., "50% Market Approach"), but other parts break it down (e.g., 25% EBITDA + 25% SDE), **prefer the detailed breakdown with percent value**.   
-         - When describing weights, also mention the **corresponding dollar values** used in the context (e.g., “50% DCF = $3,712,000, 25% EBITDA = $4,087,000...”)
-         - **If Market approach is composed of sub-methods like EBITDA and SDE, then explicitly extract and show their individual weights and values, even if not listed together in a single table.**
-   
 4. If you cannot find an answer in Context → reply exactly:
    "Sorry I didnt understand the question. Did you mean SUGGESTION?"
-
 
 ---
 Context:
@@ -687,82 +417,21 @@ Conversation so far:
                     input_variables=["chat_history", "context", "question", "pdf_name"]
                 ).invoke(full_input)
             ).content
-            answer = fix_markdown_tables(answer)   
+            answer = fix_markdown_tables(answer)
             answer = sanitize_suggestion(answer, effective_q, docs)
 
+            # store suggestion (if any)
             sug = extract_suggestion(answer)
             st.session_state.last_suggestion = _clean_heading(sug) if sug else None
 
-            apology = f"Sorry I can only answer question related to {pdf_display} pdf document"
-            is_unrelated = apology.lower() in answer.strip().lower()
-            is_clarify  = is_clarification(answer)
+        thinking.empty()
+        type_bubble(answer)
 
-            entry = {"id": _new_id(), "role": "assistant", "content": answer}
-            thinking.empty()
+        st.session_state.messages.append({"id": _new_id(), "role": "assistant", "content": answer})
+        st.session_state.pending_input = None
+        st.session_state.waiting_for_response = False
 
-            with block.container():
-                type_bubble(answer)
-                skip_reference = is_unrelated or is_clarify
-                if docs and not skip_reference:
-                    try:
-                        texts = [d.page_content for d in docs]
-                        emb = _embedder()
-                        emb_query = emb.embed_query(answer)
-                        chunk_embs = emb.embed_documents(texts)
-                        sims = cosine_similarity([emb_query], chunk_embs)[0]
-                        ranked = sorted(list(zip(docs, sims)), key=lambda x: x[1], reverse=True)
-
-                        best_doc = None
-                        if len(ranked) >= 1:
-                            if len(ranked) < 3:
-                                best_doc = ranked[0][0]
-                            else:
-                                top3 = [d for d,_ in ranked[:3]]
-                                ranking_prompt = PromptTemplate(
-                                    template=(
-                                        "Given the user's question and 3 candidate context chunks, "
-                                        "reply with only the number (1, 2, or 3) of the chunk that best answers it.\n\n"
-                                        "Question:\n{question}\n\n"
-                                        "Chunk 1:\n{chunk1}\n\n"
-                                        "Chunk 2:\n{chunk2}\n\n"
-                                        "Chunk 3:\n{chunk3}\n\n"
-                                        "Best Chunk Number:"
-                                    ),
-                                    input_variables=["question", "chunk1", "chunk2", "chunk3"]
-                                )
-                                pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
-                                    ranking_prompt.invoke({
-                                        "question": query_for_retrieval,
-                                        "chunk1": top3[0].page_content,
-                                        "chunk2": top3[1].page_content,
-                                        "chunk3": top3[2].page_content
-                                    })
-                                ).content.strip()
-                                if pick.isdigit() and 1 <= int(pick) <= 3:
-                                    best_doc = top3[int(pick) - 1]
-
-                        if best_doc is not None:
-                            ref_page = best_doc.metadata.get("page_number")
-                            # Render ONE page lazily (low DPI is fine for preview)
-                            img_b64 = page_png_b64(st.session_state.pdf_bytes, ref_page, dpi=120)
-                            entry["source"] = f"Page {ref_page}"
-                            entry["source_img"] = img_b64
-                            entry["source_pdf_b64"] = st.session_state.pdf_b64  # reuse single copy
-                            entry["source_page"] = ref_page
-                            render_reference_card(
-                                label=entry["source"],
-                                img_b64=entry["source_img"],
-                                pdf_b64=entry["source_pdf_b64"],
-                                page=entry["source_page"],
-                                key=entry["id"],
-                            )
-                    except Exception as e:
-                        st.info(f"ℹ️ Reference selection skipped: {e}")
-
-            st.session_state.messages.append(entry)
-            st.session_state.pending_input = None
-            st.session_state.waiting_for_response = False
-
+# Keepalive (optional, harmless)
 components.html(
     """
     <script>
