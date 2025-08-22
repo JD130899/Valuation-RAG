@@ -1,4 +1,4 @@
-# app.py  (simplified: no Google Drive, no reference section)
+# app.py  (simplified + source reference section restored)
 
 import os, io, pickle, base64, re, uuid, time, json
 import streamlit as st
@@ -41,11 +41,6 @@ def type_bubble(text: str, *, base_delay: float = 0.012, cutoff_chars: int = 200
             time.sleep(base_delay)
     return placeholder
 
-def _company_from_filename(pdf_name: str) -> str:
-    base = os.path.splitext(pdf_name)[0]
-    base = re.sub(r"\s*[-–—:]?\s*Certified\s+Valuation\s+Report.*$", "", base, flags=re.I)
-    return base.strip() or "the subject company"
-
 def _reset_chat():
     st.session_state.messages = [
         {"role": "assistant", "content": "Hi! I am here to answer any questions you may have about your valuation report."},
@@ -56,8 +51,6 @@ def _reset_chat():
     st.session_state.last_suggestion = None
 
 # ---------- Session state ----------
-if "last_synced_file_id" not in st.session_state:  # kept for parity; unused in this simplified app
-    st.session_state.last_synced_file_id = None
 if "messages" not in st.session_state:
     _reset_chat()
 if "pending_input" not in st.session_state:
@@ -73,7 +66,7 @@ if "last_suggestion" not in st.session_state:
 if "next_msg_id" not in st.session_state:
     st.session_state.next_msg_id = 0
 
-# ---------- styles (chat only) ----------
+# ---------- styles (chat + reference styles) ----------
 st.markdown("""
 <style>
 .block-container{ padding-top:54px!important; padding-bottom:160px!important; }
@@ -83,6 +76,27 @@ st.markdown("""
 .user-bubble {background:#007bff;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:right;margin:4px;}
 .assistant-bubble {background:#1e1e1e;color:#fff;padding:8px;border-radius:8px;max-width:60%;float:left;margin:4px;}
 .clearfix::after {content:"";display:table;clear:both;}
+
+/* Reference card */
+.ref{ display:block; width:60%; max-width:900px; margin:6px 0 12px 8px; }
+.ref summary{
+  display:inline-flex; align-items:center; gap:8px; cursor:pointer; list-style:none; outline:none;
+  background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-radius:10px; padding:6px 10px;
+}
+.ref summary::before{ content:"▶"; font-size:12px; line-height:1; }
+.ref[open] summary::before{ content:"▼"; }
+.ref .panel{
+  background:#0f172a; color:#e2e8f0; border:1px solid #334155; border-top:none;
+  border-radius:10px; padding:10px; margin-top:0; box-shadow:0 6px 20px rgba(0,0,0,.25);
+}
+.ref .panel img{ width:100%; height:auto; border-radius:8px; display:block; }
+.ref .overlay{ display:none; }
+.ref[open] .overlay{ display:block; position:fixed; inset:0; z-index:998; background:transparent; border:0; padding:0; margin:0; }
+.ref[open] > .panel{
+  position: fixed; z-index: 999; top: 12vh; left: 50%; transform: translateX(-50%);
+  width: min(900px, 90vw); max-height: 75vh; overflow: auto; box-shadow:0 20px 60px rgba(0,0,0,.45);
+}
+.ref .close-x{ position:absolute; top:6px; right:10px; border:0; background:transparent; color:#94a3b8; font-size:20px; line-height:1; cursor:pointer; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -91,7 +105,6 @@ def _new_id():
     st.session_state.next_msg_id += 1
     return f"m{n}"
 
-# ==================== INTERACTIONS ====================
 def queue_question(q: str):
     st.session_state.pending_input = q
     st.session_state.waiting_for_response = True
@@ -127,6 +140,53 @@ def file_badge_link(name: str, pdf_bytes: bytes):
   attach();
   var me = window.frameElement; if(me){{me.style.display="none";me.style.height="0";me.style.border="0";}}
 }})();</script>''',
+        height=0,
+    )
+
+def render_reference_card(label: str, img_b64: str, page: int, key: str):
+    """Lightweight reference card with overlay open-in-page link."""
+    pdf_b64 = st.session_state.get("pdf_b64", "")
+    st.markdown(
+        f"""
+        <details class="ref" id="ref-{key}">
+          <summary>📘 {label or "Reference"}</summary>
+          <button class="overlay" id="overlay-{key}" type="button" aria-label="Close"></button>
+          <div class="panel">
+            <button class="close-x" id="close-{key}" type="button" aria-label="Close">×</button>
+            <img src="data:image/png;base64,{img_b64}" alt="reference" loading="lazy"/>
+            <div style="margin-top:8px; text-align:right;">
+              <a id="open-{key}" href="#" target="_blank" rel="noopener">Open this page ↗</a>
+            </div>
+          </div>
+        </details>
+        <div class="clearfix"></div>
+        """,
+        unsafe_allow_html=True,
+    )
+    components.html(
+        f"""<!doctype html><meta charset='utf-8'>
+<style>html,body{{background:transparent;margin:0;height:0;overflow:hidden}}</style>
+<script>(function(){{
+  function b64ToUint8Array(s){{var b=atob(s),u=new Uint8Array(b.length);for(var i=0;i<b.length;i++)u[i]=b.charCodeAt(i);return u;}}
+  var blob = new Blob([b64ToUint8Array('{st.session_state.get("pdf_b64","")}')], {{type:'application/pdf'}});
+  var url  = URL.createObjectURL(blob) + '#page={page}';
+  function attach(){{
+    var d = window.parent && window.parent.document;
+    if(!d) return setTimeout(attach,120);
+    var ref = d.getElementById('ref-{key}');
+    var a   = d.getElementById('open-{key}');
+    var ovl = d.getElementById('overlay-{key}');
+    var cls = d.getElementById('close-{key}');
+    if(!ref || !a || !ovl || !cls) return setTimeout(attach,120);
+    a.setAttribute('href', url);
+    function closeRef(){{ ref.removeAttribute('open'); }}
+    ovl.addEventListener('click', closeRef);
+    cls.addEventListener('click', closeRef);
+    d.addEventListener('keydown', function(e){{ if(e.key==='Escape') closeRef(); }});
+  }}
+  attach();
+  var me = window.frameElement; if(me){{me.style.display='none';me.style.height='0';me.style.border='0';}}
+}})();</script>""",
         height=0,
     )
 
@@ -390,7 +450,7 @@ if st.session_state.get("last_processed_pdf") != up.name:
     st.session_state.last_processed_pdf = up.name
     pdf_bytes = up.getvalue()
     st.session_state.pdf_bytes = pdf_bytes
-    st.session_state.pdf_b64 = base64.b64encode(pdf_bytes).decode("ascii")  # kept for parity
+    st.session_state.pdf_b64 = base64.b64encode(pdf_bytes).decode("ascii")  # used by reference card
 
     (st.session_state.retriever,
      st.session_state.page_images,
@@ -407,6 +467,13 @@ if user_q:
 for msg in st.session_state.messages:
     cls = "user-bubble" if msg["role"] == "user" else "assistant-bubble"
     st.markdown(f"<div class='{cls} clearfix'>{msg['content']}</div>", unsafe_allow_html=True)
+    if msg.get("source_img") and msg.get("source_page"):
+        render_reference_card(
+            label=(msg.get("source") or "Page"),
+            img_b64=msg["source_img"],
+            page=msg["source_page"],
+            key=msg.get("id", "k0"),
+        )
 
 # ========================== ANSWER ==========================
 if st.session_state.waiting_for_response and st.session_state.pending_input:
@@ -419,7 +486,28 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
         history_to_use = st.session_state.messages[-10:]
         pdf_display = os.path.splitext(up.name)[0]
 
-        intent = classify_reply_intent(raw_q, _last_assistant_text(history_to_use))
+        # Lightweight intent check
+        try:
+            judge = PromptTemplate(
+                template=(
+                    "You are a strict intent classifier.\n"
+                    "Assistant just said:\n{assistant}\n\n"
+                    "User replied:\n{user}\n\n"
+                    "Label as one of: CONFIRM, DENY, NEITHER.\n"
+                    "Reply with ONLY that token."
+                ),
+                input_variables=["assistant", "user"]
+            )
+            prev_assistant = ""
+            for m in reversed(history_to_use):
+                if m["role"] == "assistant":
+                    prev_assistant = m["content"]; break
+            intent = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
+                judge.invoke({"assistant": prev_assistant, "user": raw_q})
+            ).content.strip().upper()
+        except Exception:
+            intent = "NEITHER"
+
         is_deny = (intent == "DENY")
         is_confirm = (intent == "CONFIRM")
 
@@ -432,19 +520,43 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
             st.session_state.pending_input = None
             st.session_state.waiting_for_response = False
         else:
+            # Condense query
+            def condense_query(chat_history, user_input: str, pdf_name: str) -> str:
+                hist = []
+                for m in chat_history[-6:]:
+                    speaker = "User" if m["role"] == "user" else "Assistant"
+                    hist.append(f"{speaker}: {m['content']}")
+                hist_txt = "\n".join(hist)
+                prompt = PromptTemplate(
+                    template=(
+                        'Turn the last user message into a self-contained search query about the PDF "{pdf_name}". '
+                        "Use ONLY info implied by the history; keep it short and noun-heavy. "
+                        "Return just the query.\n"
+                        "---\nHistory:\n{history}\n---\nLast user message: {question}\nStandalone query:"
+                    ),
+                    input_variables=["pdf_name", "history", "question"]
+                )
+                try:
+                    return ChatOpenAI(model="gpt-4o", temperature=0).invoke(
+                        prompt.invoke({"pdf_name": pdf_name, "history": hist_txt, "question": user_input})
+                    ).content.strip() or user_input
+                except Exception:
+                    return user_input
+
             effective_q = st.session_state.last_suggestion if (is_confirm and st.session_state.last_suggestion) else raw_q
             query_for_retrieval = condense_query(history_to_use, effective_q, pdf_display)
 
+            # Retrieve
             ctx, docs, retr_err = "", [], None
             try:
                 docs = st.session_state.retriever.get_relevant_documents(query_for_retrieval)
                 ctx = "\n\n".join(d.page_content for d in docs)
             except Exception as e:
                 retr_err = str(e)
-
             if retr_err:
                 st.warning(f"RAG retrieval error: {retr_err}")
 
+            # Answer
             try:
                 llm = ChatOpenAI(model="gpt-4o", temperature=0)
                 full_input = {
@@ -476,22 +588,15 @@ if st.session_state.waiting_for_response and st.session_state.pending_input:
         1. **Single value questions**  
         • Find the row + column that match the user's words.  
         • Return the answer in a **short, clear sentence** using the exact number from the context.  
-            Example: “The Income (DCF) approach value is $1,150,000.”  
         • **Do NOT repeat the metric name or company name** unless the user asks.
         
         2. **Table questions**  
         • Return the full table **with its header row** in GitHub-flavoured markdown.
         
         3. **Valuation method / theory / reasoning questions**
-            
-        • If the question involves **valuation methods**, **concluded value**, or topics like **Income Approach**, **Market Approach**, or **Valuation Summary**, do the following:
             - Combine and synthesize relevant information across all chunks.
-            - Pay special attention to how **weights are distributed** (e.g., “50% DCF, 25% EBITDA, 25% SDE”).
-            - Avoid oversimplifying if more detailed breakdowns (like subcomponents of market approach) are available.
-            - If a table gives a simplified view (e.g., "50% Market Approach"), but other parts break it down (e.g., 25% EBITDA + 25% SDE), **prefer the detailed breakdown with percent value**.   
-            - When describing weights, also mention the **corresponding dollar values** used in the context (e.g., “50% DCF = $3,712,000, 25% EBITDA = $4,087,000...”)
-            - **If Market approach is composed of sub-methods like EBITDA and SDE, then explicitly extract and show their individual weights and values, even if not listed together in a single table.**
-            
+            - Pay special attention to how **weights are distributed** and the corresponding **dollar values**.
+            - If Market approach is composed of sub-methods like EBITDA and SDE, explicitly extract and show their individual weights and values, even if not listed together in a single table.
     
         4. **Theory/textual question**  
         • Try to return an explanation **based on the context**.
@@ -514,17 +619,127 @@ Conversation so far:
             except Exception as e:
                 answer = f"Sorry, I hit an error while answering: {e}"
 
-            answer = sanitize_suggestion(answer, effective_q, docs)
-            st.session_state.last_suggestion = _clean_heading(extract_suggestion(answer) or "") or None
+            # Suggestion sanitization
+            def extract_suggestion(text):
+                m = re.search(r"did you mean\s+(.+?)\?", text, flags=re.IGNORECASE)
+                if not m: return None
+                val = re.sub(r"^[#>\-\*\d\.\)\(]+\s*", "", m.group(1).strip()).strip(" :–—-·•")
+                return None if val.lower()=="suggestion" else val
 
+            def sanitize_suggestion(answer: str, question: str, docs):
+                low = answer.lower().strip()
+                if ("sorry i didnt understand the question" not in low
+                    and "sorry i didn't understand the question" not in low
+                    and "did you mean" not in low):
+                    return answer
+                # Heuristic guesser
+                def guess_suggestion(question: str, docs):
+                    q_terms = set(w.lower() for w in re.findall(r"[A-Za-z]{3,}", question))
+                    best_line, best_score = None, 0
+                    for d in docs or []:
+                        for ln in d.page_content.splitlines():
+                            raw = ln.strip()
+                            if not raw: continue
+                            if len(raw.split()) > 6: continue
+                            words = set(w.lower() for w in re.findall(r"[A-Za-z]{3,}", raw))
+                            score = len(q_terms & words)
+                            if score > best_score:
+                                best_score, best_line = score, raw
+                    if not best_line: return "Valuation Summary"
+                    best_line = re.sub(r"^[#>\-\*\d\.\)\(]+\s*", "", best_line).strip(" :–—-·•")
+                    return best_line or "Valuation Summary"
+
+                sug = guess_suggestion(question, docs)
+                answer = re.sub(r"\bSUGGESTION\b", sug, answer, flags=re.IGNORECASE)
+                answer = re.sub(r"\[.*?\]", sug, answer)
+                m = re.search(r"did you mean\s+(.+?)\?", answer, flags=re.IGNORECASE)
+                cand = re.sub(r"^[#>\-\*\d\.\)\(]+\s*", "", m.group(1).strip()).strip(" :–—-·•") if m else ""
+                if not cand or cand.lower() == "suggestion":
+                    return f"Sorry I didnt understand the question. Did you mean {sug}?"
+                if len(cand.split()) > 6:
+                    cand = " ".join(cand.split()[:6])
+                    return f"Sorry I didnt understand the question. Did you mean {cand}?"
+                return re.sub(r"(Did you mean\s+)[#>\-\*\d\.\)\(]+\s*", r"\1", answer, flags=re.IGNORECASE)
+
+            answer = sanitize_suggestion(answer, effective_q, docs)
+            st.session_state.last_suggestion = (extract_suggestion(answer) or "").strip() or None
+
+            # Flags
             apology = f"Sorry I can only answer question related to {pdf_display} pdf document"
             is_unrelated = apology.lower() in answer.strip().lower()
             is_clarify  = is_clarification(answer)
 
+            # Render answer + reference
             thinking.empty()
+            entry = {"id": _new_id(), "role": "assistant", "content": answer}
+
             with block.container():
                 type_bubble(answer)
 
-            st.session_state.messages.append({"id": _new_id(), "role": "assistant", "content": answer})
+                # Skip reference for unrelated or clarify
+                if docs and not (is_unrelated or is_clarify):
+                    try:
+                        # Rank retrieved docs against the final answer (cheap & deterministic)
+                        texts = [d.page_content for d in docs]
+                        emb_query = embedder.embed_query(answer)
+                        chunk_embs = embedder.embed_documents(texts)
+                        sims = cosine_similarity([emb_query], chunk_embs)[0]
+                        ranked = sorted(list(zip(docs, sims)), key=lambda x: x[1], reverse=True)
+                        top3 = [d for d,_ in ranked[:3]]
+
+                        best_doc = top3[0] if top3 else None
+
+                        # Optional tie-break via LLM if we have 3
+                        if len(top3) == 3:
+                            ranking_prompt = PromptTemplate(
+                                template=("""
+                                Given a user question and 3 candidate context chunks, return the number (1-3) of the chunk that best answers it.
+                                Question:
+                                {question}
+
+                                Chunk 1:
+                                {chunk1}
+
+                                Chunk 2:
+                                {chunk2}
+
+                                Chunk 3:
+                                {chunk3}
+
+                                Best Chunk Number:
+                                """),
+                                input_variables=["question", "chunk1", "chunk2", "chunk3"]
+                            )
+                            try:
+                                pick = ChatOpenAI(model="gpt-4o", temperature=0).invoke(
+                                    ranking_prompt.invoke({
+                                        "question": query_for_retrieval,
+                                        "chunk1": top3[0].page_content,
+                                        "chunk2": top3[1].page_content,
+                                        "chunk3": top3[2].page_content
+                                    })
+                                ).content.strip()
+                                if pick.isdigit() and 1 <= int(pick) <= 3:
+                                    best_doc = top3[int(pick) - 1]
+                            except Exception:
+                                pass
+
+                        if best_doc is not None:
+                            ref_page = best_doc.metadata.get("page_number")
+                            img_b64 = st.session_state.page_images.get(ref_page)
+                            if img_b64:
+                                entry["source"] = f"Page {ref_page}"
+                                entry["source_img"] = img_b64
+                                entry["source_page"] = ref_page
+                                render_reference_card(
+                                    label=entry["source"],
+                                    img_b64=img_b64,
+                                    page=ref_page,
+                                    key=entry["id"],
+                                )
+                    except Exception as e:
+                        st.info(f"ℹ️ Reference selection skipped: {e}")
+
+            st.session_state.messages.append(entry)
             st.session_state.pending_input = None
             st.session_state.waiting_for_response = False
