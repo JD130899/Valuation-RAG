@@ -1,4 +1,4 @@
-# app.py  (Drive + Upload, flicker-free, source reference)
+# app.py  (Drive + Upload, flicker-free, source reference, LlamaParse+OCR APPEND)
 
 import os, io, pickle, base64, re, uuid, time, json
 import streamlit as st
@@ -28,6 +28,9 @@ from gdrive_utils import get_drive_service, get_all_pdfs, download_pdf
 load_dotenv()
 st.set_page_config(page_title="Underwriting Agent", layout="wide")
 openai.api_key = os.getenv("OPENAI_API_KEY")
+
+# ---- OCR merge behavior: "append" | "override" (append is what you asked for)
+OCR_MERGE_MODE = os.getenv("OCR_MERGE_MODE", "append").lower().strip()
 
 # ---------- small helpers ----------
 def type_bubble(text: str, *, base_delay: float = 0.012, cutoff_chars: int = 2000):
@@ -362,13 +365,15 @@ embedder = CohereEmbeddings(
 def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
     """
     Heavy work: page previews (base64 strings), selective OCR, LlamaParse, embeddings, FAISS, retriever
+    - LlamaParse parses ALL pages
+    - For selected pages, OCR text is APPENDED to the LlamaParse text (or overrides if OCR_MERGE_MODE='override')
     """
     os.makedirs("uploaded", exist_ok=True)
     pdf_path = os.path.join("uploaded", file_name)
     with open(pdf_path, "wb") as f:
         f.write(pdf_bytes)
 
-    # Open with PyMuPDF
+    # Open with PyMuPDF for previews
     doc = fitz.open(pdf_path)
 
     # Build base64 PNG previews (reduced DPI to save memory)
@@ -378,36 +383,51 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
         img_b64 = base64.b64encode(pix.tobytes("png")).decode("ascii")
         page_images_b64[i + 1] = img_b64
 
-    # Detect which pages to override with OCR
+    # Detect which pages need OCR supplement
     selected_pages = _detect_selected_pages(doc)
+
+    # OCR for selected pages only (using already-rendered previews)
     ocr_text_by_page = {}
     for pnum in sorted(selected_pages):
         try:
             img_b = base64.b64decode(page_images_b64[pnum])
             ocr_text = _ocr_page_with_gpt4o(img_b)
             if ocr_text:
-                ocr_text_by_page[pnum] = ocr_text
+                ocr_text_by_page[pnum] = ocr_text.strip()
         except Exception:
             pass
 
     doc.close()
 
-    # Parse entire document with LlamaParse
+    # Parse entire document with LlamaParse (all pages)
     parser = LlamaParse(api_key=os.environ["LLAMA_CLOUD_API_KEY"], num_workers=4)
     result = parser.parse(pdf_path)
 
-    # Build pages array with OCR overrides
+    # Build pages array: merge LlamaParse text and OCR supplement
     pages, page_texts = [], {}
     for pg in result.pages:
         pnum = pg.page  # 1-based
+        # Clean LlamaParse md
+        lp_lines = [l for l in (pg.md or "").splitlines() if l.strip() and l.lower() != "null"]
+        lp_text = "\n".join(lp_lines).strip()
+
         if pnum in ocr_text_by_page:
-            text = ocr_text_by_page[pnum].strip()
+            ocr_text = ocr_text_by_page[pnum]
+            if OCR_MERGE_MODE == "override":
+                merged_text = ocr_text
+            else:  # "append" (default)
+                # Append OCR as a clearly marked supplement to avoid losing LP structure
+                merged_text = lp_text
+                if lp_text and ocr_text:
+                    merged_text += "\n\n---\n[OCR supplement]\n" + ocr_text
+                elif ocr_text:  # just in case LP was empty
+                    merged_text = ocr_text
         else:
-            cleaned = [l for l in pg.md.splitlines() if l.strip() and l.lower() != "null"]
-            text = "\n".join(cleaned)
-        if text:
-            pages.append(Document(page_content=text, metadata={"page_number": pnum}))
-            page_texts[pnum] = text
+            merged_text = lp_text
+
+        if merged_text:
+            pages.append(Document(page_content=merged_text, metadata={"page_number": pnum}))
+            page_texts[pnum] = merged_text
 
     # Split → Embed → Index
     splitter = RecursiveCharacterTextSplitter(chunk_size=3300, chunk_overlap=0)
