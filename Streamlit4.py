@@ -469,7 +469,7 @@ DRIVE_FOLDER_FROM_SECRET = os.getenv("GOOGLE_DRIVE_FOLDER", "").strip()
 HARDCODED_FOLDER_LINK = "https://drive.google.com/drive/folders/1XGyBBFhhQFiG43jpYJhNzZYi7C-_l5me"
 FOLDER_TO_USE = DRIVE_FOLDER_FROM_SECRET or HARDCODED_FOLDER_LINK
 
-st.sidebar.caption(f"📁 Using Drive folder: {FOLDER_TO_USE}")
+#st.sidebar.caption(f"📁 Using Drive folder: {FOLDER_TO_USE}")
 
 try:
     pdf_files = _list_pdfs_from_drive(FOLDER_TO_USE)
