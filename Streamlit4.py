@@ -459,7 +459,7 @@ def build_retriever_from_pdf(pdf_bytes: bytes, file_name: str):
     return retriever, page_images_b64, page_texts
 
 # --- Optional: cache listing to reduce churn ---
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=300,show_spinner=False)
 def _list_pdfs_from_drive(folder_to_use: str):
     service = get_drive_service()
     return get_all_pdfs(service, folder_to_use) if service else []
