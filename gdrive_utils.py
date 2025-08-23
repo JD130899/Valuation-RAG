@@ -87,7 +87,7 @@ def get_drive_service():
                     "❌ Google default credentials not available. "
                     "Attach a service account to the Cloud Run revision or provide secrets/env."
                 )
-                st.info(f"(Details: {e})")
+                #st.info(f"(Details: {e})")
                 return None
         else:
             # Local and no creds -> clear guidance instead of metadata timeout
